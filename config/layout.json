@@ -1,0 +1,29 @@
+{
+  "hub": {
+    "main": [
+      "overview",
+      "services"
+    ],
+    "rail": [
+      "weather",
+      "markets",
+      "news",
+      "bookmarks",
+      "activity"
+    ],
+    "hidden": [],
+    "sizes": {
+      "overview": "md",
+      "services": "md",
+      "weather": "md",
+      "markets": "md",
+      "news": "md",
+      "activity": "md",
+      "bookmarks": "md"
+    }
+  },
+  "services": {
+    "groupOrder": null,
+    "order": {}
+  }
+}
