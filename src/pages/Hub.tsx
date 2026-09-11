@@ -20,6 +20,14 @@ function Clock() {
   const { settings } = useSettings();
   const [now, setNow] = useState(() => new Date());
   const secs = !!settings?.hub.showSeconds;
+  // nudge to the next second boundary so the first tick isn't visibly late
+  useEffect(() => {
+    if (secs) return;
+    const d = new Date();
+    const wait = 1000 - d.getMilliseconds();
+    const id = window.setTimeout(() => setNow(new Date()), wait);
+    return () => window.clearTimeout(id);
+  }, [secs]);
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), secs ? 1000 : 20000);
     return () => clearInterval(t);
