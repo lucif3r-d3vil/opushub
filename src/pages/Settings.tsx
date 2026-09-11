@@ -201,7 +201,7 @@ function HubTab() {
       <Block title="Layout templates" aside={<span className="stale-note">presets, then fine-tune as you like</span>}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10, marginTop: 'var(--sp-2)' }}>
           {Object.entries(TEMPLATES).map(([name, t]) => (
-            <button key={name} className="svc-tile" style={{ padding: 'var(--sp-4)' }} onClick={() => setLayout({ hub: JSON.parse(JSON.stringify(t.layout)) })}>
+            <button key={name} className="svc-tile" style={{ padding: 'var(--sp-4)' }} onClick={() => setLayout({ hub: { ...t.layout, sizes: { ...t.layout.sizes, ...(layout?.hub?.sizes || {}) } } })}>
               <div className="tile-name">{name}</div>
               <div className="tile-app">{t.desc}</div>
             </button>

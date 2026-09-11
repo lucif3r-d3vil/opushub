@@ -1,6 +1,7 @@
 node_modules/
 dist/
 data/
+config/backups/
 config/.env
 .env
 *.log

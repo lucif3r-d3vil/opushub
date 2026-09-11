@@ -107,7 +107,8 @@ results are cached briefly (60s) so an unreachable source is retried gently rath
 | `GET /api/icons/search?q=` | local collections, then Iconify; `GET /api/icon?ref=` returns SVG |
 | `GET /user/icons/*`, `/user/backgrounds/*` | static, path-traversal guarded |
 
-Mutations are limited to *configuration* (yaml/json writes, atomically via temp+rename). There is
+Mutations are limited to *configuration* (yaml/json writes, atomically via temp+rename, each
+preceded by a copy of the previous contents in `data/config-backups/`, 20 per file). There is
 no endpoint that executes commands, restarts containers, or touches the socket for writes. Action
 buttons for restart/update are rendered **only** when the backing capability reports `ok` (V1 ships
 none — everything is Open/Details/Logs where real).

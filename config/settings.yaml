@@ -1,7 +1,6 @@
 app:
   name: OpusHub
   tagline: The OpusGrid homelab, at a glance.
-
 appearance:
   theme: system
   accent: sage
@@ -13,12 +12,10 @@ appearance:
     photo: null
     blur: 24
     scrim: 62
-
 hub:
   greetingName: null
   clock24h: false
   showSeconds: false
-
 integrations:
   news:
     feeds: []
@@ -30,13 +27,11 @@ integrations:
     units: c
   markets:
     symbols: []
-
 behavior:
   logLaunches: true
   refresh:
     system: 5
     services: 30
-
 advanced:
   customCss: false
   customJs: false

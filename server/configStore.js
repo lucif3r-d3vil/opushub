@@ -58,7 +58,24 @@ export function readJson(name, fallback) {
   }
 }
 
-function atomicWrite(file, text) {
+// Bounded backup of every file OpusHub overwrites, so a bad write (or a lost hand-edit) is
+// recoverable: data/config-backups/<name>.<timestamp>. Keep the newest KEEP_PER_FILE per file.
+const BACKUP_DIR = path.join(DATA_DIR, 'config-backups');
+const KEEP_PER_FILE = 20;
+
+function backup(file, name) {
+  try {
+    if (!fs.existsSync(file)) return;
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.copyFileSync(file, path.join(BACKUP_DIR, `${name}.${stamp}.bak`));
+    const mine = fs.readdirSync(BACKUP_DIR).filter((f) => f.startsWith(`${name}.`) && f.endsWith('.bak')).sort();
+    for (const old of mine.slice(0, Math.max(0, mine.length - KEEP_PER_FILE))) fs.unlinkSync(path.join(BACKUP_DIR, old));
+  } catch { /* never fail a write because of backup bookkeeping */ }
+}
+
+function atomicWrite(file, text, name) {
+  if (name) backup(file, name);
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
   fs.writeFileSync(tmp, text, 'utf8');
   fs.renameSync(tmp, file);
@@ -86,7 +103,7 @@ export function writeYaml(name, value, { header = null } = {}) {
   if (!YAML_FILES.has(name)) throw Object.assign(new Error(`not a yaml file: ${name}`), { status: 400 });
   const doc = new YAML.Document(value);
   const body = String(doc).replace(/\n{3,}/g, '\n\n');
-  atomicWrite(file, (header ?? headerOf(name)) + body);
+  atomicWrite(file, (header ?? headerOf(name)) + body, name);
   return { file };
 }
 
@@ -98,14 +115,14 @@ export function editYaml(name, mutate, fallbackValue = {}) {
   doc = YAML.parseDocument(text ?? '', { keepSourceTokens: true });
   if (doc.isEmpty && fallbackValue != null) doc.setSchemaProps?.(null);
   mutate(doc, fallbackValue);
-  atomicWrite(file, String(doc));
+  atomicWrite(file, String(doc), name);
   return doc.toJS();
 }
 
 export function writeJson(name, value) {
   const file = assertName(name);
   if (!JSON_FILES.has(name)) throw Object.assign(new Error(`not a json file: ${name}`), { status: 400 });
-  atomicWrite(file, JSON.stringify(value, null, 2) + '\n');
+  atomicWrite(file, JSON.stringify(value, null, 2) + '\n', name);
   return { file };
 }
 
@@ -113,7 +130,7 @@ export function writeText(name, text) {
   const file = assertName(name);
   if (!TEXT_FILES.has(name)) throw Object.assign(new Error(`not an editable text file: ${name}`), { status: 400 });
   if (text.length > 512_000) throw Object.assign(new Error('file too large (512 KB cap)'), { status: 413 });
-  atomicWrite(file, text);
+  atomicWrite(file, text, name);
   return { file };
 }
 
