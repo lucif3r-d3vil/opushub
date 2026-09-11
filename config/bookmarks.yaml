@@ -1,0 +1,10 @@
+# OpusHub — bookmarks (flat links, no status, no icon machinery)
+groups:
+  - name: Reading
+    items:
+      - { name: Hacker News, href: https://news.ycombinator.com, description: Front page of the nerd internet }
+      - { name: r/selfhosted, href: https://reddit.com/r/selfhosted, description: The community }
+  - name: Reference
+    items:
+      - { name: DuckDuckGo, href: https://duckduckgo.com, description: The quick search }
+      - { name: Open-Meteo docs, href: https://open-meteo.com/en/docs, description: Weather API we use }

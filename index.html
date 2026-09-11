@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0b0c0e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0c0e'/%3E%3Cpath d='M32 14l15.6 9v18L32 50 16.4 41V23L32 14z' fill='none' stroke='%23eef0f2' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='5.5' fill='%23eef0f2'/%3E%3C/svg%3E" />
+    <title>OpusHub</title>
+    <style>
+      /* pre-hydration: paint the shell color immediately, respect saved theme, no white flash */
+      html { background: #0b0c0e; }
+      html[data-theme="light"] { background: #f7f7f5; }
+      @media (prefers-color-scheme: light) { html:not([data-theme="dark"]) { background: #f7f7f5; } }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      try {
+        const t = JSON.parse(localStorage.getItem('opushub.theme') || 'null');
+        if (t) document.documentElement.setAttribute('data-theme', t);
+      } catch {}
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

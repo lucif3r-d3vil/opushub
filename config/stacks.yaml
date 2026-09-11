@@ -1,0 +1,39 @@
+# OpusHub — stacks
+# A stack is a group of related services/containers that live and die together.
+# `services` reference names in services.yaml. Infra containers that aren't "services"
+# (databases, caches, proxies) are discovered automatically from compose labels when
+# Docker is connected — nothing is invented here.
+
+stacks:
+  - name: Media
+    description: Streaming and requests
+    icon: lucide:clapperboard
+    services: [Stream, Seerr, Wave]
+    compose: /opt/opusgrid/stacks/media/docker-compose.yaml
+    notes: Transcodes run on the iGPU; keep an eye on the library volume.
+
+  - name: Photos
+    description: Lens and its rails
+    icon: mdi:image-outline
+    services: [Lens]
+    compose: /opt/opusgrid/stacks/photos/docker-compose.yaml
+    notes: Postgres + redis + ml are managed inside the stack, not as services.
+
+  - name: Cloud
+    description: Files and paper
+    icon: lucide:folder-open
+    services: [Drive, Docs]
+    compose: /opt/opusgrid/stacks/cloud/docker-compose.yaml
+
+  - name: Secure
+    description: The perimeter
+    icon: lucide:shield-check
+    services: [Vault]
+    compose: /opt/opusgrid/stacks/secure/docker-compose.yaml
+    notes: The only stack exposed through the reverse proxy with real TLS.
+
+  - name: Home
+    description: Sensors and automations
+    icon: lucide:house
+    services: [Nest]
+    compose: /opt/opusgrid/stacks/home/docker-compose.yaml

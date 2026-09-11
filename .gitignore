@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+config/.env
+.env
+*.log
+.DS_Store
+dist-ssr/
+config/layout.json.tmp*

@@ -1,0 +1,120 @@
+/* OpusHub design tokens — the entire visual contract lives here. */
+
+:root {
+  /* type */
+  --font-ui: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  --fs-display: clamp(30px, 4.6vw, 42px);
+  --fs-title: clamp(22px, 2.6vw, 28px);
+  --fs-section: 17px;
+  --fs-body: 14px;
+  --fs-meta: 12.5px;
+  --fs-micro: 11px;
+  --fs-big-num: clamp(26px, 3.2vw, 34px);
+
+  --lh-tight: 1.06;
+  --lh-snug: 1.22;
+  --lh-body: 1.6;
+  --track-display: -0.022em;
+  --track-tight: -0.011em;
+
+  /* space */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px; --sp-16: 64px; --sp-24: 96px;
+  --section-gap: var(--sp-16);
+  --row-h: 44px;
+  --tile-pad: var(--sp-4);
+
+  /* geometry */
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-pill: 999px;
+  --gutter: var(--sp-6);
+  --content-max: 1320px;
+  --rail-w: 76px;
+  --hub-rail: 380px;
+
+  /* motion */
+  --t-fast: 120ms;
+  --t-med: 180ms;
+  --t-slow: 260ms;
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* dark is the default identity of a machine room at night */
+  color-scheme: dark;
+  --bg: #0b0c0e;
+  --bg-grad: none;
+  --surface: #131519;
+  --surface-2: #191c21;
+  --sunken: #0e1013;
+  --overlay: rgba(20, 22, 27, 0.82);
+  --ink: #eef0f2;
+  --ink-2: #a7adb5;
+  --ink-3: #6d747c;
+  --hair: rgba(238, 240, 242, 0.09);
+  --hair-strong: rgba(238, 240, 242, 0.16);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 12px 40px -12px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --ok: #6fbf7a;
+  --warn: #d9a05b;
+  --fail: #d3696b;
+  --accent-ink: #a8c8a0;
+  --accent: #8fb389;
+  --accent-soft: rgba(143, 179, 137, 0.14);
+  --focus: var(--accent);
+  --scrim-bg: rgba(11, 12, 14, 0.55);
+  --code-bg: #0d0f12;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --surface-2: #f1f1ee;
+  --sunken: #ededea;
+  --overlay: rgba(255, 255, 255, 0.86);
+  --ink: #16181b;
+  --ink-2: #565c64;
+  --ink-3: #6b7178;
+  --hair: rgba(22, 24, 27, 0.1);
+  --hair-strong: rgba(22, 24, 27, 0.2);
+  --shadow-1: 0 1px 2px rgba(20, 20, 25, 0.06);
+  --shadow-2: 0 16px 48px -16px rgba(20, 20, 30, 0.22), 0 2px 8px rgba(20, 20, 30, 0.08);
+  --ok: #3f9149;
+  --warn: #b07a2e;
+  --fail: #c04f4c;
+  --accent-ink: #4d7248;
+  --accent: #5d8357;
+  --accent-soft: rgba(93, 131, 87, 0.12);
+  --scrim-bg: rgba(244, 244, 241, 0.6);
+  --code-bg: #f0f0ee;
+}
+
+/* accents — muted, single-hue; chosen to sit under content, never be it */
+html[data-accent='slate'] { --accent: #7e93ac; --accent-ink: #a9bdd6; --accent-soft: rgba(126, 147, 172, 0.14); }
+html[data-theme='light'][data-accent='slate'] { --accent: #55708f; --accent-ink: #3d5877; --accent-soft: rgba(85, 112, 143, 0.12); }
+html[data-accent='teal'] { --accent: #69a5a1; --accent-ink: #94c8c4; --accent-soft: rgba(105, 165, 161, 0.14); }
+html[data-theme='light'][data-accent='teal'] { --accent: #3e837e; --accent-ink: #2f6b67; --accent-soft: rgba(62, 131, 126, 0.12); }
+html[data-accent='amber'] { --accent: #cfa15e; --accent-ink: #e3bd82; --accent-soft: rgba(207, 161, 94, 0.14); }
+html[data-theme='light'][data-accent='amber'] { --accent: #a3742c; --accent-ink: #8a611f; --accent-soft: rgba(163, 116, 44, 0.13); }
+html[data-accent='rose'] { --accent: #c98189; --accent-ink: #dfa3aa; --accent-soft: rgba(201, 129, 137, 0.14); }
+html[data-theme='light'][data-accent='rose'] { --accent: #ab5560; --accent-ink: #8e3f4a; --accent-soft: rgba(171, 85, 96, 0.12); }
+html[data-accent='clay'] { --accent: #c08a6d; --accent-ink: #d9ab92; --accent-soft: rgba(192, 138, 109, 0.14); }
+html[data-theme='light'][data-accent='clay'] { --accent: #96603f; --accent-ink: #7c4c2f; --accent-soft: rgba(150, 96, 63, 0.12); }
+html[data-accent='moss'] { --accent: #93a56f; --accent-ink: #b5c691; --accent-soft: rgba(147, 165, 111, 0.14); }
+html[data-theme='light'][data-accent='moss'] { --accent: #6d7f45; --accent-ink: #586935; --accent-soft: rgba(109, 127, 69, 0.12); }
+
+html[data-density='compact'] {
+  --fs-body: 13px;
+  --fs-section: 15.5px;
+  --fs-meta: 11.5px;
+  --lh-body: 1.5;
+  --section-gap: var(--sp-10);
+  --tile-pad: var(--sp-3);
+  --row-h: 38px;
+  --sp-6: 18px;
+}
+
+/* font scale: `zoom` scales the px-based type scale uniformly (baseline-supported) */
+html { zoom: var(--font-scale, 1); }
