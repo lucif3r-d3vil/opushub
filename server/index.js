@@ -24,6 +24,15 @@ if (envReport.loaded.length) {
 } else {
   console.log('│ env file   : none found (tried: ' + envReport.tried.join(', ') + ')');
 }
+{
+  // what discovery will be able to say — printed once at boot, because an empty Services page
+  // with no explanation is the exact confusion this whole subsystem exists to avoid
+  const ep = docker.resolveEndpoint();
+  const where = ep?.socket ? `socket ${ep.socket}` : ep?.host ? `tcp ${ep.host}:${ep.port}` : 'no socket configured';
+  const a = docker.availability();
+  console.log(`│ discovery  : ${a.ok ? 'Docker connected' : `Docker ${a.state}`} — ${where}`);
+  if (!a.ok) console.log('│              services will be listed as discovered-but-no-engine; fix in the environment or Settings → System');
+}
 console.log('└──────────────────────────────────────────────────────────────');
 
 // ---- static serving ----

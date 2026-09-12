@@ -12,9 +12,9 @@ seams, so that the future OpusGrid control plane can attach to the same provider
 
 ```
 opushub/
-├── config/                  # user-editable YAML state (the product's source of truth)
-│   ├── services.yaml          groups → services (name, icon, href, description, stack, meta)
-│   ├── stacks.yaml            stacks → member services, notes
+├── config/                  # user-editable YAML state; Docker is the source of truth for what exists
+│   ├── services.yaml          optional overlay: per-container presentation (displayName, icon, group, order, url override)
+│   ├── stacks.yaml            optional overlay: rename/describe a compose project the engine reported
 │   ├── settings.yaml          appearance, integrations, behavior (theme, accent, feeds, …)
 │   ├── bookmarks.yaml         flat link collection
 │   ├── layout.json            hub section order / widget visibility / service order (persisted by drag&drop)
@@ -29,12 +29,16 @@ opushub/
 │   ├── env.js                 .env discovery + loading (the bug fix)
 │   ├── configStore.js         YAML read/atomic write via `yaml` Document (comments preserved)
 │   ├── api.js                 routes
+│   ├── discovery.js           the canonical inventory: normalize → URL → overlay join → classify
+│   ├── urlResolver.js         URL precedence: manual → Traefik labels → published port → null
+│   ├── lib/hostAddress.js     this machine's own address (env → probe → interface), never a default
 │   ├── activity.js            append-only JSONL event log + query
 │   ├── metrics.js             ring-buffer history for charts
-│   ├── search.js              unified search across config + providers
+│   ├── search.js              unified search over the same inventory (no second implementation)
 │   └── providers/
 │       ├── system.js          /proc + /sys host metrics (real, always available on Linux)
 │       ├── docker.js          Docker Engine via unix socket/DOCKER_HOST, read-only
+│       ├── dockerLabels.js      label grammar: compose, curated Traefik routers, opushub.* overlay keys
 │       ├── news.js            server-side RSS/Atom fetch + cache (CORS-free)
 │       ├── weather.js         Open-Meteo (no key needed), configurable location
 │       ├── market.js          Stooq quotes + daily history for sparklines (no key needed)
@@ -101,7 +105,8 @@ results are cached briefly (60s) so an unreachable source is retried gently rath
 | `GET /api/health` | version, paths, env-file names, provider availability summary |
 | `GET/PUT /api/settings` | appearance/integrations/behavior; PUT = partial deep-merge, atomic YAML write, logged to Activity |
 | `GET/PUT /api/layout` | hub section order, widget visibility/size, service order overrides |
-| `GET /api/services` | config + live status merged per service when Docker is available |
+| `GET /api/services` | the canonical inventory: one object per container, enriched by overlays; `groups`, flat `services`, `infrastructure`, `unmatched`, `stats` |
+| `GET /api/discovery` | engine + URL-source diagnostics for Settings → System |
 | `GET /api/services/:group/:name` | detail incl. container/stack join |
 | `GET/PUT /api/services` | full YAML document (safe subset), write preserves comments |
 | `GET/PUT /api/stacks`, `GET /api/stacks/:id` | stacks + joined member status |
@@ -149,7 +154,10 @@ Server: single process, no deps beyond `yaml`. ETag/`Cache-Control` on API json;
 Client: route-level `React.lazy`, fonts self-hosted via @fontsource (no external fetch), icon SVGs
 cached by browser, provider responses cached server-side, `IntersectionObserver` defers hub widgets.
 
-## Docker integration (Phase 2)
+## Docker discovery
+
+`docs/04-discovery.md` is the contract (what Docker decides, what config may decide, the URL
+precedence list, the label vocabulary). The architecture points that matter here:
 
 ```
 browser ──▶ /api ──▶ model join ──▶ server/providers/docker.js ──▶ Engine API (unix socket / TCP)
@@ -178,20 +186,28 @@ browser ──▶ /api ──▶ model join ──▶ server/providers/docker.js
   only (never the high-watermark as a substitute).
 - **Logs** demultiplex Docker's framed stdout/stderr stream (with raw-stream fallback for
   TTY containers), cap at `tail ≤ 500` and 256 KB server-side, and support `?timestamps=1`.
-- **Stack discovery** (`model.getStacksDoc()`, the single stacks builder — the old duplicated
-  list logic in `api.js` was removed): configured stacks from `stacks.yaml` link live
-  containers; compose projects found via `com.docker.compose.project` labels with no
-  same-named configured stack surface as `source: "discovered"`; containers with no project
-  label and no configured link surface as `standalone`. Nothing is force-fit into a stack.
+- **One join, one place.** `discovery.js` builds services, stacks and counters from a single pass
+  over the fleet; `model.getServicesView()`/`getStacksDoc()` project that same object. There is no
+  config-side list to merge with, so a container cannot be rendered twice and a removed one cannot
+  linger. Overlays bind by container name/id only (`bindOverlays`) and are reported when unmatched.
+- **Stack discovery**: compose projects from `com.docker.compose.project` (with `.service`,
+  `.container-number`, and `.project.working_dir` read server-side only to guess a project name);
+  a `stacks.yaml` entry renames/describes an existing project and can never add or remove a member;
+  containers with no project label surface as `standalone`. Nothing is force-fit into a stack.
 - **Caching / polling.** `dockerContainers()` caches the fleet list 15s; availability probes
   cache 30s; `/api/system/history` honors ETag 304. The browser polls system 5s (cheap
   `/proc` reads), services/stacks 30s, logs 30s, and pauses when the tab is hidden. Detail
   pages inspect on demand. Measured API latency against the mock engine: <15 ms per route.
-- **Validation without an Engine.** `test/mock-engine.js` serves the Engine API subset above
-  over a unix socket with fixtures for every state (§§5–6, §19). `npm test` runs 45 tests
-  (provider · model · env · API boundary incl. an offline process) against it; for visual
-  validation: `npm run mock-engine` + `OPUSHUB_DOCKER_SOCKET=/tmp/opushub-mock-docker.sock
-  npm start`. Fixtures are marked `MOCK DATA` and never touch production paths.
+- **Validation without an Engine.** `test/mock-engine.js` serves the Engine API subset above over a
+  unix socket with 24 fixtures covering every state and every URL case the resolver must handle
+  (proxied HTTP/HTTPS, a redirect router that must lose to its TLS sibling, multi-host rules,
+  PathPrefix + stripPrefix, HostRegexp, `traefik.enable=false`, `expose` without `published`,
+  loopback-only, rails, a paused container, a `created` one). `OPUSHUB_MOCK_HIDE=name` removes a
+  container so disappearance can be checked end-to-end. `npm test` runs 130 tests (label grammar ·
+  URL precedence · the discovery join · model integration with and without overlays · provider · env ·
+  API boundary · the offline contract) against it; for visual validation: `npm run mock-engine` +
+  `OPUSHUB_DOCKER_SOCKET=/tmp/opushub-mock-docker.sock npm start`. Fixtures are marked `MOCK DATA`
+  and never touch production paths.
 
 ## Security posture
 

@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, put, usePolled, useSave } from '../lib/api';
+import { api, post, put, usePolled, useSave } from '../lib/api';
 import { relTime } from '../lib/format';
 import { useLayout, useSettings, type DeepPartial } from '../lib/theme';
-import type { HealthDoc, LayoutDoc, ServicesDoc, SettingsDoc } from '../lib/types';
+import type { DiscoveryDoc, HealthDoc, LayoutDoc, Service, ServicesDoc, SettingsDoc } from '../lib/types';
 import { Icon } from '../components/Icon';
 import { IconPickerModal } from '../components/IconPicker';
-import { Menu, type MenuItem, Modal, PageHero, Segmented, Switch } from '../components/ui';
+import { Menu, type MenuItem, Modal, PageHero, ProviderNote, Segmented, Switch } from '../components/ui';
 
 const TABS = [
   { id: 'appearance', label: 'Appearance' },
@@ -238,8 +238,34 @@ function SourceRow({ label, path, feeds = false }: { label: string; path: string
   );
 }
 
-/* ============ Services editor ============ */
-interface DraftGroup { name: string; description?: string | null; services: ServicesDoc['groups'][number]['services'] }
+/* ============ Services overlay editor ============ */
+/**
+ * What this editor edits is *presentation*, not infrastructure: an entry here can rename, file,
+ * icon, order, hide, or re-URL a container that Docker actually reports. It cannot create one —
+ * entries that match no container are listed under "unmatched" so they are fixable, not silent.
+ */
+interface DraftService {
+  name: string; container: string | null; displayName: string | null; app: string | null;
+  description: string | null; url: string | null; icon: string | null; group: string | null;
+  order: number | null; hidden: boolean; showOnHub: boolean; keywords: string[]; meta: { label: string; value: string }[];
+}
+interface DraftGroup { name: string; description?: string | null; icon?: string | null; order?: number | null; services: DraftService[] }
+
+const draftFromService = (s: Service): DraftService => ({
+  name: s.container.composeService || s.name,
+  container: s.name,
+  displayName: s.configured ? s.displayName : null,
+  app: s.app ?? null,
+  description: s.description ?? null,
+  url: s.urlSource === 'manual' ? s.url : null,
+  icon: s.iconSource === 'config' ? s.icon : null,
+  group: s.groupSource === 'config' ? s.group : null,
+  order: null,
+  hidden: false,
+  showOnHub: true,
+  keywords: s.keywords ?? [],
+  meta: s.meta ?? [],
+});
 
 function ServicesTab() {
   const { data } = usePolled<ServicesDoc>('/api/services', 0);
@@ -247,67 +273,158 @@ function ServicesTab() {
   const [draft, setDraft] = useState<DraftGroup[] | null>(null);
   const [editing, setEditing] = useState<{ gi: number; si: number | null } | null>(null);
   const [iconFor, setIconFor] = useState<{ gi: number; si: number } | null>(null);
-  const groups = useMemo(() => {
+  const inventory = useMemo(() => data?.services ?? [], [data]);
+  const bound = useMemo(() => new Set(inventory.filter((s) => s.configured).map((s) => s.name)), [inventory]);
+  const groups = useMemo<DraftGroup[] | null>(() => {
     if (!data) return null;
-    if (!draft) return data.groups.map((g) => ({ name: g.name, description: g.description ?? null, services: g.services.map(({ name, app, description, href, icon, container, stack, keywords, meta }) => ({ name, app, description, href, icon, container, stack, keywords, meta })) }));
+    if (!draft) {
+      return data.groups.map((g) => ({
+        name: g.name,
+        description: g.description ?? null,
+        services: g.services.filter((s) => s.configured).map((s) => ({
+          name: s.name, container: s.name, displayName: s.displayName, app: s.app, description: s.description,
+          url: s.urlSource === 'manual' ? s.url : null, icon: s.icon, group: s.group, order: s.order ?? null,
+          hidden: !!s.hidden, showOnHub: s.showOnHub !== false, keywords: s.keywords ?? [], meta: s.meta ?? [],
+        })),
+      })).filter((g) => g.services.length || g.description);
+    }
     return draft;
   }, [data, draft]);
   if (!groups) return <p className="stale-note">Loading services.yaml…</p>;
 
   const dirty = !!draft;
   const commit = () => save(async () => {
-    await put('/api/services', { groups });
+    await put('/api/services', { groups: groups.map((g) => ({ ...g, services: g.services.map((s) => ({ ...s, group: undefined })) })) });
     setDraft(null);
   });
-  const patchService = (gi: number, si: number, p: Partial<DraftGroup['services'][number]>) =>
+  const patchService = (gi: number, si: number, p: Partial<DraftService>) =>
     setDraft((d) => {
-      const base = (d ?? groups.map((g) => ({ ...g, services: [...g.services] }))) as DraftGroup[];
+      const base = (d ?? groups) as DraftGroup[];
       const next = structuredClone(base);
       next[gi].services[si] = { ...next[gi].services[si], ...p };
       return next;
     });
+  const addOverlay = (containerName: string) => setDraft((d) => {
+    const next = structuredClone((d ?? groups) as DraftGroup[]);
+    const svc = inventory.find((x) => x.name === containerName);
+    if (!svc) return next;
+    const gname = svc.group || 'Other';
+    let gi = next.findIndex((g) => g.name === gname);
+    if (gi < 0) { next.push({ name: gname, description: null, services: [] }); gi = next.length - 1; }
+    if (next[gi].services.some((x) => x.container === containerName)) return next;
+    next[gi].services.push(draftFromService(svc));
+    return next;
+  });
+  const unbound = inventory.filter((s) => !bound.has(s.name));
+  const unmatched = (data?.unmatched ?? []).filter((u) => u.kind === 'service');
 
   return (
     <>
       <p className="lede">
-        Edits write <span className="mono-meta">config/services.yaml</span> — the single source of truth the whole app reads.
+        This is a presentation layer over live discovery. Docker decides what exists;{' '}
+        <span className="mono-meta">config/services.yaml</span> only decides how a container is
+        named, filed, iconed and ordered.
         {dirty && <b style={{ color: 'var(--warn)' }}> · unsaved changes</b>}
       </p>
       {err && <p className="stale-note" style={{ color: 'var(--fail)' }}>{err}</p>}
+
+      {!data?.live && (
+        <ProviderNote
+          status="unavailable"
+          reason={data?.statusReason || 'Docker is not connected, so there is nothing to overlay. Connect the engine and every container appears here automatically.'}
+          fixHref="/settings/system"
+          fixLabel="Discovery status →"
+        />
+      )}
+
       {groups.map((g, gi) => (
         <Block
           key={g.name}
           title={g.name}
           aside={
             <span style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-              <button className="btn btn-quiet btn-sm" onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next[gi].services.push({ name: 'New service', app: null, description: null, href: null, icon: null, container: null, stack: null, keywords: [], meta: [] }); return next; })}>+ service</button>
+              <button className="btn btn-quiet btn-sm" onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next[gi].services.push({ name: 'new', container: null, displayName: null, app: null, description: null, url: null, icon: null, group: null, order: null, hidden: false, showOnHub: true, keywords: [], meta: [] }); return next; })}>+ entry</button>
               <button className="btn btn-quiet btn-sm" onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next.splice(gi, 1); return next; })}>remove group</button>
             </span>
           }
         >
           <ul style={{ listStyle: 'none' }}>
-            {g.services.map((s, si) => (
-              <li key={s.name + si} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: '9px 0', borderTop: '1px solid var(--hair)' }}>
-                <button className="icon-btn" style={{ width: 34, height: 34 }} title="Choose icon" onClick={() => setIconFor({ gi, si })}>
-                  <Icon ref={s.icon} name={s.name} size={24} />
-                </button>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 570 }}>{s.name} {s.app && <span className="stale-note">· {s.app}</span>}</div>
-                  <div className="stale-note" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {s.href ? <span className="mono-meta">{s.href}</span> : <i>no URL</i>}
-                    {s.container ? <span className="mono-meta"> · container {s.container}</span> : null}
+            {g.services.map((s, si) => {
+              const live = inventory.find((x) => x.name === s.container);
+              const label = live ? (live.container.composeService || live.name) : s.container;
+              return (
+                <li key={`${s.container || s.name}-${si}`} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: '9px 0', borderTop: '1px solid var(--hair)' }}>
+                  <button className="icon-btn" style={{ width: 34, height: 34 }} title="Choose icon" onClick={() => setIconFor({ gi, si })}>
+                    <Icon ref={s.icon || live?.icon} name={s.displayName || s.name} size={24} />
+                  </button>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 570 }}>
+                      {s.displayName || live?.displayName || s.name}
+                      {live && (s.displayName || live.displayName) !== label && <span className="stale-note"> · {label}</span>}
+                    </div>
+                    <div className="stale-note" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {s.container
+                        ? <span className="mono-meta">container {s.container}</span>
+                        : <i>not bound to a container — it will not be listed</i>}
+                      {live?.url && <span className="mono-meta"> · {live.url.replace(/^https?:\/\//, '')} ({live.urlSource})</span>}
+                      {!live?.url && s.url && <span className="mono-meta"> · {s.url.replace(/^https?:\/\//, '')} (manual)</span>}
+                      {s.hidden ? <span> · hidden</span> : null}
+                    </div>
                   </div>
-                </div>
-                <button className="btn btn-sm" onClick={() => setEditing({ gi, si })}>Edit</button>
-                <button className="btn btn-sm" title={`Remove ${s.name}`} onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next[gi].services.splice(si, 1); return next; })}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style={{ width: 14, height: 14 }}><path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" /></svg>
-                </button>
-              </li>
-            ))}
-            {!g.services.length && <li className="stale-note" style={{ padding: '8px 0' }}>empty group</li>}
+                  {!live && s.container && <span className="chip" title={unmatched.find((u) => u.name === s.name)?.reason || 'no such container on this engine'}>not installed</span>}
+                  <button className="btn btn-sm" onClick={() => setEditing({ gi, si })}>Edit</button>
+                  <button className="btn btn-sm" title={`Remove ${s.name}`} onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next[gi].services.splice(si, 1); return next; })}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style={{ width: 14, height: 14 }}><path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" /></svg>
+                  </button>
+                </li>
+              );
+            })}
+            {!g.services.length && <li className="stale-note" style={{ padding: '8px 0' }}>no overlays in this group yet — it only renders if a container matches</li>}
           </ul>
         </Block>
       ))}
+
+      {unbound.length > 0 && (
+        <Block title="Discovered, no overlay" aside={<span className="stale-note">{unbound.length} container{unbound.length === 1 ? '' : 's'} rendering with derived names and icons — fine to leave alone</span>}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {unbound.map((s) => (
+              <button key={s.id} className="chip" title={`${s.container.image || ''} · ${s.url || s.urlNote || 'no url'}`} onClick={() => addOverlay(s.name)}>
+                <Icon ref={s.icon} name={s.displayName} size={14} plain /> {s.displayName} · customize
+              </button>
+            ))}
+          </div>
+        </Block>
+      )}
+
+      {unmatched.length > 0 && (
+        <Block title="Unmatched overlays" aside={<span className="stale-note">in services.yaml, but no container on this engine</span>}>
+          <ul style={{ listStyle: 'none' }}>
+            {unmatched.map((u, i) => (
+              <li key={`${u.name}-${i}`} className="form-row" style={{ padding: '9px 0' }}>
+                <div>
+                  <div className="fr-label">{u.name}</div>
+                  <div className="fr-desc">{u.reason}{u.container ? <span className="mono-meta"> · looked for container {u.container}</span> : null}</div>
+                </div>
+                <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {inventory.length > 0 && (
+                    <select
+                      className="input"
+                      style={{ width: 210 }}
+                      value=""
+                      aria-label={`Rebind ${u.name} to a container`}
+                      onChange={(e) => { const v = e.target.value; if (v) addOverlay(v); }}
+                    >
+                      <option value="">bind to a live container…</option>
+                      {inventory.map((s) => <option key={s.id} value={s.name}>{s.displayName} ({s.name})</option>)}
+                    </select>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Block>
+      )}
+
       <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', marginTop: 'var(--sp-6)' }}>
         <button className="btn" onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next.push({ name: 'New group', description: null, services: [] }); return next; })}>+ group</button>
         <button className="btn btn-primary" onClick={commit} disabled={!dirty || busy}>{busy ? 'Saving…' : 'Save to services.yaml'}</button>
@@ -318,13 +435,13 @@ function ServicesTab() {
       {editing && groups[editing.gi] && (
         <ServiceEditor
           group={groups[editing.gi].name}
+          inventory={inventory}
           svc={groups[editing.gi].services[editing.si!]}
-          isNew={editing.si === null}
           onClose={() => setEditing(null)}
           onSave={(patch) => {
             const { gi, si } = editing;
             if (si != null) patchService(gi, si, patch);
-            else setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next[gi].services.push(patch as DraftGroup['services'][number]); return next; });
+            else setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next[gi].services.push(patch as DraftService); setEditing(null); return next; });
             setEditing(null);
           }}
         />
@@ -340,18 +457,22 @@ function ServicesTab() {
   );
 }
 
-function ServiceEditor({ group, svc, onSave, onClose }: { group: string; svc: DraftGroup['services'][number]; isNew: boolean; onSave: (p: Partial<DraftGroup['services'][number]>) => void; onClose: () => void }) {
-  const [form, setForm] = useState({ ...svc, keywordsText: svc.keywords.join(', '), metaText: svc.meta.map((m) => `${m.label}: ${m.value}`).join('\n') });
+function ServiceEditor({ group, svc, inventory, onSave, onClose }: { group: string; svc: DraftService; inventory: Service[]; onSave: (p: Partial<DraftService>) => void; onClose: () => void }) {
+  const [form, setForm] = useState({ ...svc, keywordsText: (svc.keywords || []).join(', '), metaText: (svc.meta || []).map((m) => `${m.label}: ${m.value}`).join('\n') });
   const f = (k: string, v: unknown) => setForm((x) => ({ ...x, [k]: v }));
+  const live = inventory.find((x) => x.name === form.container);
   return (
-    <Modal title={`${svc.name || 'New service'} — ${group}`} onClose={onClose}
+    <Modal title={`${svc.displayName || svc.name || 'New overlay'} — ${group}`} onClose={onClose}
       footer={
         <>
           <button className="btn btn-quiet" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" onClick={() => {
             onSave({
-              name: form.name.trim(), app: form.app?.trim() || null, description: form.description?.trim() || null,
-              href: form.href?.trim() || null, icon: form.icon ?? null, container: form.container?.trim() || null, stack: form.stack?.trim() || null,
+              name: (form.container || form.name || '').trim(),
+              container: form.container?.trim() || null,
+              displayName: form.displayName?.trim() || null, app: form.app?.trim() || null, description: form.description?.trim() || null,
+              url: form.url?.trim() || null, icon: form.icon ?? null, group: form.group?.trim() || null,
+              order: form.order, hidden: form.hidden, showOnHub: form.showOnHub,
               keywords: form.keywordsText.split(',').map((x: string) => x.trim()).filter(Boolean),
               meta: form.metaText.split('\n').map((l: string) => l.trim()).filter(Boolean).map((l: string) => { const [label, ...rest] = l.split(/[:=]\s*/); return { label: label.trim(), value: rest.join(': ').trim() }; }),
             });
@@ -359,21 +480,42 @@ function ServiceEditor({ group, svc, onSave, onClose }: { group: string; svc: Dr
         </>
       }
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 var(--sp-5)' }}>
-        <div className="field"><label>Name</label><input className="input" value={form.name} onChange={(e) => f('name', e.target.value)} /></div>
-        <div className="field"><label>App / software</label><input className="input" value={form.app || ''} onChange={(e) => f('app', e.target.value)} placeholder="Jellyfin" /></div>
+      <div className="field">
+        <label>Container <span className="hint">(what this overlay is about — required for it to show anywhere)</span></label>
+        <input className="input mono-meta" list="opus-live-containers" value={form.container || ''} onChange={(e) => f('container', e.target.value)} placeholder={live ? live.name : 'start typing a running container'} />
+        <datalist id="opus-live-containers">
+          {inventory.map((s) => <option key={s.id} value={s.name}>{`${s.displayName} · ${s.container.state}`}</option>)}
+        </datalist>
+        {form.container && !live && <p className="stale-note" style={{ color: 'var(--warn)' }}>no container named “{form.container}” on this engine — this entry will be reported as unmatched, and no service will appear.</p>}
       </div>
-      <div className="field"><label>Description</label><input className="input" value={form.description || ''} onChange={(e) => f('description', e.target.value)} /></div>
-      <div className="field"><label>URL</label><input className="input mono-meta" value={form.href || ''} onChange={(e) => f('href', e.target.value)} placeholder="http://stream.opusgrid.local:8096" /></div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 var(--sp-5)' }}>
-        <div className="field"><label>Docker container <span className="hint">(for live status/stats)</span></label><input className="input mono-meta" value={form.container || ''} onChange={(e) => f('container', e.target.value)} placeholder="jellyfin" /></div>
-        <div className="field"><label>Stack</label><input className="input" value={form.stack || ''} onChange={(e) => f('stack', e.target.value)} placeholder="Media" /></div>
+        <div className="field"><label>Display name</label><input className="input" value={form.displayName || ''} onChange={(e) => f('displayName', e.target.value)} placeholder={live ? live.displayName : 'derived from the container'} /></div>
+        <div className="field"><label>Group</label><input className="input" value={form.group || ''} onChange={(e) => f('group', e.target.value)} placeholder={live?.group || 'Other'} /></div>
+      </div>
+      <div className="field"><label>App / software <span className="hint">(shown as identity; the image is the default)</span></label><input className="input" value={form.app || ''} onChange={(e) => f('app', e.target.value)} /></div>
+      <div className="field"><label>Description</label><input className="input" value={form.description || ''} onChange={(e) => f('description', e.target.value)} /></div>
+      <div className="field">
+        <label>URL override <span className="hint">(optional — wins over Traefik and published ports)</span></label>
+        <input className="input mono-meta" value={form.url || ''} onChange={(e) => f('url', e.target.value)} placeholder={live && live.url ? `discovered: ${live.url}` : 'leave empty to use what the engine says'} />
+        {live?.url && !form.url && (
+          <p className="stale-note">discovered from {live.urlSource === 'traefik' ? 'Traefik metadata' : live.urlSource === 'published-port' ? 'a published port' : 'config'} · <span className="mono-meta">{live.url}</span></p>
+        )}
+        {!live?.url && !form.url && <p className="stale-note">{live?.urlNote || 'this container has no web endpoint — it will read “No web endpoint detected”, which is honest, not broken'}</p>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 var(--sp-5)' }}>
+        <div className="field"><label>Order in group</label><input type="number" className="input" value={form.order ?? ''} onChange={(e) => f('order', e.target.value === '' ? null : Number(e.target.value))} /></div>
+        <div className="field"><label>Visibility</label>
+          <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'center', paddingTop: 6 }}>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={form.hidden} onChange={(e) => f('hidden', e.target.checked)} /> hide everywhere</label>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={form.showOnHub} onChange={(e) => f('showOnHub', e.target.checked)} /> show on Hub</label>
+          </div>
+        </div>
       </div>
       <div className="field"><label>Keywords (comma separated)</label><input className="input" value={form.keywordsText} onChange={(e) => f('keywordsText', e.target.value)} /></div>
       <div className="field"><label>Notes / meta — one per line as <span className="mono-meta">Label: value</span></label><textarea className="textarea" rows={3} value={form.metaText} onChange={(e) => f('metaText', e.target.value)} /></div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
-        <Icon ref={form.icon} name={form.name || 'svc'} size={40} />
-        <span className="stale-note">current icon — change it from the list</span>
+        <Icon ref={form.icon || live?.icon} name={form.displayName || form.name || 'svc'} size={40} />
+        <span className="stale-note">current icon — set it from the list so it overrides the derived one</span>
       </div>
     </Modal>
   );
@@ -422,6 +564,132 @@ function BookmarksTab() {
   );
 }
 function cloneAt<T>(arr: T[], mutate: (copy: T[]) => void): T[] { const c = structuredClone(arr); mutate(c); return c; }
+
+/* ============ Discovery diagnostics ============ */
+const URL_SOURCE_LABEL: Record<string, string> = {
+  manual: 'manual overrides',
+  traefik: 'Traefik metadata',
+  'published-port': 'published ports',
+  none: 'no web endpoint',
+};
+
+function DiscoveryBlock({ health }: { health: HealthDoc | null | undefined }) {
+  const { data, refresh, fetchedAt } = usePolled<DiscoveryDoc>('/api/discovery', 30_000);
+  const { settings, update } = useSettings();
+  const { busy, save } = useSave();
+  const eng = data?.engine;
+  const url = data?.urlDiscovery;
+  const counts = [
+    { k: 'Containers', v: eng?.containers },
+    { k: 'Running', v: eng?.running },
+    { k: 'Stopped', v: eng?.stopped },
+    { k: 'Applications', v: data?.inventory.applications },
+    { k: 'Infrastructure', v: data?.inventory.infrastructure },
+    { k: 'Stacks', v: data?.inventory.stacks },
+  ];
+  const sources = url ? Object.entries(url.sources).sort((a, b) => b[1]! - a[1]!) : [];
+  return (
+    <Block title="Service discovery" aside={<span className="stale-note">{fetchedAt ? `checked ${relTime(fetchedAt)}` : 'reading the engine…'}</span>}>
+      <Row label="Docker engine" desc="What the Services, Hub and Stacks pages are built from." tight>
+        <span className="mono-meta" style={{ color: eng?.ok ? 'var(--ok)' : 'var(--ink-3)' }}>
+          {eng?.ok
+            ? `connected · engine ${eng.version || '?'}${eng.api ? ` · API ${eng.api}` : ''}`
+            : health?.providers.docker.reason || eng?.state || '…'}
+        </span>
+      </Row>
+
+      {eng?.ok && (
+        <div className="stat-strip" style={{ margin: 'var(--sp-3) 0 var(--sp-5)' }}>
+          {counts.map((c) => (
+            <div className="stat" key={c.k}>
+              <div className="stat-k">{c.k}</div>
+              <div className="stat-v">{c.v ?? '—'}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Row label="URL discovery" desc="Where each service’s clickable address comes from — the first source that answers wins.">
+        <span className="mono-meta" style={{ textAlign: 'right' }}>
+          {sources.length
+            ? sources.map(([k, n]) => `${n} ${URL_SOURCE_LABEL[k] || k}`).join(' · ')
+            : 'nothing resolved yet'}
+        </span>
+      </Row>
+
+      <Row label="Host address" desc="Only used for published-port URLs. Leave empty to detect it from this machine — never guessed, and nothing is ever assumed to live on a particular domain.">
+        <input
+          className="input mono-meta"
+          style={{ width: 230 }}
+          defaultValue={settings?.infrastructure?.hostAddress || ''}
+          placeholder={url?.hostAddress ? `auto: ${url.hostAddress}` : 'e.g. 10.0.0.5'}
+          aria-label="Host address for published ports"
+          onBlur={(e) => update({ infrastructure: { hostAddress: e.target.value.trim() || null } }, true)}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+        />
+        <span className="stale-note">{url?.hostAddress ? `using ${url.hostAddress} (${url.hostAddressSource})` : 'not detected'}</span>
+      </Row>
+
+      <Row label="Proxy entrypoint ports" desc="Optional: only needed when your Traefik entrypoint is not reachable on 80/443, e.g. web=8080. Traefik’s own metadata supplies everything else." tight>
+        <input
+          className="input mono-meta"
+          style={{ width: 230 }}
+          defaultValue={Object.entries(settings?.infrastructure?.entrypointPorts || {}).map(([k, v]) => `${k}=${v}`).join(', ')}
+          placeholder="web=8080, websecure=8443"
+          aria-label="Entrypoint port map"
+          onBlur={(e) => {
+            const map: Record<string, string> = {};
+            for (const part of e.target.value.split(/[,\n]/)) {
+              const [k, v] = part.split('=').map((x) => x.trim());
+              if (k && v) map[k] = v;
+            }
+            update({ infrastructure: { entrypointPorts: map } }, true);
+          }}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+        />
+      </Row>
+
+      <Row label="Presentation overlays" desc="How much of what you see comes from config rather than from the engine itself." tight>
+        <span className="mono-meta">
+          {data
+            ? [
+              `${data.overlays.serviceOverlays}${data.overlays.serviceEntries != null && data.overlays.serviceEntries !== data.overlays.serviceOverlays ? ` of ${data.overlays.serviceEntries}` : ''} service entries bound`,
+              `${data.overlays.stackOverlays}${data.overlays.stackEntries != null && data.overlays.stackEntries !== data.overlays.stackOverlays ? ` of ${data.overlays.stackEntries}` : ''} stack entries bound`,
+              data.overlays.skipped ? `${data.overlays.skipped} unreadable` : null,
+            ].filter(Boolean).join(' · ')
+            : '…'}
+        </span>
+      </Row>
+
+      <Row label="Last discovery" tight>
+        <span className="mono-meta">{data?.discoveredAt ? new Date(data.discoveredAt).toLocaleTimeString() : '—'}</span>
+        <button className="btn btn-quiet btn-sm" disabled={busy} onClick={() => save(async () => { await post('/api/discovery/refresh'); refresh(); })}>
+          {busy ? 'Looking…' : 'Re-discover now'}
+        </button>
+      </Row>
+
+      {!!(data?.overlays.unmatchedList?.length) && (
+        <div style={{ marginTop: 'var(--sp-4)', paddingTop: 'var(--sp-4)', borderTop: '1px solid var(--line)' }}>
+          <p className="stale-note" style={{ color: 'var(--warn)' }}>
+            {data.overlays.unmatchedList.length} overlay {data.overlays.unmatchedList.length === 1 ? 'entry describes' : 'entries describe'} nothing on this engine. They are reported, never rendered — a config entry cannot make a service exist.
+          </p>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 'var(--sp-2) 0 0', display: 'grid', gap: 4 }}>
+            {data.overlays.unmatchedList.map((u) => (
+              <li key={`${u.kind}:${u.name}`} className="mono-meta" style={{ fontSize: 12.5 }}>
+                <span style={{ color: 'var(--ink-3)' }}>{u.kind}</span> {u.name}
+                {u.container ? ` → ${u.container}` : ''}
+                <span className="muted"> · {u.reason}</span>
+              </li>
+            ))}
+          </ul>
+          <Link className="btn btn-quiet btn-sm" to="/settings/services" style={{ alignSelf: 'start', marginTop: 'var(--sp-3)' }}>
+            Fix the overlays
+          </Link>
+        </div>
+      )}
+    </Block>
+  );
+}
 
 /* ============ Integrations ============ */
 const FEED_SUGGESTIONS = [
@@ -536,13 +804,10 @@ function SystemTab() {
               : 'none found — keys fall through to process.env only'}
           </span>
         </Row>
-        <Row label="Docker engine" tight>
-          <span className="mono-meta" style={{ color: health?.providers.docker.ok ? 'var(--ok)' : 'var(--ink-3)' }}>
-            {health?.providers.docker.ok ? `connected · engine ${health.providers.docker.version}` : health?.providers.docker.reason || '…'}
-          </span>
-        </Row>
         <Row label="Runtime" tight><span className="mono-meta">OpusHub {health?.version || '0.1'} · node {health?.node || '…'} · {health?.platform || ''}</span></Row>
       </Block>
+
+      <DiscoveryBlock health={health} />
 
       <Block title="Behavior">
         <Row label="Log service launches" desc="Adds an Activity event when you open a service from OpusHub." tight>

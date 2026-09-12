@@ -44,19 +44,45 @@ test('GET /api/health offline: socket-missing state, no paths anywhere', async (
   assert.ok(!JSON.stringify(json).includes('offline-probe'));
 });
 
-test('GET /api/services offline: live=false with the public reason', async () => {
+test('GET /api/services offline: nothing is displayed, and the reason is public', async () => {
   const { json } = await get('/api/services');
   assert.equal(json.live, false);
+  assert.equal(json.statusSource, 'unavailable');
   assert.ok(json.statusReason && !json.statusReason.includes('/tmp/'));
-  assert.ok(json.groups.every((g) => g.services.every((s) => s.status === 'unavailable')));
+  // the whole point of the discovery model: a config entry cannot render a card for a
+  // container we cannot see. An empty list is honest; a phantom is not.
+  assert.deepEqual(json.groups, []);
+  assert.deepEqual(json.services, []);
+  assert.deepEqual(json.infrastructure, []);
+  assert.deepEqual(json.stats.containers === 0, true);
+  // no engine → no comparison to make, so overlays are not blamed for it
+  assert.deepEqual(json.unmatched, []);
 });
 
-test('GET /api/stacks offline: config-only, no standalone', async () => {
+test('GET /api/services/:group/:name offline: 404, because the service is not known to exist', async () => {
+  const r = await get('/api/services/Media/jellyfin');
+  assert.equal(r.status, 404);
+});
+
+test('GET /api/stacks offline: no stacks, no standalone, one clear reason', async () => {
   const { json } = await get('/api/stacks');
   assert.equal(json.live, false);
+  assert.deepEqual(json.stacks, []);
   assert.deepEqual(json.standalone, []);
-  assert.ok(json.stacks.length > 0);
-  assert.ok(json.stacks.every((s) => s.source === 'configured' && s.status === 'unavailable'));
+  assert.deepEqual(json.unmatched, []);
+  assert.ok(json.statusReason && !json.statusReason.includes('/tmp/'));
+});
+
+test('GET /api/discovery offline: the diagnostic says the engine is the problem', async () => {
+  const { status, json } = await get('/api/discovery');
+  assert.equal(status, 200, 'the diagnostics page must work precisely when discovery is broken');
+  assert.equal(json.engine.ok, false);
+  assert.notEqual(json.engine.state, 'connected');
+  assert.deepEqual(json.engine, { ...json.engine, containers: 0, running: 0, stopped: 0 });
+  assert.equal(json.urlDiscovery.withoutUrl, 0);
+  assert.equal(json.overlays.unmatched, 0);
+  assert.ok(!JSON.stringify(json).includes('/tmp/'), 'no socket path in any diagnostic field');
+  assert.ok(!JSON.stringify(json).toLowerCase().includes('token'));
 });
 
 test('GET /api/docker/containers offline: unavailable, public reason', async () => {

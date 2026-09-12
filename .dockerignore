@@ -1,0 +1,44 @@
+# Build context hygiene: none of this may end up in the image.
+#
+# The important lines are the last group: runtime config and secrets are mounted at run time, and
+# copying them into a layer would (a) leak .env into an inspectable image and (b) freeze a snapshot
+# of this particular host's services into an image meant to run on any Docker host.
+
+# git + tooling
+.git
+.gitignore
+.github
+.arena
+.cache
+.nox
+.vscode
+.idea
+*.swp
+
+# build output and installed deps (rebuilt inside the image)
+node_modules
+dist
+dist-ssr
+coverage
+*.log
+npm-debug.log*
+
+# runtime state — always a bind mount, never a COPY
+data
+config
+.env
+.env.*
+config/.env
+config/.env.*
+**/.env
+**/*.env
+config/backups
+config/icons
+config/backgrounds
+
+# source of truth for these exclusions / not needed at runtime
+docs
+test
+README.md
+Dockerfile
+.dockerignore

@@ -40,6 +40,27 @@ function iconBody(set, name) {
   return { body: def.body, width: def.width ?? col.width ?? 24, height: def.height ?? col.height ?? 24, name };
 }
 
+/** Does this ref exist in a bundled collection? (sync, offline, no network) */
+export function existsLocal(ref) {
+  const m = String(ref || '').match(/^([a-z0-9-]+):([a-z0-9+._-]+)$/i);
+  if (!m || !COLLECTIONS[m[1]]) return false;
+  return !!iconBody(m[1], m[2]);
+}
+
+/**
+ * Derive an icon from names/op/slugs an operator or the image already gave us — brand set first,
+ * then MDI. This is *existence probing*, not an application→icon mapping: if `si:jellyfin`
+ * resolves, the container is a Jellyfin, and the icon came from the image name, not from a table.
+ * Returns null when nothing matches, and the client falls back to a monogram.
+ */
+export function suggestRef(slugs) {
+  const names = [...new Set((slugs || []).map((s) => String(s || '').toLowerCase().trim()).filter((s) => s && s.length > 1 && /^[a-z0-9._-]+$/.test(s)))];
+  if (!names.length) return null;
+  for (const name of names) if (existsLocal(`si:${name}`)) return `si:${name}`;
+  for (const name of names) if (existsLocal(`mdi:${name}`)) return `mdi:${name}`;
+  return null;
+}
+
 export function resolveIcon(ref, size = 24, color = 'currentColor') {
   if (!ref || typeof ref !== 'string') return null;
   const m = ref.match(/^([a-z0-9-]+):([a-z0-9+._-]+)$/i);

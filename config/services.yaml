@@ -1,109 +1,58 @@
-# OpusHub — services
-# This file is the source of truth for the Services directory.
-# Edit it in Settings → Services (or by hand; comments here are preserved when OpusHub writes).
+# OpusHub — presentation overlay (optional)
 #
-# Per service:
-#   name        display name
-#   app         the software behind it (shown as identity)
-#   description one line, used in search too
-#   href        where to open it
-#   icon        lucide:*/mdi:*/si:* (bundled, offline-safe), http(s) URL, /user/icons/<file>, or a short emoji
-#   container   docker container name to bind live status to (optional; falls back to name matching)
-#   stack       stack membership (optional, mirrors stacks.yaml)
-#   meta        free-form key/value facts shown on the service page (optional)
+# Docker decides what EXISTS. This file only decides how a discovered container LOOKS.
+#
+#   • Every entry here must bind to a real container, by `container:` (a container name or id
+#     prefix — authoritative) or by `name:` matching a container name / compose service name.
+#   • An entry whose container is gone is NOT shown as a service. It is reported under
+#     Settings → System → Service discovery as an unmatched overlay, and nowhere else.
+#   • Nothing needs to be written here at all: with this file empty, OpusHub still discovers every
+#     container, resolves its URL from Traefik/published ports, and derives its name and icon.
+#   • URLs come from the engine. Set `url:` only to *override* what Traefik/published ports say —
+#     that is the top of the precedence list, so it wins over real metadata. It is also the right
+#     place for a URL your proxy knows about but does not publish in labels.
+#
+# Per entry:
+#   container    docker container name or id prefix (recommended binding key)
+#   name         label for this entry; also a binding key when `container` is absent
+#   displayName  what the UI calls it (default: derived from the container/compose service name)
+#   app          the software behind it, shown as identity (default: none — the image says)
+#   description  one line, also searched
+#   url          manual URL override (legacy `href` is read as `url`)
+#   icon         lucide:*/mdi:*/si:* (bundled, offline-safe), http(s) URL, /user/icons/<file>, or an emoji
+#   group        which group this service is filed under (default: its compose project, else "Other")
+#   order        rank inside the group (drag-and-drop on the Services page wins over this)
+#   hidden       true → left out of Services/Hub entirely (still visible in its stack)
+#   showOnHub    false → listed on Services but not on the Hub launcher
+#   keywords     extra search terms
+#   meta         free-form key/value facts shown on the service page
+#
+# You can also put this metadata on the container itself, and OpusHub will pick it up with no
+# config file at all (handy when the compose file is the thing you version):
+#   labels:
+#     opushub.displayName: Wave
+#     opushub.group: Music
+#     opushub.icon: lucide:waves
+#     opushub.meta.Library: 312 GB FLAC
+#     opushub.kind: infrastructure           # file it with the rails instead of the grid
+#     opushub.url: http://192.0.2.10:4533        # manual override, urlSource: "manual"
+#     opushub.hidden: "true"
 
-groups:
-  - name: Media
-    description: Streams, requests, the fun bits
-    services:
-      - name: Stream
-        app: Jellyfin
-        description: Movies and TV, streamed anywhere in the house
-        href: http://stream.opusgrid.home.arpa:8096
-        icon: si:jellyfin
-        container: jellyfin
-        stack: Media
-        meta:
-          - { label: Library, value: 1.2 TB on disk }
-      - name: Seerr
-        app: Seerr
-        description: Request queue for the household
-        href: http://seerr.opusgrid.home.arpa:5055
-        icon: mdi:movie-search-outline
-        container: seerr
-        stack: Media
+groups: []
 
-  - name: Photos
-    description: Every memory, backed up nightly
-    services:
-      - name: Lens
-        app: Immich
-        description: Photo library with machine learning on the phones
-        href: http://lens.opusgrid.home.arpa:2283
-        icon: si:immich
-        container: immich
-        stack: Photos
-        meta:
-          - { label: Backups, value: automatic }
-
-  - name: Files
-    description: Sync, docs, paper trail
-    services:
-      - name: Drive
-        app: Nextcloud
-        description: Files and calendar, self-hosted
-        href: http://drive.opusgrid.home.arpa:8080
-        icon: si:nextcloud
-        container: nextcloud
-        stack: Cloud
-      - name: Docs
-        app: Paperless-ngx
-        description: The paper office, searchable
-        href: http://docs.opusgrid.home.arpa:8010
-        icon: si:paperlessngx
-        container: paperless
-        stack: Cloud
-
-  - name: Music
-    description: The long tail of the collection
-    services:
-      - name: Wave
-        app: Navidrome
-        description: Streaming the lossless collection
-        href: http://wave.opusgrid.home.arpa:4533
-        icon: lucide:waves
-        container: navidrome
-        stack: Media
-
-  - name: Security
-    description: Doors to the outside
-    services:
-      - name: Vault
-        app: Vaultwarden
-        description: Every key, in one place
-        href: https://vault.opusgrid.example
-        icon: si:vaultwarden
-        container: vaultwarden
-        stack: Secure
-
-  - name: Home
-    description: The house itself
-    services:
-      - name: Nest
-        app: Home Assistant
-        description: Lights, climate, the sensors in the walls
-        href: http://nest.opusgrid.home.arpa:8123
-        icon: si:homeassistant
-        container: home-assistant
-        stack: Home
-
-  - name: OpusGrid
-    description: The control center and its rails
-    services:
-      - name: Hub
-        app: OpusHub
-        description: This place
-        href: /
-        icon: mdi:hexagon-multiple
-        meta:
-          - { label: Role, value: control center }
+# A worked example, commented out. It renames and files the `jellyfin` container only if such a
+# container is actually running on this engine; if it is not, the entry does nothing at all.
+#
+# groups:
+#   - name: Media
+#     description: Streams, requests, the fun bits
+#     services:
+#       - container: jellyfin
+#         displayName: Stream
+#         description: Movies and TV, streamed anywhere in the house
+#         icon: si:jellyfin
+#         meta:
+#           - { label: Library, value: 1.2 TB on disk }
+#       - container: seerr
+#         group: Media
+#         icon: mdi:movie-search-outline

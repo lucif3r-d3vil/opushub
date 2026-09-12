@@ -41,6 +41,8 @@ test.before(async () => {
   ENGINE = await startMockEngine();
   process.env.OPUSHUB_DOCKER_SOCKET = ENGINE.socketPath;
   delete process.env.DOCKER_HOST;
+  // a named host address, so the published-port tier resolves the same way on every machine
+  process.env.OPUSHUB_HOST_ADDRESS = '198.51.100.20';
   ({ handleApi } = await import('./api.js'));
 });
 
@@ -73,20 +75,55 @@ test('GET /api/services: status reasons are public-safe; no env/ids leak', async
 });
 
 test('GET /api/services/:group/:name: command is redacted end to end', async () => {
-  const { json } = await get('/api/services/Security/Vault');
+  const { json } = await get('/api/services/Other/vaultwarden');
   assert.ok(json.container, 'vaultwarden fixture links');
   assert.match(json.container.command, /••••/);
   assert.ok(!JSON.stringify(json).includes('MOCK-FIXTURE-NOT-A-REAL-SECRET'));
   assert.ok(!('entrypoint' in json.container));
 });
 
-test('GET /api/stacks: discovered + standalone present; reasons public-safe', async () => {
+test('GET /api/stacks: compose projects + standalone present; reasons public-safe', async () => {
   const { json } = await get('/api/stacks');
   assert.equal(json.live, true);
-  assert.ok(json.stacks.some((s) => s.source === 'configured'));
+  assert.ok(json.stacks.every((s) => s.project), 'every live stack is backed by a compose project');
   assert.ok(Array.isArray(json.standalone));
   assert.ok(json.standalone.some((c) => c.name === 'traefik'));
-  assert.ok(!JSON.stringify(json).includes('.sock'));
+  const blob = JSON.stringify(json);
+  assert.ok(!blob.includes('.sock'));
+  assert.ok(!blob.includes('opt/stacks'), 'compose file paths stay server-side');
+  assert.ok(!blob.includes('rawLabels'));
+});
+
+test('GET /api/services: URLs come from Docker metadata, never from a baked-in domain', async () => {
+  const { json } = await get('/api/services');
+  const all = json.groups.flatMap((g) => g.services);
+  const seer = all.find((s) => s.name === 'seerr');
+  assert.equal(seer.url, 'https://seerr.lab.internal');
+  assert.equal(seer.urlSource, 'traefik');
+  const radarr = all.find((s) => s.name === 'radarr');
+  assert.match(radarr.url, /^https?:\/\/[^/]+:7878$/);
+  assert.equal(radarr.urlSource, 'published-port');
+  const sonarr = all.find((s) => s.name === 'sonarr');
+  assert.equal(sonarr.url, null);
+  assert.equal(sonarr.urlSource, 'none');
+});
+
+test('GET /api/discovery: counters + URL sources, no engine internals', async () => {
+  const { json } = await get('/api/discovery');
+  assert.equal(json.engine.ok, true);
+  assert.equal(json.engine.version, '26.1.0-mock');
+  assert.equal(json.engine.containers, 24);
+  assert.ok(json.urlDiscovery.sources.traefik >= 4);
+  assert.ok(json.inventory.applications > 0);
+  const blob = JSON.stringify(json);
+  assert.ok(!blob.includes('.sock') && !blob.includes('registry-mock') && !blob.includes('proxy-mock'));
+});
+
+test('GET /api/search: one canonical inventory behind search', async () => {
+  const { json } = await get('/api/search?q=wave');
+  const hit = json.results.find((r) => r.kind === 'service');
+  assert.equal(hit.title, 'Wave', 'the opushub.displayName label is what search offers');
+  assert.match(hit.href, /\/services\/.+\/navidrome$/);
 });
 
 test('GET /api/docker/containers/:ref/logs caps tail and validates refs', async () => {

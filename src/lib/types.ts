@@ -2,64 +2,193 @@ export type ProviderStatus = 'ok' | 'unavailable' | 'unconfigured' | 'error' | '
 
 export type ServiceStatusState = 'up' | 'down' | 'unhealthy' | 'unmanaged' | 'unavailable' | 'restarting' | 'paused' | string;
 
+/** Where a service's URL came from. `none` means there is genuinely no web endpoint — OpusHub
+ * never invents one. Surfaced in the service page's technical details and in Settings → System. */
+export type UrlSource = 'manual' | 'traefik' | 'published-port' | 'none';
+
 export interface ServiceMetaPair { label: string; value: string }
 
-export interface Service {
+/** Container identity as Docker reports it. Everything here is infrastructure, not presentation. */
+export interface ContainerInfo {
   name: string;
-  app: string | null;
-  description: string | null;
-  href: string | null;
-  icon: string | null;
-  container: string | null;
-  stack: string | null;
-  keywords: string[];
-  meta: ServiceMetaPair[];
-  group?: string;
-  status?: ServiceStatusState;
-  statusDetail?: { name: string; image: string; status: string; health: string | null } | null;
-  statusReason?: string | null;
+  id: string;
+  image: string | null;
+  state: string | null;
+  status: string | null;
+  health: string | null;
+  created: number | null;
+  restartCount: number | null;
+  composeProject: string | null;
+  composeService: string | null;
+  networks: { name: string; ip?: string; gateway?: string; aliases?: string[] }[];
+  ports: { ip: string; private: number; public: number | null; type: string }[];
+  labels: {
+    compose: { project: string | null; service: string | null; version: string | null } | null;
+    proxy: { router: string; hosts: string[]; entrypoints: string[]; tls: boolean; path: string | null; service: string | null; servicePort: number | null }[] | null;
+    overlay: { displayName: string | null; icon: string | null; group: string | null; url: string | null; description: string | null } | null;
+  };
 }
 
-export interface ServiceGroup { name: string; description?: string | null; services: Service[] }
-export interface ServicesDoc { groups: ServiceGroup[]; skipped?: { group: string; name: string; reason: string }[]; live: boolean; statusSource: string; statusReason: string | null }
+/** The single canonical service object: one per container. Infrastructure identity from Docker,
+ * presentation identity from the OpusHub overlay — `configured` says whether an overlay matched. */
+export interface Service {
+  name: string;                 // container name — unique, and the key used in URLs
+  displayName: string;
+  slug: string;
+  id: string;                   // container id (12)
+  app: string | null;
+  description: string | null;
+  url: string | null;
+  urlSource: UrlSource;
+  urlNote?: string | null;
+  icon: string | null;
+  iconSource?: 'config' | 'label' | 'derived:image' | 'none' | null;
+  group: string;
+  groupSource?: string;
+  keywords?: string[];
+  meta?: ServiceMetaPair[];
+  hidden?: boolean;
+  showOnHub?: boolean;
+  order?: number | null;
+  configured: boolean;
+  discovered: boolean;
+  /** what enriched this container: null, 'container label', or 'services.yaml' */
+  overlaid?: string | null;
+  kind: 'application' | 'infrastructure';
+  kindSource?: string;
+  status: ServiceStatusState;
+  statusReason?: string | null;
+  stack: string | null;          // stack id (the compose project), not a config-invented name
+  stackDisplayName: string | null;
+  container: ContainerInfo;
+}
 
-export interface ContainerBrief { name: string; id: string; state: string; status: string; health: string | null; image: string }
+export interface ServiceGroup {
+  name: string;
+  description?: string | null;
+  icon?: string | null;
+  configured?: boolean;
+  services: Service[];
+}
+
+export interface UnmatchedOverlay {
+  kind: 'service' | 'stack';
+  name: string;
+  group?: string | null;
+  container?: string | null;
+  conflict?: string | null;
+  reason: string;
+}
+
+export interface DiscoveryStats {
+  containers: number; running: number; stopped: number;
+  applications: number; infrastructure: number;
+  urlSources: Partial<Record<UrlSource, number>>;
+  withUrl: number; configured: number; discovered: number; stacks: number; standalone: number;
+}
+
+export interface ServicesDoc {
+  groups: ServiceGroup[];
+  /** the full flat inventory (applications + infrastructure + hidden) — what the overlay editor binds to */
+  services?: Service[];
+  infrastructure: Service[];
+  skipped?: { group: string; name: string; reason: string }[];
+  unmatched?: UnmatchedOverlay[];
+  live: boolean;
+  statusSource: string;
+  statusReason: string | null;
+  discoveredAt?: number | null;
+  stats?: DiscoveryStats;
+}
+
+export interface ContainerBrief {
+  name: string; id: string; state: string; status: string; health: string | null; image: string;
+  composeProject?: string | null; composeService?: string | null;
+}
 
 export interface StackMember {
   service: string;
-  icon: string | null;
+  name: string;
+  containerName: string;
   group: string | null;
-  href: string | null;
+  icon: string | null;
+  url: string | null;
+  urlSource: UrlSource;
+  kind: 'application' | 'infrastructure';
+  configured: boolean;
+  route: string | null;
   container: ContainerBrief | null;
-  discovered?: boolean;
-  // enriched on detail route:
+  // enriched on the detail route:
   stats?: { cpu: number | null; memory: { used: number | null; limit: number | null }; net: { rx: number; tx: number } } | null;
   ports?: { private: string; host: string; hostPort: string }[];
   networks?: { name: string; ip: string; gateway: string; aliases: string[] }[];
   mounts?: { type: string; source: string; target: string; rw: boolean }[];
   startedAt?: string | null;
   health?: string | null;
+  restartCount?: number;
+  restartPolicy?: string | null;
+  command?: string | null;
+  error?: boolean;
 }
 
 export interface Stack {
+  id: string;                    // compose project name (the URL key)
+  project: string | null;        // null → a configured overlay grouping real containers
   name: string;
+  displayName: string;
   description: string | null;
   icon: string | null;
-  services: string[];
-  compose: string | null;
   notes: string | null;
+  /** deliberately null: compose file paths stay server-side (see docs/04-discovery.md) */
+  compose: string | null;
   source: 'configured' | 'discovered';
-  members: StackMember[];
+  configured: boolean;
   status: 'operational' | 'degraded' | 'attention' | 'unlinked' | 'unavailable' | string;
   statusReason: string | null;
   containerCount: number;
+  runningCount: number;
+  services: string[];
+  members: StackMember[];
+}
+
+export interface StandaloneContainer extends ContainerBrief {
+  displayName: string;
+  kind: 'application' | 'infrastructure';
+  url: string | null;
+  urlSource: UrlSource;
 }
 
 export interface StacksDoc {
   stacks: Stack[];
   live: boolean;
   statusReason: string | null;
-  standalone: ContainerBrief[];
+  standalone: StandaloneContainer[];
+  unmatched?: UnmatchedOverlay[];
+}
+
+/** Settings → System: how discovery is going, with no engine internals beyond counts. */
+export interface DiscoveryDoc {
+  engine: { ok: boolean; state: string; version: string | null; api: string | null; containers: number; running: number; stopped: number; operatingSystem: string | null };
+  urlDiscovery: {
+    sources: Partial<Record<UrlSource, number>>;
+    withUrl: number; withoutUrl: number;
+    hostAddress: string | null; hostAddressSource: string;
+    entrypointPorts: Record<string, string>;
+    traefikRouters: number;
+  };
+  overlays: {
+    /** overlays that bind to a live container/project */
+    serviceOverlays: number;
+    stackOverlays: number;
+    /** what the YAML files actually contain — the difference is what silently does nothing */
+    serviceEntries?: number;
+    stackEntries?: number;
+    unmatched: number;
+    unmatchedList?: UnmatchedOverlay[];
+    skipped: number;
+  };
+  inventory: { applications: number; infrastructure: number; stacks: number; standalone: number };
+  discoveredAt: number | null;
 }
 
 export interface SystemSnapshot {
@@ -129,6 +258,7 @@ export interface SettingsDoc {
     markets: { symbols: string[] };
   };
   behavior: { logLaunches: boolean; refresh: { system: number; services: number } };
+  infrastructure: { hostAddress: string | null; entrypointPorts: Record<string, string> };
   advanced: { customCss: boolean; customJs: boolean };
   _raw?: unknown;
   _text?: string;
