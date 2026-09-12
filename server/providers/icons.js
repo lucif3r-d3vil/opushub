@@ -34,7 +34,9 @@ function iconBody(set, name) {
   if (!col) return null;
   let def = col.icons?.[name] ?? col.aliases?.[name];
   if (def?.parent) def = col.icons?.[def.parent];
-  if (!def || def.hidden) return null;
+  // note: `hidden` (deprecated-but-present, e.g. lucide:waves) still resolves — a user
+  // asked for this exact ref, so we serve it. Search ranking may still deprioritize it.
+  if (!def || !def.body) return null;
   return { body: def.body, width: def.width ?? col.width ?? 24, height: def.height ?? col.height ?? 24, name };
 }
 

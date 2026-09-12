@@ -56,7 +56,7 @@ export async function getMarket(symbolsRaw) {
   const symbols = (Array.isArray(symbolsRaw) ? symbolsRaw : [])
     .map(normSymbol).filter(Boolean);
   if (!symbols.length) {
-    return { status: 'unconfigured', reason: 'No watchlist configured — add tickers in Settings → Integrations (e.g. AAPL, NVDA, RELIANCE.NS, ^NKX).', items: [] };
+    return { status: 'unconfigured', reason: 'No symbols in the watchlist — e.g. AAPL, RELIANCE.NS, ^NKX.', items: [] };
   }
   try {
     const q = await quotes(symbols);

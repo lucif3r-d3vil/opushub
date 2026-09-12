@@ -116,7 +116,15 @@ export function AreaChart({
         {ticks.map((t, i) => (
           <g key={i}>
             <line x1={geom.x(t.t)} x2={geom.x(t.t)} y1={PAD_T} y2={H - 14} stroke="var(--hair)" strokeWidth="1" strokeDasharray={i === 0 ? '0' : '1 4'} />
-            <text x={geom.x(t.t) + 4} y={H + 8} className="chart-label">{t.label}</text>
+            {/* first/last labels anchored inside the frame so nothing clips at the edges */}
+            <text
+              x={i === ticks.length - 1 ? W : geom.x(t.t) + 4}
+              y={H + 8}
+              textAnchor={i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'start'}
+              className="chart-label"
+            >
+              {t.label}
+            </text>
           </g>
         ))}
         <line x1="0" x2={W} y1={H - 14} y2={H - 14} stroke="var(--hair)" />

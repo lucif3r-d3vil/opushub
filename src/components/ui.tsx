@@ -12,10 +12,12 @@ export const STATUS_WORDS: Record<string, string> = {
 };
 
 export function StatusDot({ state, title }: { state: string; title?: string }) {
+  // note: `absent` (not `unavailable`) — the bare class name would collide with the
+  // `.unavailable` provider-note box and the dot would inherit its padding/border.
   const cls = ['up', 'operational'].includes(state) ? 'up'
     : ['down', 'error', 'attention', 'fail'].includes(state) ? 'down'
       : ['unhealthy', 'degraded', 'restarting', 'partial'].includes(state) ? 'unhealthy'
-        : state === 'unavailable' ? 'unavailable' : 'unmanaged';
+        : state === 'unavailable' ? 'absent' : 'unmanaged';
   return <span className={`status-dot ${cls}`} role="img" aria-label={title || STATUS_WORDS[state] || state} title={title} />;
 }
 
@@ -28,17 +30,21 @@ export function StatusLine({ state, note, className = '' }: { state: string; not
   );
 }
 
-/** The single honest "there is no data" surface: what's missing, why, and how to fix it. */
+/** The single honest "there is no data" surface: what's missing, why, and how to fix it.
+ *  Quiet by design — absence is not an error; only real failures get the dashed alert box.
+ *  Technical detail (socket paths, fetch errors) tucks under a Details disclosure. */
 export function ProviderNote({
-  status, reason, fixHref, fixLabel = 'Configure →', compact = false,
-}: { status: ProviderStatus | string; reason?: string | null; fixHref?: string; fixLabel?: string; compact?: boolean }) {
+  status, reason, fixHref, fixLabel = 'Configure →', compact = false, details,
+}: { status: ProviderStatus | string; reason?: string | null; fixHref?: string; fixLabel?: string; compact?: boolean; details?: string | null }) {
+  const alert = status === 'error' || status === 'partial';
   return (
-    <div className="unavailable" style={compact ? { padding: '10px 12px' } : undefined}>
+    <div className={`unavailable${alert ? ' alert' : ''}${compact ? ' compact' : ''}`} role={alert ? 'alert' : 'status'}>
       <span className="why">
         {status === 'unconfigured' ? 'Not set up yet.' : status === 'unavailable' ? 'Unavailable.' : status === 'partial' ? 'Partially available.' : status === 'error' ? 'Something failed.' : 'No data.'}
       </span>
-      {reason && <span style={{ opacity: 0.85 }}>{reason}</span>}
+      {reason && <span className="reason">{reason}</span>}
       {fixHref && <Link to={fixHref} className="act">{fixLabel}</Link>}
+      {details && <details className="tech"><summary>Details</summary><code>{details}</code></details>}
     </div>
   );
 }

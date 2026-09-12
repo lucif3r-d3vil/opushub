@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, usePolled } from '../lib/api';
-import { bytes, num, pct, relTime, timeOfDay, uptime } from '../lib/format';
+import { bytes, pct, relTime, uptime } from '../lib/format';
 import { useSettings } from '../lib/theme';
 import type { ActivityEvent, Stack, SystemSnapshot } from '../lib/types';
 import { Icon } from '../components/Icon';
 import { MeterBar } from '../components/Charts';
-import { OpenLink, ProviderNote, SectionHead, StatusLine } from '../components/ui';
+import { Freshness, OpenLink, ProviderNote, SectionHead, StatusLine, STATUS_WORDS } from '../components/ui';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
-import { humanEvent } from './Hub';
+import { humanEvent } from '../lib/events';
 
 interface Detail {
   service: {
@@ -99,7 +99,7 @@ export default function ServiceDetail() {
         <div>
           {/* runtime */}
           <section className="detail-block">
-            <SectionHead title="Runtime" right={data.dockerAvailable ? (sys.data ? <Fresh at={sys.fetchedAt} /> : undefined) : undefined} />
+            <SectionHead title="Runtime" right={data.dockerAvailable ? <Freshness at={sys.fetchedAt} /> : undefined} />
             {data.dockerAvailable ? (
               c ? (
                 <div className="stat-strip" style={{ gridAutoFlow: 'row', gridAutoColumns: 'auto' }}>
@@ -137,7 +137,7 @@ export default function ServiceDetail() {
           {/* config-level facts */}
           {s.meta.length > 0 && (
             <section className="detail-block">
-              <SectionHead title="Notes" />
+              <SectionHead title="About" />
               <dl className="kv">
                 {s.meta.map((m, i) => <Pair key={i} k={m.label} v={m.value} />)}
               </dl>
@@ -241,7 +241,7 @@ export default function ServiceDetail() {
                 <Icon ref={data.stack.icon} name={data.stack.name} size={30} />
                 <div>
                   <div style={{ fontWeight: 600 }}>{data.stack.name}</div>
-                  <div className="stale-note">{data.stack.members.length} members · {data.stack.status}</div>
+                  <div className="stale-note">{data.stack.members.length} member{data.stack.members.length === 1 ? '' : 's'} · {STATUS_WORDS[data.stack.status] || data.stack.status}</div>
                 </div>
               </Link>
             </section>
@@ -253,7 +253,7 @@ export default function ServiceDetail() {
               <Pair k="Group" v={s.group} />
               <Pair k="Software" v={s.app || '—'} />
               {s.keywords.length > 0 && <Pair k="Keywords" v={s.keywords.join(', ')} />}
-              <Pair k="Status source" v={data.dockerAvailable ? 'Docker engine' : 'unavailable'} />
+              <Pair k="Status source" v={data.dockerAvailable ? 'Docker engine (live)' : 'Docker not connected'} />
             </dl>
           </section>
         </div>
@@ -266,7 +266,3 @@ export default function ServiceDetail() {
 function Pair({ k, v }: { k: string; v: React.ReactNode }) {
   return (<><dt>{k}</dt><dd>{v}</dd></>);
 }
-function Fresh({ at }: { at: number | null }) {
-  return at ? <span className="stale-note">polled {timeOfDay(at)} · every 10s{''}</span> : null;
-}
-void num;

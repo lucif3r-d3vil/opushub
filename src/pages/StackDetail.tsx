@@ -8,7 +8,7 @@ import { Icon } from '../components/Icon';
 import { MeterBar } from '../components/Charts';
 import { PageHero, ProviderNote, SectionHead, StatusLine } from '../components/ui';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
-import { humanEvent } from './Hub';
+import { humanEvent } from '../lib/events';
 
 interface StackDetailDoc {
   name: string; description: string | null; icon: string | null; notes: string | null; compose: string | null;
@@ -83,7 +83,7 @@ export default function StackDetailPage() {
       </div>
 
       {data.notes && (
-        <p style={{ maxWidth: 64, color: 'var(--ink-2)', fontStyle: 'italic', fontFamily: 'var(--font-display)', fontSize: 16, margin: '0 0 var(--sp-8)' }}>
+        <p style={{ maxWidth: 640, color: 'var(--ink-2)', fontStyle: 'italic', fontFamily: 'var(--font-display)', fontSize: 16, lineHeight: 1.5, margin: '0 0 var(--sp-8)' }}>
           “{data.notes}”
         </p>
       )}
@@ -102,7 +102,9 @@ export default function StackDetailPage() {
               <div className="member-row">
                 <Icon ref={m.icon} name={m.service} size={22} plain />
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 590 }}>{m.service}</div>
+                  {m.group
+                    ? <Link to={`/services/${encodeURIComponent(m.group)}/${encodeURIComponent(m.service)}`} style={{ fontWeight: 590, display: 'inline-block' }}>{m.service}</Link>
+                    : <div style={{ fontWeight: 590 }}>{m.service}</div>}
                   <div className="stale-note">{m.container ? `${m.container.name} · ${m.container.id}` : 'no container linked'}</div>
                 </div>
                 <div className="member-state image-col">{m.container?.image || '—'}</div>
@@ -114,7 +116,7 @@ export default function StackDetailPage() {
                   </button>}
                 </div>
               </div>
-              {(m.ports?.length || m.mounts?.length || m.networks?.length) && (
+              {!!(m.ports?.length || m.mounts?.length || m.networks?.length) && (
                 <dl className="kv" style={{ padding: '2px 0 var(--sp-4) 42px', gridTemplateColumns: '110px minmax(0,1fr)' }}>
                   {!!m.ports?.length && <><dt>Ports</dt><dd>{m.ports!.map((p, i) => <div className="port-row" key={i}><span>{p.host === '0.0.0.0' ? 'all' : p.host}:{p.hostPort}</span><span className="port-arrow">→</span><span>{p.private}</span></div>)}</dd></>}
                   {!!m.networks?.length && <><dt>Networks</dt><dd>{m.networks!.map((n) => <div className="port-row" key={n.name}><span>{n.name}</span><span className="port-arrow">·</span><span className="mono-meta">{n.ip}</span></div>)}</dd></>}
@@ -129,7 +131,7 @@ export default function StackDetailPage() {
       <div className="detail-grid">
         <div>
           <section className="detail-block">
-            <SectionHead title="Resources" right={data.live && totals.hasAny ? <span className="stale-note">sampled at container stats API, every {settings?.behavior?.refresh?.services ?? 30}s</span> : undefined} />
+            <SectionHead title="Resources" right={data.live && totals.hasAny ? <span className="stale-note">from the engine, every {settings?.behavior?.refresh?.services ?? 30}s</span> : undefined} />
             {data.members.some((m) => m.stats) ? (
               <div>
                 {data.members.filter((m) => m.stats).map((m) => (
@@ -150,7 +152,7 @@ export default function StackDetailPage() {
                 ))}
               </div>
             ) : (
-              <ProviderNote compact status={data.live ? 'unavailable' : 'unconfigured'} reason={data.live ? 'Container stats are not available from this engine.' : 'Connect Docker to see live resource use.'} />
+              <ProviderNote compact status={data.live ? 'unavailable' : 'unconfigured'} reason={data.live ? 'The engine here does not expose container stats.' : 'Connect Docker to see live resource use.'} fixHref={data.live ? undefined : '/settings/system'} fixLabel="Configure Docker →" />
             )}
           </section>
 

@@ -66,7 +66,9 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('x-frame-options', 'DENY');
   res.setHeader('content-security-policy', [
     "default-src 'self'",
-    "script-src 'self'",
+    // 'sha256-…' is the hash of the small pre-hydration theme script in index.html —
+    // if that script changes, recompute: node -e "…" (see docs/03-design-system.md)
+    "script-src 'self' 'sha256-wV7KrfbxQ7GQ61LOA7WeOy66fhFZ28qCHefeeuHPRDY='",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https: http:",
     "font-src 'self'",

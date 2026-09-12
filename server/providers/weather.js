@@ -35,7 +35,7 @@ async function geocode(city) {
 
 export async function getWeather(cfg) {
   if (!cfg || (!cfg.location && !(cfg.latitude != null && cfg.longitude != null))) {
-    return { status: 'unconfigured', reason: 'No location configured — set one in Settings → Integrations.' };
+    return { status: 'unconfigured', reason: 'No location configured.' };
   }
   const key = `wx:${cfg.location || `${cfg.latitude},${cfg.longitude}`}`;
   const hit = cache.get(key);

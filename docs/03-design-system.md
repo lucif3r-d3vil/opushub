@@ -1,8 +1,59 @@
-# OpusHub — Design system (V1)
+# OpusHub — Design system (V1.1)
 
 One sentence: *a private digital home, not an admin panel.* The interface should feel like a place
 someone visited — an editorial homepage for your infrastructure — rather than a grid of floating
 cards generated to fill space.
+
+## V1.1 decisions (Phase 1 visual/product review, 2026-09-12)
+
+Reviewed every route in light + dark at 1440/1024/768/390 and fixed the deviations found. New
+rules and their rationale:
+
+- **Status dot states are `status-dot.<state>` compound classes; the "absent" state is
+  `.status-dot.absent`.** The old `unavailable` state class collided with the `.unavailable`
+  provider-note box and every absent dot rendered as a 34px dashed rounded square. Any future
+  class added to a status dot must never equal a standalone class used elsewhere in the
+  vocabulary.
+- **Absence is quiet; only failure is boxed.** `.unavailable` no longer has a dashed border or
+  padding — an unconfigured/unavailable provider is a short sentence ("Not set up yet." /
+  "Unavailable."), a one-line reason, and an accent "Configure →" link. The dashed border is
+  reserved for `.unavailable.alert` (real errors, e.g. unreadable config entries) and for the
+  "Collecting samples…" chart placeholder. Raw technical detail (socket paths, fetch errors)
+  goes under a `Details` disclosure, never in the main sentence.
+- **Docker-off copy is one human sentence + a fix.** "Docker isn't connected. OpusHub can't see
+  containers, so live status, stats and logs stay off." + "Configure Docker →" (Settings →
+  System). The exact probe failure text (env vars, socket path) is available under Details.
+  Pages must not dump raw provider reasons in footers — the Stacks list footer now just says
+  "updated X".
+- **Timeline markers: one glyph on the rule per event.** The type glyph renders in a 22px
+  circular chip centered on the vertical rule (the chip's background masks the line); the old
+  plain dot is gone. Absolute + relative time sit in a single right-aligned tabular group
+  ("7:14 AM · 19 min ago"). Filter chips use a real `.chip.active` state class, not inline
+  style duplication.
+- **System KV lists are two-column** (label left 130px secondary / value right-aligned,
+  tabular) — the old markup (dt/dd) and CSS (`.r/.k/.v`) disagreed and rendered as a stacked
+  text pile. `sys-kv` now styles dt/dd directly.
+- **Chart tick labels anchor inside the frame** (`text-anchor: start` first, `end` last) so the
+  first/last time labels never clip at the SVG edge.
+- **Row actions on mobile get their own line** (`.svc-row .row-actions { grid-column: 1/-1;
+  justify-content: flex-end }` under 860px) instead of wrapping mid-row.
+- **ISO week is real.** Hub's "week N" uses the standard ISO 8601 algorithm (Thursday-anchored
+  week 1); the previous approximation was off by one for most of the year.
+- **Icon resolution: `hidden` (deprecated-but-present) bundled icons still resolve.** A user who
+  asked for `lucide:waves` gets it; search ranking may still prefer the successor icon.
+- **Route lookups are case-insensitive** (`/services/media/stream` ≡ `/services/Media/Stream`)
+  on the server; canonical casing still drives config files and in-app links.
+- **CSP: the pre-hydration theme script in index.html is allowlisted by sha256 hash**
+  (`script-src 'self' 'sha256-…'`). If that inline script changes, recompute the hash and update
+  `server/index.js` — otherwise the browser blocks it and saved-theme flash returns.
+- **Service detail receives the full stack projection** (`members`, `status`, `containerCount`)
+  from the API — the previous raw shape crashed the page (`members` undefined) for any service
+  in a stack. Stack detail member names link to their service page (Stack → Services
+  relationship, per the composition brief).
+- **Component hygiene:** `humanEvent` wording lives in `src/lib/events.ts` (not exported from a
+  page); no page renders a literal `0` from a `(count || …) && <el>` expression — use
+  boolean guards (`!!(…)`); `ServiceDetail` reports freshness through the shared `Freshness`
+  component instead of a hardcoded "every 10s" string.
 
 ## Anti-goals (hard rules)
 

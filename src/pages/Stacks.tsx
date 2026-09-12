@@ -68,9 +68,7 @@ export default function StacksPage() {
         ))}
       </ul>
       {stacks.length > 0 && (
-        <p className="stale-note" style={{ marginTop: 'var(--sp-6)' }}>
-          updated {relTime(fetchedAt || Date.now())}{data?.statusReason ? ` · ${data.statusReason}` : ''}
-        </p>
+        <p className="stale-note" style={{ marginTop: 'var(--sp-6)' }}>updated {relTime(fetchedAt || Date.now())}</p>
       )}
     </>
   );
