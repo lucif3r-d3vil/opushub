@@ -1,0 +1,38 @@
+# Fixture for model.test.js: a *presentation overlay* over the mock engine's containers.
+# Every entry here binds to a real fixture container — except the deliberate ghosts, which the
+# test asserts are reported as unmatched instead of rendered.
+groups:
+  - name: Media
+    description: Streams, requests, the fun bits
+    icon: lucide:clapperboard
+    order: 1
+    services:
+      - container: jellyfin
+        displayName: Stream
+        description: Movies and TV, streamed anywhere in the house
+        icon: si:jellyfin
+        keywords: [movies, tv]
+        meta:
+          - { label: Library, value: 1.2 TB on disk }
+      - name: seerr
+        displayName: Requests
+        group: Media
+        url: https://requests.example.org
+      - container: paperless
+        displayName: Paperless
+        group: Documents
+        hidden: true
+      - container: ghost-app
+        displayName: Ghost
+        description: this container does not exist — asserting it never renders
+      - container: postgres
+        displayName: Main Database
+        group: Ops
+        icon: si:postgresql
+  - name: Ops
+    description: Rails and janitors
+    order: 2
+    services:
+      - container: watchtower
+        displayName: Watchtower
+        showOnHub: false

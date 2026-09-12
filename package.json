@@ -2,9 +2,11 @@
   "name": "opushub",
   "version": "0.1.0",
   "private": true,
-  "description": "OpusHub — the interactive control center of the OpusGrid homelab.",
+  "description": "OpusHub \u2014 the interactive control center of the OpusGrid homelab.",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "vite build",
     "start": "node server/index.js",
@@ -12,7 +14,7 @@
     "dev:web": "vite build --watch",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build",
-    "test": "node --test server/*.test.js server/providers/*.test.js",
+    "test": "node --test server/*.test.js server/providers/*.test.js test/*.test.js",
     "mock-engine": "node test/mock-engine.js /tmp/opushub-mock-docker.sock"
   },
   "dependencies": {

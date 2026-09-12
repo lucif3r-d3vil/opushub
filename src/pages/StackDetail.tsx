@@ -11,10 +11,11 @@ import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
 
 interface StackDetailDoc {
-  name: string; description: string | null; icon: string | null; notes: string | null; compose: string | null;
-  status: string; statusReason: string | null; live: boolean; source: 'configured' | 'discovered';
+  id: string; project: string | null; name: string; displayName: string; description: string | null; icon: string | null; notes: string | null; compose: string | null;
+  status: string; statusReason: string | null; live: boolean; source: 'configured' | 'discovered'; configured: boolean;
+  containerCount: number; runningCount: number;
   members: {
-    service: string; icon: string | null; group: string | null; href: string | null; discovered?: boolean;
+    service: string; containerName: string; icon: string | null; group: string | null; url: string | null; urlSource: string; kind: string; route: string | null; configured: boolean;
     container: { name: string; id: string; state: string; status: string; health: string | null; image: string } | null;
     stats?: { cpu: number | null; memory: { used: number | null; limit: number | null }; net: { rx: number; tx: number }; blockIo?: number | null } | null;
     ports?: { private: string; host: string; hostPort: string }[];
@@ -48,7 +49,12 @@ export default function StackDetailPage() {
   if (error && !data) return <ProviderNote status="error" reason={error} fixHref="/stacks" fixLabel="All stacks →" />;
   if (!data) return <ProviderNote status="error" reason="Stack not found." fixHref="/stacks" fixLabel="All stacks →" />;
 
-  const memberNames = new Set(data.members.map((m) => m.service).concat(data.members.map((m) => m.container?.name || '')));
+  const memberNames = new Set([
+    ...data.members.map((m) => m.service),
+    ...data.members.map((m) => m.container?.name || ''),
+    ...data.members.map((m) => m.containerName),
+    data.project || '',
+  ]);
   const related = (activity.data?.items || []).filter((e) => e.subject && memberNames.has(e.subject));
   const totals = data.members.reduce(
     (a, m) => ({
@@ -76,8 +82,8 @@ export default function StackDetailPage() {
           </div>
         </div>
         <div className="detail-actions">
-          {data.members.filter((m) => m.href).map((m) => (
-            <a key={m.service} className="btn" href={m.href!} target="_blank" rel="noreferrer">Open {m.service}</a>
+          {data.members.filter((m) => m.url).map((m) => (
+            <a key={m.containerName} className="btn" href={m.url!} target="_blank" rel="noreferrer" title={`${m.url} · ${m.urlSource}`}>Open {m.service}</a>
           ))}
           {data.live && (
             <button className="btn" onClick={() => setLogsFor(data.members.find((m) => m.container)?.container?.name || '')}>
@@ -96,7 +102,8 @@ export default function StackDetailPage() {
 
       {data.source === 'discovered' && (
         <p className="stale-note" style={{ margin: '-8px 0 var(--sp-8)' }}>
-          Discovered from compose labels on the engine — add a <span className="mono-meta">{data.name}</span> entry to stacks.yaml to name, describe and icon it.
+          Live because the engine reports these containers — nothing here invents it. Add a
+          {' '}<span className="mono-meta">project: {data.project || data.id}</span> entry to stacks.yaml to rename, describe and icon it.
         </p>
       )}
 
@@ -107,19 +114,25 @@ export default function StackDetailPage() {
       )}
 
       <section className="detail-block">
-        <SectionHead title="Containers" right={data.compose ? <span className="mono-meta">{data.compose}</span> : undefined} />
+        <SectionHead title="Containers" right={<span className="mono-meta">{data.project ? `${data.members.length} container(s) in project ${data.project}` : 'grouped by overlay'}</span>} />
         <ul style={{ listStyle: 'none' }}>
           {data.members.map((m) => (
-            <li key={m.service} style={{ borderTop: '1px solid var(--hair)' }}>
+            <li key={m.containerName} style={{ borderTop: '1px solid var(--hair)' }}>
               <div className="member-row">
                 <Icon ref={m.icon} name={m.service} size={22} plain />
                 <div style={{ minWidth: 0 }}>
-                  {m.group
-                    ? <Link to={`/services/${encodeURIComponent(m.group)}/${encodeURIComponent(m.service)}`} style={{ fontWeight: 590, display: 'inline-block' }}>{m.service}</Link>
+                  {m.group || m.containerName
+                    ? <Link to={`/services/${encodeURIComponent(m.group || 'Other')}/${encodeURIComponent(m.containerName)}`} style={{ fontWeight: 590, display: 'inline-block' }}>{m.service}</Link>
                     : <div style={{ fontWeight: 590 }}>{m.service}</div>}
-                  <div className="stale-note">{m.container ? `${m.container.name} · ${m.container.id}` : 'no container linked'}</div>
+                  <div className="stale-note">
+                    {m.container ? `${m.container.name} · ${m.container.id}` : 'no container linked'}
+                    {m.kind === 'infrastructure' ? ' · infrastructure' : ''}
+                  </div>
                 </div>
                 <div className="member-state image-col">{m.container?.image || '—'}</div>
+                {m.url
+                  ? <a className="mono-meta" href={m.url} target="_blank" rel="noreferrer" title={`url from ${m.urlSource}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 210, whiteSpace: 'nowrap' }}>{m.url.replace(/^https?:\/\//, '')}</a>
+                  : <span className="stale-note">no web endpoint</span>}
                 <StatusLine state={stateWord(m)} note={m.container?.status} />
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'flex-end', minWidth: 140 }}>
                   {m.stats ? <span className="mono-meta">{pct(m.stats.cpu, 0)} cpu · {bytes(m.stats.memory.used)}</span> : <span className="stale-note" />}
@@ -187,8 +200,8 @@ export default function StackDetailPage() {
           <section className="detail-block">
             <SectionHead title="Configuration" />
             <dl className="kv">
-              <div><dt>Source</dt><dd className="mono-meta">{data.source === 'discovered' ? 'auto-discovered from the engine' : 'stacks.yaml'}</dd></div>
-              <div><dt>Compose</dt><dd className="mono-meta" style={{ wordBreak: 'break-all' }}>{data.compose || 'not specified'}</dd></div>
+              <div><dt>Existence</dt><dd className="mono-meta">Docker · {data.project ? `compose project “${data.project}”` : 'containers matched by the overlay'}</dd></div>
+              <div><dt>Appearance</dt><dd className="mono-meta">{data.configured ? 'stacks.yaml overlay' : 'no overlay — defaults from discovery'}</dd></div>
               <div><dt>Members</dt><dd>{data.members.map((m) => m.service).join(', ') || '—'}</dd></div>
               <div><dt>Status source</dt><dd>{data.live ? 'Docker engine' : 'configuration only'}</dd></div>
               <div><dt>Checked</dt><dd className="mono-meta">{fetchedAt ? timeOfDay(fetchedAt) + ' · ' + num(data.members.filter((m) => m.container).length, 0) + ' linked' : '—'}</dd></div>

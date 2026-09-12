@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, usePolled } from '../lib/api';
 import { bytes, num, pct, relTime, uptime } from '../lib/format';
 import { useLayout, useSettings } from '../lib/theme';
-import type { ActivityEvent, LayoutDoc, NewsDoc, ServicesDoc, SystemSnapshot, WeatherDoc } from '../lib/types';
+import type { ActivityEvent, LayoutDoc, NewsDoc, Service, ServicesDoc, SystemSnapshot, WeatherDoc } from '../lib/types';
 import { Icon } from '../components/Icon';
 import SetupBanner from '../components/SetupBanner';
 import { MeterBar, Sparkline } from '../components/Charts';
@@ -92,39 +92,38 @@ function OverviewStrip({ sys }: { sys: SystemSnapshot | null }) {
 }
 
 /* ---------------- service tile ---------------- */
-function ServiceTile({ svc, groupName, handle }: { svc: ServicesDoc['groups'][number]['services'][number]; groupName: string; handle?: ReactNode }) {
+function ServiceTile({ svc, groupName, handle }: { svc: Service; groupName: string; handle?: ReactNode }) {
   const { settings } = useSettings();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const detail = `/services/${encodeURIComponent(groupName)}/${encodeURIComponent(svc.name)}`;
   const launch = useCallback(() => {
-    if (!svc.href) return;
-    if (settings?.behavior?.logLaunches) {
-      void api(`/api/services/${encodeURIComponent(groupName)}/${encodeURIComponent(svc.name)}`, { method: 'POST' }).catch(() => undefined);
-    }
-    window.open(svc.href, '_blank', 'noreferrer');
-  }, [svc.href, svc.name, groupName, settings?.behavior?.logLaunches]);
+    if (!svc.url) return;
+    if (settings?.behavior?.logLaunches) void api(detail, { method: 'POST' }).catch(() => undefined);
+    window.open(svc.url, '_blank', 'noreferrer');
+  }, [svc.url, detail, settings?.behavior?.logLaunches]);
   const items: MenuItem[] = [
-    ...(svc.href ? [{ label: 'Open in new tab', action: launch } as MenuItem] : []),
-    { label: 'Service details', href: `/services/${encodeURIComponent(groupName)}/${encodeURIComponent(svc.name)}` },
-    ...(svc.href ? [{ label: 'Copy URL', action: () => void navigator.clipboard?.writeText(svc.href || '').catch(() => undefined) } as MenuItem] : []),
+    ...(svc.url ? [{ label: 'Open in new tab', action: launch } as MenuItem] : []),
+    { label: 'Service details', href: detail },
+    ...(svc.url ? [{ label: 'Copy URL', action: () => void navigator.clipboard?.writeText(svc.url || '').catch(() => undefined) } as MenuItem] : []),
   ];
   return (
     <article className="svc-tile" onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}>
       <div className="tile-top">
-        <Icon ref={svc.icon} name={svc.name} size={30} />
+        <Icon ref={svc.icon} name={svc.displayName} size={30} />
         <span className="tile-top-right">
-          <StatusDot state={svc.status || 'unavailable'} title={svc.statusReason || undefined} />
+          <StatusDot state={svc.status || 'unavailable'} title={svc.statusReason || svc.urlNote || undefined} />
           {handle}
         </span>
       </div>
       <div style={{ marginTop: 'auto' }}>
-        <Link to={`/services/${encodeURIComponent(groupName)}/${encodeURIComponent(svc.name)}`} className="tile-name" style={{ display: 'block' }}>{svc.name}</Link>
+        <Link to={detail} className="tile-name" style={{ display: 'block' }}>{svc.displayName}</Link>
         {(svc.app || svc.description) && (
           <div className="tile-app" title={svc.description || undefined}>{svc.app}{svc.app && svc.description ? ' — ' : ''}{svc.description}</div>
         )}
       </div>
       <div className="tile-actions">
-        {svc.href && (
-          <button className="icon-btn accent-on-hover" title="Open in new tab" aria-label={`Open ${svc.name}`} onClick={launch}>
+        {svc.url && (
+          <button className="icon-btn accent-on-hover" title={`Open ${svc.url}`} aria-label={`Open ${svc.displayName}`} onClick={launch}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
         )}
@@ -139,7 +138,7 @@ function HubGroup({ g, handle }: { g: ServicesDoc['groups'][number]; handle: Rea
   const { layout, setLayout } = useLayout();
   const saved = layout?.services?.order?.[g.name];
   const ids = useMemo(() => {
-    const names = g.services.map((s) => s.name);
+    const names = g.services.filter((s) => s.showOnHub !== false).map((s) => s.name);
     if (!saved) return names;
     const ordered = saved.filter((n) => names.includes(n));
     return [...ordered, ...names.filter((n) => !ordered.includes(n))];
@@ -174,7 +173,14 @@ function HubServices({ data }: { data: ServicesDoc | null }) {
   }, [groups, layout?.services?.groupOrder]);
   const byName = useMemo(() => new Map(groups.map((g) => [g.name, g])), [groups]);
   if (!groups.length) {
-    return <ProviderNote status="unconfigured" reason="No services configured yet." fixHref="/settings/services" fixLabel="Add services →" />;
+    return (
+      <ProviderNote
+        status="unconfigured"
+        reason="Nothing to launch yet — the Hub lists whatever this Docker engine is running, so it fills itself in as containers appear."
+        fixHref="/settings/system"
+        fixLabel="Discovery status →"
+      />
+    );
   }
   return (
     <Sortable
@@ -468,7 +474,7 @@ export default function Hub() {
             <StatusDot state={svcQ.data?.live ? 'up' : 'unavailable'} title={svcQ.data?.statusReason || undefined} />
             <span>
               {svcQ.data
-                ? `${svcQ.data.groups.reduce((a, g) => a + g.services.length, 0)} services · ${svcQ.data.live ? 'status live' : 'status unavailable'}`
+                ? `${svcQ.data.groups.reduce((a, g) => a + g.services.length, 0)} services · ${svcQ.data.live ? `discovered from docker · ${svcQ.data.stats?.withUrl ?? 0} reachable` : 'docker not connected'}`
                 : sysQ.error ? 'host metrics unreachable' : 'reading host…'}
             </span>
             <span>·</span>

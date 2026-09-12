@@ -1,0 +1,15 @@
+# Stacks fixture: renames and annotates real compose projects, and carries one ghost.
+stacks:
+  - name: Media
+    description: Streaming and requests
+    icon: lucide:clapperboard
+    notes: Transcodes run on the iGPU — keep an eye on /mnt/library.
+    services: [jellyfin, seerr, radarr]
+
+  - project: photos
+    displayName: Photos
+    description: Immich and its rails
+
+  - project: finance
+    displayName: Finance
+    notes: nothing runs this project — it must not appear as a stack

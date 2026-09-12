@@ -82,7 +82,7 @@ test('listContainers projects the safe shape for every fixture', async () => {
   }
   const byName = new Map(list.map((c) => [c.name, c]));
   assert.equal(byName.get('jellyfin').state, 'running');
-  assert.equal(byName.get('jellyfin').labels.project, 'media');
+  assert.equal(byName.get('jellyfin').labels.project, 'opustream');
   assert.equal(byName.get('jellyfin').labels.service, 'jellyfin');
   assert.equal(byName.get('paperless').state, 'exited');
   assert.equal(byName.get('home-assistant').state, 'paused');
@@ -215,7 +215,31 @@ test('imagesSummary and systemDf degrade gracefully', async () => {
 test('groupByProject separates compose stacks from standalone', async () => {
   const list = await docker.listContainers({ all: true });
   const { projects, standalone } = docker.groupByProject(list);
-  assert.deepEqual([...projects.keys()].sort(), ['cloud', 'home', 'media', 'observability', 'photos', 'secure']);
-  assert.equal(projects.get('media').length, 3);
-  assert.deepEqual(standalone.map((c) => c.name).sort(), ['nightly-backup-runner-with-a-remarkably-long-name', 'traefik']);
+  assert.deepEqual([...projects.keys()].sort(), ['cloud', 'home', 'observability', 'opustream', 'photos', 'secure', 'update']);
+  assert.equal(projects.get('opustream').length, 8);
+  assert.deepEqual(standalone.map((c) => c.name).sort(), ['nightly-backup-runner-with-a-remarkably-long-name', 'opushub', 'traefik']);
+});
+
+test('listContainers keeps raw labels server-side unless explicitly asked for them', async () => {
+  const safe = await docker.listContainers({ all: true });
+  assert.ok(safe.every((c) => !('rawLabels' in c)), 'the default projection must not carry the label map');
+  assert.deepEqual(safe.find((c) => c.name === 'seerr').labels, { project: 'opustream', service: 'seerr' });
+  const withLabels = await docker.listContainers({ all: true, withLabels: true });
+  const seer = withLabels.find((c) => c.name === 'seerr');
+  assert.equal(seer.rawLabels['traefik.http.routers.seerr.tls.certresolver'], 'letsencrypt');
+});
+
+test('engineInfo projects version + counters only (no /info internals)', async () => {
+  const info = await docker.engineInfo();
+  assert.equal(info.version, '26.1.0-mock');
+  assert.equal(info.apiVersion, '1.43');
+  assert.equal(info.containers, FIXTURES.length);
+  assert.equal(info.running, FIXTURES.filter((f) => f.State === 'running').length);
+  const blob = JSON.stringify(info);
+  // what /info holds that nobody outside the server should see: host paths, registry mirrors,
+  // proxies, resource totals, security options. The storage driver name is fine to show.
+  assert.equal(info.driver, 'overlay2', 'the driver name is a useful, harmless diagnostic');
+  for (const forbidden of ['registry-mock', 'proxy-mock', 'var/lib/docker', 'ServerVersion', 'MemTotal', 'NCPU', 'DockerRootDir', 'SecurityOptions', 'CgroupDriver', 'userns']) {
+    assert.ok(!blob.includes(forbidden), `${forbidden} must not be projected`);
+  }
 });

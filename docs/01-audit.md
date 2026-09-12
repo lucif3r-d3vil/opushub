@@ -143,3 +143,40 @@ what that environment actually is, because several Phase 2 assumptions do not ho
 5. **`.env` discovery was validated for real** by placing and then removing a `config/.env`:
    `GET /api/health` reported FOUND with the file path and key *names*; a full-response scan of
    every endpoint confirmed no secret *value* leaks.
+
+# Phase 3 — discovery audit (2026-09-12)
+
+Re-audited the *model* rather than the machine, because the machine is unchanged: still no Docker
+CLI, no socket, no Engine (`apt` and `download.docker.com` blocked — see Phase 2). Concretely
+re-checked: `ls /var/run/docker.sock /run/docker.sock`, `which docker`, `ip addr` (only `lo` +
+`eth0` at `169.254.0.21/30`), `find / -name 'docker-compose*.y*ml'`. Nothing to inspect.
+
+## What the shipped config actually claimed
+
+`config/services.yaml` and `config/stacks.yaml` in this checkout described nine services
+(Stream, Requests, Wave, Photos, Drive, Vault, Metrics, Nest, Docs, Lens) and four stacks. Of
+those, zero exist on this host — and the app rendered all of them anyway, with `href` values
+pointed at `*.opusgrid.home.arpa` and `:5055`-style ports that nothing listens on. That is the
+failure this phase removes: **a config file was allowed to assert existence.**
+
+The second symptom was the duplicate row: a configured `Media/Seerr` and a discovered
+`opustream/seerr` are the same container presented as two entries, because the merge joined on
+`image.includes(name)`. Both defects are structural, not cosmetic, so the fix is the data model:
+Docker decides existence, and config only decorates.
+
+## How the replacement was validated without an Engine
+
+- `test/mock-engine.js` speaks the real HTTP-over-unix-socket protocol (24 fixtures: proxied
+  HTTP/HTTPS, a redirect router losing to its TLS twin, multi-host rules, `PathPrefix` with and
+  without `stripprefix`, `HostRegexp`, `traefik.enable=false`, `expose` without `published`,
+  loopback-only publishes, `created`/`paused`/`exited` states, rails, a container whose name is a
+  lie, and a long name that used to wrap badly). `OPUSHUB_MOCK_HIDE=name` deletes a container so
+  "it disappeared from the UI" is testable end-to-end rather than asserted in prose.
+- `scripts/opusgrid-inspect.sh` is the read-only tool that performs the inspection this sandbox
+  cannot: per container it prints state, image, compose labels, published vs exposed ports,
+  networks, the routing-relevant label set, which hostnames Traefik rules actually spell out — and
+  what OpusHub resolved from the same data. Run it on the real host before trusting any assumption
+  about how that installation is wired; if a machine encodes its hostnames somewhere else, that
+  script shows it in one screen, and the fix is a `url:` overlay entry, not a code change.
+- 130 tests (`npm test`) cover label grammar, every URL tier and refusal, the overlay join,
+  classification, the projection's security boundary, and the offline contract.

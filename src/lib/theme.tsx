@@ -122,6 +122,7 @@ const FALLBACK: SettingsDoc = {
   hub: { greetingName: null, clock24h: false, showSeconds: false },
   integrations: { news: { feeds: [] }, weather: { location: null, latitude: null, longitude: null, place: null, units: 'c' }, markets: { symbols: [] } },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
+  infrastructure: { hostAddress: null, entrypointPorts: {} },
   advanced: { customCss: false, customJs: false },
 };
 

@@ -1,6 +1,9 @@
 // Unified search: pages · services · stacks · bookmarks · settings · recent news.
+// Services and stacks come from the SAME canonical inventory the Hub, Services and Stacks pages
+// render — one model, so search can never offer something that isn't a container, or hide
+// something that is. (Bookmarks and pages are OpusHub's own surfaces, not infrastructure.)
 // A lightweight scoring pass — the client adds its own instant fuzzy layer on top.
-import { readServices, readStacks, readBookmarks } from './model.js';
+import { readBookmarks, getInventory } from './model.js';
 
 const PAGES = [
   { title: 'Hub', href: '/', hint: 'Your digital home', kind: 'page' },
@@ -31,46 +34,46 @@ function score(needle, ...fields) {
   return best;
 }
 
-export function searchAll(q, { newsItems = [] } = {}) {
+export async function searchAll(q, { newsItems = [] } = {}) {
   const needle = String(q || '').toLowerCase().trim();
   const out = [];
-  const add = (group, item, s) => { if (s > 8) out.push({ ...item, _s: s }); };
+  const add = (item, s, weight = 1) => { if (s > 8) out.push({ ...item, _s: s * weight }); };
 
-  for (const p of PAGES) add('Pages', { title: p.title, subtitle: p.hint, href: p.href, kind: 'page' }, score(needle, p.title, p.hint));
+  for (const p of PAGES) add({ title: p.title, subtitle: p.hint, href: p.href, kind: 'page' }, score(needle, p.title, p.hint));
 
-  try {
-    const { groups } = readServices();
-    for (const g of groups) {
-      for (const s of g.services) {
-        add('Services', {
-          title: s.name, subtitle: [s.app, g.name].filter(Boolean).join(' · '),
-          href: `/services/${encodeURIComponent(g.name)}/${encodeURIComponent(s.name)}`,
-          kind: 'service', group: g.name, icon: s.icon, status: s.status || null,
-        }, score(needle, s.name, s.app, s.description, ...s.keywords, g.name));
-      }
+  // the one canonical inventory: containers, their resolved URLs, and their presentation overlay
+  let inv = null;
+  try { inv = await getInventory(); } catch { /* discovery failed — search still answers with pages/bookmarks */ }
+
+  if (inv) {
+    for (const s of inv.services) {
+      if (s.hidden) continue;
+      add({
+        title: s.displayName,
+        subtitle: [s.kind === 'infrastructure' ? 'infrastructure' : s.group, s.container.state === 'running' ? 'running' : s.container.state].filter(Boolean).join(' · '),
+        href: `/services/${encodeURIComponent(s.group || 'Other')}/${encodeURIComponent(s.name)}`,
+        kind: 'service', group: s.group, icon: s.icon, status: s.status, url: s.url,
+      }, score(needle, s.displayName, s.name, s.container.composeService, s.container.image, s.description, s.app, ...(s.keywords || []), s.group));
     }
-  } catch { /* config broken — search degrades, page still loads */ }
-
-  try {
-    const { stacks } = readStacks();
-    for (const st of stacks) {
-      add('Stacks', {
-        title: st.name, subtitle: (st.services || []).slice(0, 4).join(', ') || 'stack',
-        href: `/stacks/${encodeURIComponent(st.name)}`, kind: 'stack', icon: st.icon,
-      }, score(needle, st.name, st.description, ...(st.services || [])));
+    for (const st of inv.stacks) {
+      add({
+        title: st.name,
+        subtitle: [st.project ? `compose · ${st.project}` : 'stack', `${st.containerCount} container${st.containerCount === 1 ? '' : 's'}`].join(' · '),
+        href: `/stacks/${encodeURIComponent(st.id)}`,
+        kind: 'stack', icon: st.icon, status: st.status,
+      }, score(needle, st.name, st.displayName, st.project, st.description, ...st.services));
     }
-  } catch { /* ok */ }
+  }
 
   try {
     const { flat } = readBookmarks();
     for (const b of flat) {
-      add('Bookmarks', { title: b.name, subtitle: b.group, href: b.href, kind: 'bookmark' }, score(needle, b.name, b.description, b.group));
+      add({ title: b.name, subtitle: b.group, href: b.href, kind: 'bookmark' }, score(needle, b.name, b.description, b.group));
     }
   } catch { /* ok */ }
 
   for (const n of newsItems.slice(0, 120)) {
-    const s = score(needle, n.title, n.source);
-    if (s > 8) out.push({ title: n.title, subtitle: `News · ${n.source || ''}`.trim(), href: n.link, kind: 'news', external: true, _s: s * 0.8 });
+    add({ title: n.title, subtitle: `News · ${n.source || ''}`.trim(), href: n.link, kind: 'news', external: true }, score(needle, n.title, n.source), 0.8);
   }
 
   return out.sort((a, b) => b._s - a._s).slice(0, 24).map(({ _s, ...item }) => item);

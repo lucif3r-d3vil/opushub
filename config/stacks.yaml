@@ -1,39 +1,28 @@
-# OpusHub — stacks
-# A stack is a group of related services/containers that live and die together.
-# `services` reference names in services.yaml. Infra containers that aren't "services"
-# (databases, caches, proxies) are discovered automatically from compose labels when
-# Docker is connected — nothing is invented here.
+# OpusHub — stack overlay (optional)
+#
+# A stack is a compose project. Docker decides which containers belong to it — from
+# `com.docker.compose.project` (plus `.service`, `.container-number`, `.project.working_dir`) —
+# and containers with no project label surface as standalone. Nothing here can create, add to,
+# or remove a stack; this file only renames and annotates the ones the engine reports.
+#
+# Per entry:
+#   project      the com.docker.compose.project value this overlay describes  ← the binding key
+#   name         entry label; also matched as a project name (and, for entries with no
+#                `project:`, treated as the friendly name of the project its members live in)
+#   displayName  friendly name shown in the UI (default: humanized project name)
+#   description  one line
+#   icon         lucide:*/mdi:*/si:*, an http(s) URL, /user/icons/<file>, or an emoji
+#   notes        shown on the stack page
+#   services     LEGACY. Membership is decided by Docker now, so this list is only used to bind
+#                an overlay to a project when no `project:` key is set; it cannot add members.
+#
+# Example — a compose project called `opustream` that you want called Media:
+#
+# stacks:
+#   - project: opustream
+#     displayName: Media
+#     description: Streaming and requests
+#     icon: lucide:clapperboard
+#     notes: Transcodes run on the iGPU; keep an eye on the library volume.
 
-stacks:
-  - name: Media
-    description: Streaming and requests
-    icon: lucide:clapperboard
-    services: [Stream, Seerr, Wave]
-    compose: /opt/opusgrid/stacks/media/docker-compose.yaml
-    notes: Transcodes run on the iGPU; keep an eye on the library volume.
-
-  - name: Photos
-    description: Lens and its rails
-    icon: mdi:image-outline
-    services: [Lens]
-    compose: /opt/opusgrid/stacks/photos/docker-compose.yaml
-    notes: Postgres + redis + ml are managed inside the stack, not as services.
-
-  - name: Cloud
-    description: Files and paper
-    icon: lucide:folder-open
-    services: [Drive, Docs]
-    compose: /opt/opusgrid/stacks/cloud/docker-compose.yaml
-
-  - name: Secure
-    description: The perimeter
-    icon: lucide:shield-check
-    services: [Vault]
-    compose: /opt/opusgrid/stacks/secure/docker-compose.yaml
-    notes: The only stack exposed through the reverse proxy with real TLS.
-
-  - name: Home
-    description: Sensors and automations
-    icon: lucide:house
-    services: [Nest]
-    compose: /opt/opusgrid/stacks/home/docker-compose.yaml
+stacks: []

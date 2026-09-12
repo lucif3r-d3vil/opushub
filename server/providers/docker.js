@@ -138,11 +138,18 @@ export function redactCommand(cmd) {
   return out;
 }
 
-export async function listContainers({ all = true } = {}) {
+/**
+ * @param withLabels include the FULL label map as `rawLabels` — for server-side discovery only
+ * (Traefik/compose parsing). It must never be serialized to a response: labels are arbitrary
+ * user data and people do put tokens in them. Callers that project for the browser leave this
+ * off, and `discovery.js` re-projects through `curatedLabels()` before anything reaches an API.
+ */
+export async function listContainers({ all = true, withLabels = false } = {}) {
   const list = await requestJson(`/containers/json?all=${all ? 'true' : 'false'}`);
   return list.map((c) => {
     const cfg = c.Labels || {};
     return {
+      ...(withLabels ? { rawLabels: cfg } : {}),
       id: String(c.Id).slice(0, 12),
       name: (c.Names?.[0] || '').replace(/^\//, ''),
       image: c.Image,
@@ -298,6 +305,29 @@ export async function events({ sinceSec } = {}) {
       } catch { return null; }
     }).filter(Boolean);
   } catch { return []; }
+}
+
+/** Engine facts safe enough for the browser: version + container counters. `/info` carries
+// registry mirrors, daemon labels, proxy config and paths — none of it is projected. */
+export async function engineInfo() {
+  const out = {};
+  try {
+    const v = await requestJson('/version', { timeoutMs: 4000 });
+    out.version = v.Version || null;
+    out.apiVersion = v.ApiVersion || null;
+    out.os = v.Os || null;
+    out.arch = v.Arch || null;
+  } catch { /* partial */ }
+  try {
+    const info = await requestJson('/info', { timeoutMs: 5000 });
+    out.containers = Number.isFinite(info.Containers) ? info.Containers : null;
+    out.running = Number.isFinite(info.ContainersRunning) ? info.ContainersRunning : null;
+    out.paused = Number.isFinite(info.ContainersPaused) ? info.ContainersPaused : null;
+    out.stopped = Number.isFinite(info.ContainersStopped) ? info.ContainersStopped : null;
+    out.driver = info.Driver || null;
+  } catch { /* older/limited daemons */ }
+  if (!Object.keys(out).length) throw new Error('engine info unavailable');
+  return out;
 }
 
 export async function imagesSummary() {

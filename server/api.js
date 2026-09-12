@@ -83,6 +83,7 @@ export async function handleApi(req, res, url) {
   if (route === 'PUT /api/settings') {
     const patch = await jsonBody();
     const next = model.putSettings(patch);
+    model.invalidateDiscovery(); // infrastructure.* changes how URLs are resolved
     logEvent({ source: 'config', type: 'settings.updated', subject: 'settings.yaml', message: summarizeSettingsPatch(patch) });
     return send(res, 200, next);
   }
@@ -99,38 +100,52 @@ export async function handleApi(req, res, url) {
     return send(res, 200, next);
   }
 
-  // ---------- services & stacks ----------
-  if (route === 'GET /api/services') return send(res, 200, await model.getServicesWithStatus());
+  // ---------- services & stacks (both read the one canonical inventory) ----------
+  if (route === 'GET /api/services') return send(res, 200, await model.getServicesView());
   if (route === 'PUT /api/services') {
     const patch = await jsonBody();
     const next = model.writeServices(patch);
     const n = next.groups.reduce((a, g) => a + g.services.length, 0);
-    logEvent({ source: 'config', type: 'services.updated', subject: 'services.yaml', message: `updated ${next.groups.length} group(s), ${n} service(s)` });
-    return send(res, 200, await model.getServicesWithStatus());
+    model.invalidateDiscovery();
+    logEvent({ source: 'config', type: 'services.updated', subject: 'services.yaml', message: `updated ${next.groups.length} group(s), ${n} overlay entr${n === 1 ? 'y' : 'ies'}` });
+    return send(res, 200, await model.getServicesView());
   }
   const svcMatch = p.match(/^\/api\/services\/([^/]+)\/([^/]+)$/);
   if (method === 'GET' && svcMatch) {
     const group = decodeURIComponent(svcMatch[1]);
     const name = decodeURIComponent(svcMatch[2]);
-    const data = await model.getServicesWithStatus();
-    const service = model.findService(data, group, name);
-    if (!service) return send(res, 404, { error: `service not found: ${group}/${name}` });
+    const inv = await model.getInventory();
+    const service = model.findService(inv, group, name);
+    if (!service) return send(res, 404, { error: `no live container for: ${group}/${name}` });
     // full stack projection (same shape as GET /api/stacks) so the UI gets members + status
     const stacksDoc = await model.getStacksDoc();
-    const stack = stacksDoc.stacks.find((s) =>
-      (service.stack && s.name.toLowerCase() === service.stack.toLowerCase()) ||
-      s.services.some((n) => n.toLowerCase() === service.name.toLowerCase())
-    ) || null;
+    const stack = stacksDoc.stacks.find((s) => s.id === service.stack)
+      || stacksDoc.stacks.find((s) => s.members.some((m) => m.containerName === service.name)) || null;
     let container = null, containerStats = null;
-    const { containers } = await model.dockerContainers();
-    const ref = service.container || containers?.find((c) => c.name === service.name || c.name.toLowerCase() === service.name.toLowerCase())?.name;
+    const ref = service.id || service.container?.name;
     if (ref && docker.availability().ok) {
       try {
         container = await docker.inspectContainer(ref);
         containerStats = await docker.containerStats(ref).catch(() => null);
       } catch { /* keep partial */ }
     }
-    return send(res, 200, { service, stack, container, containerStats, dockerAvailable: docker.availability().ok });
+    // inspect is the only place health and restartCount exist — surface them on the record
+    const enriched = container ? {
+      ...service,
+      status: container.state.status === 'running'
+        ? (container.state.health === 'unhealthy' ? 'unhealthy' : 'up')
+        : container.state.status === 'exited' ? 'down' : (container.state.status || service.status),
+      container: {
+        ...service.container,
+        health: container.state.health ?? service.container.health,
+        restartCount: container.state.restartCount ?? service.container.restartCount,
+      },
+    } : service;
+    return send(res, 200, {
+      service: enriched, stack, container, containerStats,
+      dockerAvailable: docker.availability().ok,
+      url: service.url, urlSource: service.urlSource, urlNote: service.urlNote ?? null,
+    });
   }
   if (method === 'POST' && svcMatch) {
     // user launched a service externally — a real event worth logging
@@ -150,7 +165,8 @@ export async function handleApi(req, res, url) {
   if (method === 'GET' && stMatch) {
     const name = decodeURIComponent(stMatch[1]);
     const data = await model.getStacksDoc();
-    const stack = data.stacks.find((s) => s.name.toLowerCase() === name.toLowerCase());
+    const key = name.toLowerCase();
+    const stack = data.stacks.find((s) => String(s.id).toLowerCase() === key || s.name.toLowerCase() === key || String(s.project || '').toLowerCase() === key);
     if (!stack) return send(res, 404, { error: `stack not found: ${name}` });
     const members = await model.enrichStackMembers(stack);
     return send(res, 200, { ...stack, members, live: data.live, statusReason: data.statusReason });
@@ -158,7 +174,8 @@ export async function handleApi(req, res, url) {
   if (route === 'PUT /api/stacks') {
     const patch = await jsonBody();
     const next = model.writeStacks(patch);
-    logEvent({ source: 'config', type: 'stacks.updated', subject: 'stacks.yaml', message: `updated ${next.stacks.length} stack(s)` });
+    model.invalidateDiscovery();
+    logEvent({ source: 'config', type: 'stacks.updated', subject: 'stacks.yaml', message: `updated ${next.stacks.length} stack overlay(s)` });
     return send(res, 200, next);
   }
 
@@ -184,6 +201,15 @@ export async function handleApi(req, res, url) {
     }
     return send(res, 200, null, { etagBody: body });
   }
+  // ---------- discovery diagnostics ----------
+  if (route === 'GET /api/discovery') return send(res, 200, await model.getDiscoveryStatus());
+  if (route === 'POST /api/discovery/refresh') {
+    model.invalidateDiscovery();
+    const inv = await model.getInventory();
+    logEvent({ source: 'docker', type: 'discovery.refreshed', subject: 'docker', message: `${inv.stats.containers} container(s), ${inv.stats.withUrl} with a web URL` });
+    return send(res, 200, await model.getDiscoveryStatus({ refreshMs: 0 }));
+  }
+
   // ---------- docker passthrough (read-only projections) ----------
   if (route === 'GET /api/docker/status') return send(res, 200, await dockerAvailabilityCached(true));
   if (route === 'GET /api/docker/containers') {
@@ -248,7 +274,7 @@ export async function handleApi(req, res, url) {
   // ---------- search ----------
   if (route === 'GET /api/search') {
     const q = url.searchParams.get('q') || '';
-    return send(res, 200, { query: q, results: searchAll(q, { newsItems: lastNews.items || [] }) });
+    return send(res, 200, { query: q, results: await searchAll(q, { newsItems: lastNews.items || [] }) });
   }
 
   // ---------- icons ----------
