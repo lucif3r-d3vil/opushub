@@ -12,9 +12,9 @@ import { humanEvent } from '../lib/events';
 
 interface StackDetailDoc {
   name: string; description: string | null; icon: string | null; notes: string | null; compose: string | null;
-  status: string; statusReason: string | null; live: boolean;
+  status: string; statusReason: string | null; live: boolean; source: 'configured' | 'discovered';
   members: {
-    service: string; icon: string | null; group: string | null; href: string | null;
+    service: string; icon: string | null; group: string | null; href: string | null; discovered?: boolean;
     container: { name: string; id: string; state: string; status: string; health: string | null; image: string } | null;
     stats?: { cpu: number | null; memory: { used: number | null; limit: number | null }; net: { rx: number; tx: number }; blockIo?: number | null } | null;
     ports?: { private: string; host: string; hostPort: string }[];
@@ -25,8 +25,14 @@ interface StackDetailDoc {
   }[];
 }
 
-const stateWord = (m: StackDetailDoc['members'][number]) =>
-  !m.container ? 'unlinked' : m.container.state === 'running' ? (m.container.health === 'unhealthy' ? 'unhealthy' : 'up') : m.container.state;
+const stateWord = (m: StackDetailDoc['members'][number]) => {
+  if (!m.container) return 'unlinked';
+  // the list API carries no health; the detail route enriches it from inspect — prefer that
+  const health = m.health ?? m.container.health;
+  if (m.container.state === 'running') return health === 'unhealthy' ? 'unhealthy' : 'up';
+  if (m.container.state === 'exited') return 'down';
+  return m.container.state;
+};
 
 export default function StackDetailPage() {
   const { name = '' } = useParams();
@@ -85,6 +91,12 @@ export default function StackDetailPage() {
       {data.notes && (
         <p style={{ maxWidth: 640, color: 'var(--ink-2)', fontStyle: 'italic', fontFamily: 'var(--font-display)', fontSize: 16, lineHeight: 1.5, margin: '0 0 var(--sp-8)' }}>
           “{data.notes}”
+        </p>
+      )}
+
+      {data.source === 'discovered' && (
+        <p className="stale-note" style={{ margin: '-8px 0 var(--sp-8)' }}>
+          Discovered from compose labels on the engine — add a <span className="mono-meta">{data.name}</span> entry to stacks.yaml to name, describe and icon it.
         </p>
       )}
 
@@ -175,7 +187,7 @@ export default function StackDetailPage() {
           <section className="detail-block">
             <SectionHead title="Configuration" />
             <dl className="kv">
-              <div><dt>Services file</dt><dd className="mono-meta">stacks.yaml</dd></div>
+              <div><dt>Source</dt><dd className="mono-meta">{data.source === 'discovered' ? 'auto-discovered from the engine' : 'stacks.yaml'}</dd></div>
               <div><dt>Compose</dt><dd className="mono-meta" style={{ wordBreak: 'break-all' }}>{data.compose || 'not specified'}</dd></div>
               <div><dt>Members</dt><dd>{data.members.map((m) => m.service).join(', ') || '—'}</dd></div>
               <div><dt>Status source</dt><dd>{data.live ? 'Docker engine' : 'configuration only'}</dd></div>

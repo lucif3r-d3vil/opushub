@@ -97,5 +97,7 @@ entrypoint, not a public service); put a reverse proxy with auth in front if you
 
 ```
 npm run check               # tsc + production build
-node --test server/*.test.js … # (tests land with V1.1; SSR smoke: see src/ssr-smoke.tsx)
+npm test                    # 45 tests: provider, model, env, API boundary (mock engine)
+npm run mock-engine         # standalone fake Engine API for live validation:
+                            # OPUSHUB_DOCKER_SOCKET=/tmp/opushub-mock-docker.sock npm start
 ```

@@ -11,7 +11,9 @@
     "dev": "node --watch server/index.js",
     "dev:web": "vite build --watch",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run build"
+    "check": "npm run typecheck && npm run build",
+    "test": "node --test server/*.test.js server/providers/*.test.js",
+    "mock-engine": "node test/mock-engine.js /tmp/opushub-mock-docker.sock"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.0",

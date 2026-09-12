@@ -34,8 +34,8 @@
 .svc-tile:hover { transform: translateY(-1px); border-color: var(--hair-strong); background: var(--surface-2); }
 .svc-tile:active { transform: translateY(0); }
 .svc-tile .tile-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-2); }
-.svc-tile .tile-name { font-weight: 600; font-size: calc(var(--fs-body) + 0.5px); letter-spacing: var(--track-tight); }
-.svc-tile .tile-app { color: var(--ink-3); font-size: var(--fs-meta); margin-top: 1px; }
+.svc-tile .tile-name { font-weight: 600; font-size: calc(var(--fs-body) + 0.5px); letter-spacing: var(--track-tight); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.svc-tile .tile-app { color: var(--ink-3); font-size: var(--fs-meta); margin-top: 1px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .svc-tile .tile-desc { color: var(--ink-2); font-size: var(--fs-meta); line-height: 1.45; min-height: 0;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tile-actions { position: absolute; right: 10px; bottom: 9px; display: flex; gap: 4px; opacity: 0; transition: opacity var(--t-fast) var(--ease); }

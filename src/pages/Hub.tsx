@@ -5,6 +5,7 @@ import { bytes, num, pct, relTime, uptime } from '../lib/format';
 import { useLayout, useSettings } from '../lib/theme';
 import type { ActivityEvent, LayoutDoc, NewsDoc, ServicesDoc, SystemSnapshot, WeatherDoc } from '../lib/types';
 import { Icon } from '../components/Icon';
+import SetupBanner from '../components/SetupBanner';
 import { MeterBar, Sparkline } from '../components/Charts';
 import { Menu, type MenuItem, ProviderNote, StatusDot, Freshness } from '../components/ui';
 import { Sortable, type SortableCtx } from '../components/Sortable';
@@ -327,15 +328,23 @@ function NewsWidget({ handle }: { handle?: ReactNode }) {
         ? <ProviderNote compact status="error" reason={data.reason || 'All feeds failed.'} fixHref="/settings/integrations" fixLabel="Review feeds →" />
         : (
           <div>
-            {data.items.slice(0, cap).map((n, i) => (
-              <a className="news-item" key={n.link + i} href={n.link} target="_blank" rel="noreferrer">
-                <span className="n-title">{n.title}</span>
-                <span className="n-meta">
-                  <span className="n-src">{n.source}</span>
-                  {n.publishedAt && <span>· {relTime(new Date(n.publishedAt).getTime())}</span>}
-                </span>
-              </a>
-            ))}
+            {data.items.slice(0, cap).map((n, i) => {
+              // the server blanks non-http(s) links; render those as plain text, never <a href="">
+              const inner = (
+                <>
+                  <span className="n-title">{n.title}</span>
+                  <span className="n-meta">
+                    <span className="n-src">{n.source}</span>
+                    {n.publishedAt && <span>· {relTime(new Date(n.publishedAt).getTime())}</span>}
+                  </span>
+                </>
+              );
+              return n.link ? (
+                <a className="news-item" key={n.link + i} href={n.link} target="_blank" rel="noreferrer">{inner}</a>
+              ) : (
+                <span className="news-item" key={`nolink-${i}`}>{inner}</span>
+              );
+            })}
             {!data.items.length && <div className="unavailable"><span className="why">Feeds are reachable but empty right now.</span></div>}
           </div>
         )}
@@ -468,6 +477,8 @@ export default function Hub() {
         </div>
         <Clock />
       </div>
+
+      <SetupBanner sys={sysQ.data} services={svcQ.data} />
 
       <div className="hub-search">
         <button className="hub-search-trigger" onClick={openSearch} aria-label="Search OpusHub">

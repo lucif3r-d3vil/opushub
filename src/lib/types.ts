@@ -31,6 +31,7 @@ export interface StackMember {
   group: string | null;
   href: string | null;
   container: ContainerBrief | null;
+  discovered?: boolean;
   // enriched on detail route:
   stats?: { cpu: number | null; memory: { used: number | null; limit: number | null }; net: { rx: number; tx: number } } | null;
   ports?: { private: string; host: string; hostPort: string }[];
@@ -47,13 +48,19 @@ export interface Stack {
   services: string[];
   compose: string | null;
   notes: string | null;
+  source: 'configured' | 'discovered';
   members: StackMember[];
   status: 'operational' | 'degraded' | 'attention' | 'unlinked' | 'unavailable' | string;
   statusReason: string | null;
   containerCount: number;
 }
 
-export interface StacksDoc { stacks: Stack[]; live: boolean; statusReason: string | null }
+export interface StacksDoc {
+  stacks: Stack[];
+  live: boolean;
+  statusReason: string | null;
+  standalone: ContainerBrief[];
+}
 
 export interface SystemSnapshot {
   at: number;
@@ -133,6 +140,7 @@ export interface LayoutDoc {
     rail: string[];
     hidden: string[];
     sizes: Record<string, 'sm' | 'md' | 'lg'>;
+    setupDismissed?: boolean;
   };
   services: { groupOrder: string[] | null; order: Record<string, string[]> };
 }
@@ -140,7 +148,10 @@ export interface LayoutDoc {
 export interface HealthDoc {
   name: string; version: string; configDir: string; dataDir: string; node?: string; platform?: string;
   env: { files: { file: string; keys: string[]; error?: string | null }[]; note: string };
-  providers: { docker: { ok: boolean; reason?: string; version?: string }; system: { ok: boolean; note: string } };
+  providers: {
+    docker: { ok: boolean; state: 'connected' | 'no-socket' | 'socket-missing' | 'invalid-endpoint' | 'unreachable'; reason?: string; version?: string; api?: string };
+    system: { ok: boolean; note: string };
+  };
 }
 
 export interface IconSearchResult { ref: string; set: string; name: string; label: string; local: boolean }

@@ -20,11 +20,11 @@ interface Detail {
   stack: Stack | null;
   container: {
     id: string; name: string; image: string | null; state: { status: string; running: boolean; startedAt: string | null; health: string | null; exitCode: number | null };
-    restartPolicy: string | null; labels: { project: string | null; service: string | null; workingDir: string | null };
+    restartPolicy: string | null; labels: { project: string | null; service: string | null };
     ports: { private: string; host: string; hostPort: string }[];
     mounts: { type: string; source: string; target: string; rw: boolean }[];
     networks: { name: string; ip: string; gateway: string; aliases: string[] }[];
-    entrypoint: string | null; command: string | null; created: string | null;
+    command: string | null; created: string | null;
   } | null;
   containerStats: { cpu: number | null; memory: { used: number | null; limit: number | null }; net: { rx: number; tx: number }; pids: number | null; blockIo: number | null } | null;
   dockerAvailable: boolean;
