@@ -110,8 +110,12 @@ export async function handleApi(req, res, url) {
     const data = await model.getServicesWithStatus();
     const service = model.findService(data, group, name);
     if (!service) return send(res, 404, { error: `service not found: ${group}/${name}` });
-    const { stacks } = model.readStacks();
-    const stack = stacks.find((s) => s.name === service.stack || s.services.includes(service.name)) || null;
+    // full stack projection (same shape as GET /api/stacks) so the UI gets members + status
+    const stacksDoc = await handleStacksList();
+    const stack = stacksDoc.stacks.find((s) =>
+      (service.stack && s.name.toLowerCase() === service.stack.toLowerCase()) ||
+      s.services.some((n) => n.toLowerCase() === service.name.toLowerCase())
+    ) || null;
     let container = null, containerStats = null;
     const { containers } = await model.dockerContainers();
     const ref = service.container || containers?.find((c) => c.name === service.name || c.name.toLowerCase() === service.name.toLowerCase())?.name;
@@ -170,7 +174,7 @@ export async function handleApi(req, res, url) {
   if (method === 'GET' && stMatch) {
     const name = decodeURIComponent(stMatch[1]);
     const data = await handleStacksList();
-    const stack = data.stacks.find((s) => s.name === name);
+    const stack = data.stacks.find((s) => s.name.toLowerCase() === name.toLowerCase());
     if (!stack) return send(res, 404, { error: `stack not found: ${name}` });
     // aggregate per-member container detail
     const members = await Promise.all(stack.members.map(async (m) => {

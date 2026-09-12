@@ -8,6 +8,7 @@ import { Icon } from '../components/Icon';
 import { MeterBar, Sparkline } from '../components/Charts';
 import { Menu, type MenuItem, ProviderNote, StatusDot, Freshness } from '../components/ui';
 import { Sortable, type SortableCtx } from '../components/Sortable';
+import { humanEvent } from '../lib/events';
 
 /* ---------------- greeting + clock ---------------- */
 function greeting(name: string | null) {
@@ -212,7 +213,7 @@ function Widget({ id, title, right, handle, children }: { id: string; title: str
         <Menu
           x={menu.x} y={menu.y} onClose={() => setMenu(null)}
           items={[
-            { label: `Size — ${size} (click to change)`, action: () => setLayout({ hub: { sizes: { [id]: ({ sm: 'md', md: 'lg', lg: 'sm' } as const)[size] } } }) },
+            { label: `Size: ${size.toUpperCase()} (click to cycle)`, action: () => setLayout({ hub: { sizes: { [id]: ({ sm: 'md', md: 'lg', lg: 'sm' } as const)[size] } } }) },
             { label: 'Hide from Hub', action: () => setLayout({ hub: { hidden: [...(layout?.hub?.hidden || []), id] } }) },
           ]}
         />
@@ -318,7 +319,7 @@ function NewsWidget({ handle }: { handle?: ReactNode }) {
   const cap = size === 'sm' ? 3 : size === 'lg' ? 10 : 5;
   if (!data) return <Widget id="news" title="News" handle={handle}><ProviderNote compact status="idle" reason="Loading feeds…" /></Widget>;
   if (data.status === 'unconfigured') {
-    return <Widget id="news" title="News" handle={handle}><ProviderNote compact status="unconfigured" reason="No feeds yet." fixHref="/settings/integrations" fixLabel="Add feeds →" /></Widget>;
+    return <Widget id="news" title="News" handle={handle}><ProviderNote compact status="unconfigured" fixHref="/settings/integrations" fixLabel="Add feeds →" /></Widget>;
   }
   return (
     <Widget id="news" title="News" handle={handle} right={<Freshness at={data.fetchedAt ?? null} error={data.status === 'error' ? 'unreachable' : null} />}>
@@ -340,25 +341,6 @@ function NewsWidget({ handle }: { handle?: ReactNode }) {
         )}
     </Widget>
   );
-}
-
-export function humanEvent(e: ActivityEvent): string {
-  if (e.source === 'docker') {
-    if (e.type === 'container.started') return 'container started';
-    if (e.type === 'container.exited') return 'container exited';
-    if (e.type === 'container.state') return `container ${e.message || 'changed'}`;
-    if (e.type === 'container.discovered') return 'seen in Docker';
-    return e.message || e.type;
-  }
-  if (e.source === 'user' && e.type === 'service.launch') return e.message || 'opened';
-  const map: Record<string, string> = {
-    'app.boot': 'OpusHub started',
-    'app.shutdown': 'OpusHub stopped',
-    'docker.ok': 'Docker engine connected',
-    'docker.unavailable': 'Docker engine disconnected',
-    'docker.error': 'Docker error',
-  };
-  return map[e.type] || e.message || e.type;
 }
 
 function ActivityWidget({ handle }: { handle?: ReactNode }) {
@@ -559,8 +541,11 @@ function mergeRail(dropped: string[], layout: LayoutDoc | null): string[] {
   return out;
 }
 
-function isoWeek(): number {
-  const now = new Date();
-  const onejan = new Date(now.getFullYear(), 0, 1);
-  return Math.ceil(((now.getTime() - onejan.getTime()) / 86400000 + onejan.getDay() + 1) / 7);
+function isoWeek(d = new Date()): number {
+  // ISO 8601 week — the year of week 1's Thursday anchors the count
+  const date = new Date(d);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
+  const week1 = new Date(date.getFullYear(), 0, 4);
+  return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
 }

@@ -9,14 +9,19 @@ export function useDockerStatus(refreshMs = 60_000) {
   return usePolled<DockerStatus>('/api/docker/status', refreshMs);
 }
 
-export function DockerOffNote({ reason, extra }: { reason?: string | null; extra?: ReactNode }) {
+/** The honest "Docker is off" surface: a sentence, a fix, and the raw reason tucked away. */
+export function DockerOffNote({ reason, extra, fixHref = '/settings/system' }: { reason?: string | null; extra?: ReactNode; fixHref?: string }) {
   return (
     <div className="unavailable" role="status">
-      <span className="why">Docker is not connected — container-level detail is unavailable.</span>
-      {reason && <span style={{ opacity: 0.9 }}>{reason}</span>}
-      <span style={{ opacity: 0.85 }}>
-        Set <code>OPUSHUB_DOCKER_SOCKET</code> or <code>DOCKER_HOST</code> in the server environment.
-      </span>
+      <span className="why">Docker isn't connected.</span>
+      <span className="reason">OpusHub can't see containers, so live status, stats and logs stay off. Connect the engine and this fills in automatically.</span>
+      <Link to={fixHref} className="act">Configure Docker →</Link>
+      {reason && (
+        <details className="tech">
+          <summary>Details</summary>
+          <code>{reason}</code>
+        </details>
+      )}
       {extra}
     </div>
   );

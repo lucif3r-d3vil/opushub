@@ -317,8 +317,9 @@ export async function getServicesWithStatus() {
 }
 
 export function findService(data, group, name) {
-  const g = data.groups.find((x) => x.name === group);
-  const s = g?.services.find((x) => x.name === name);
+  // case-insensitive: URLs are user-typed (and proxies normalize case), names are canonical
+  const g = data.groups.find((x) => x.name.toLowerCase() === String(group || '').toLowerCase());
+  const s = g?.services.find((x) => x.name.toLowerCase() === String(name || '').toLowerCase());
   return s || null;
 }
 

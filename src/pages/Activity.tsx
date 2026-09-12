@@ -3,7 +3,7 @@ import { usePolled } from '../lib/api';
 import { dayLabel, relTime, timeOfDay } from '../lib/format';
 import type { ActivityEvent } from '../lib/types';
 import { PageHero, ProviderNote } from '../components/ui';
-import { humanEvent } from './Hub';
+import { humanEvent } from '../lib/events';
 
 const SOURCES = ['all', 'system', 'config', 'user', 'docker'] as const;
 type Source = (typeof SOURCES)[number];
@@ -44,7 +44,7 @@ export default function ActivityPage() {
       />
       <div className="tl-filters" role="tablist" aria-label="Filter events" style={{ marginBottom: 'var(--sp-8)' }}>
         {SOURCES.map((s) => (
-          <button key={s} role="tab" aria-selected={source === s} className={source === s ? 'chip' : 'chip'} style={source === s ? { borderColor: 'var(--hair-strong)', color: 'var(--ink)', background: 'var(--surface-2)' } : undefined} onClick={() => setSource(s)}>
+          <button key={s} role="tab" aria-selected={source === s} className={source === s ? 'chip active' : 'chip'} onClick={() => setSource(s)}>
             {s === 'all' ? 'All' : s[0].toUpperCase() + s.slice(1)}
           </button>
         ))}
@@ -66,17 +66,19 @@ export default function ActivityPage() {
               <div className="tl-day">{day}</div>
               {evs.map((e) => (
                 <div className="tl-item" key={e.id}>
+                  <span className="tl-ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                      <path d={SOURCE_ICON[e.type] || 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z'} />
+                    </svg>
+                  </span>
                   <div className="tl-main">
-                    <span className="act-type-ico tl-ico-wrap" style={{ position: 'relative', left: 0, top: 0, width: 'auto' }}>
-                      <svg className="tl-ico" style={{ position: 'static' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round">
-                        <path d={SOURCE_ICON[e.type] || 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z'} />
-                      </svg>
-                    </span>
                     <span className="tl-type">{humanEvent(e)}</span>
                     {e.subject && e.source !== 'user' && <span className="tl-subject">{e.subject}</span>}
-                    {e.source !== 'system' && <span className="chip" style={{ padding: '0 8px', fontSize: 10.5 }}>{e.source}</span>}
-                    <span className="tl-time" title={new Date(e.t).toLocaleString()}>{timeOfDay(e.t)}</span>
-                    <span className="tl-time stale-note" style={{ minWidth: 62, textAlign: 'right' }}>{relTime(e.t)}</span>
+                    {e.source !== 'system' && <span className="chip tl-src">{e.source}</span>}
+                    <span className="tl-when" title={new Date(e.t).toLocaleString()}>
+                      <span>{timeOfDay(e.t)}</span>
+                      <span className="rel">{relTime(e.t)}</span>
+                    </span>
                   </div>
                 </div>
               ))}

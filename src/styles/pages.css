@@ -69,9 +69,11 @@
 .svc-row { grid-template-columns: 34px minmax(120px, 1.1fr) minmax(0, 1.6fr) auto auto auto; }
 .svc-row .app-tag { color: var(--ink-3); font-size: var(--fs-meta); font-weight: 560; flex: none; border: 1px solid var(--hair); border-radius: var(--r-pill); padding: 1px 9px; }
 @media (max-width: 860px) {
-  .svc-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
+  .svc-row { grid-template-columns: 30px minmax(0, 1fr) auto; row-gap: 8px; }
   .svc-row .desc-col { display: none; }
   .svc-row .app-tag { display: none; }
+  /* actions get their own line, right-aligned — no cramped wrapping */
+  .svc-row .row-actions { grid-column: 1 / -1; justify-content: flex-end; }
 }
 
 /* ---------- detail pages (service + stack) ---------- */
@@ -106,10 +108,16 @@
 @media (max-width: 900px) { .sys-cols { grid-template-columns: 1fr; gap: var(--sp-6); } }
 .sys-stat-hero .v { font-size: 54px; font-weight: 640; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
 .sys-stat-hero .v small { font-size: 22px; color: var(--ink-3); font-weight: 500; }
-.sys-kv { display: grid; gap: 10px; margin-top: var(--sp-6); }
-.sys-kv .r { display: flex; justify-content: space-between; gap: var(--sp-4); font-size: var(--fs-meta); }
-.sys-kv .r .k { color: var(--ink-3); }
-.sys-kv .r .v { font-weight: 560; text-align: right; }
+/* two-column label/value list — labels left, values right-aligned tabular */
+.sys-kv {
+  display: grid; grid-template-columns: 130px minmax(0, 1fr);
+  column-gap: var(--sp-4); row-gap: 9px; margin-top: var(--sp-6);
+  font-size: var(--fs-meta); align-items: baseline;
+}
+.sys-kv dt { color: var(--ink-3); }
+.sys-kv dd { font-weight: 560; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.sys-kv dd.mono { font-size: 12px; font-weight: 500; }
+.sys-kv dd.stale-note { color: var(--ink-3); font-weight: 400; }
 .coregrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 8px; }
 .corecell { border: 1px solid var(--hair); border-radius: 8px; padding: 7px 8px 8px; background: var(--surface); }
 .corecell .cv { font-size: 13px; font-weight: 620; }
@@ -147,8 +155,7 @@
 
 /* activity page */
 .activity-wrap { max-width: 860px; }
-.act-type-ico { display: inline-flex; align-items: center; gap: 7px; }
-.act-type-ico svg { width: 14px; height: 14px; color: var(--ink-3); }
+.tl-src { padding: 0 8px; font-size: 10.5px; }
 
 /* settings extra */
 .accent-note { font-size: var(--fs-meta); color: var(--ink-3); }

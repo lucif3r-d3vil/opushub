@@ -63,7 +63,6 @@ function Shell() {
     window.addEventListener('opushub:open-search', open);
     return () => window.removeEventListener('opushub:open-search', open);
   }, []);
-  const { settings } = useSettings();
   const location = useLocation();
   return (
     <>
@@ -98,7 +97,7 @@ function Shell() {
         <div className="main-wrap">
           <div className="page">
             <div className="page-anim" key={location.pathname}>
-              <Suspense fallback={<div style={{ padding: 'var(--sp-16) 0', color: 'var(--ink-3)' }}>Loading…</div>}>
+              <Suspense fallback={<div aria-busy="true" style={{ padding: 'var(--sp-16) 0', color: 'var(--ink-3)' }} className="stale-note">Loading…</div>}>
                 <Outlet />
               </Suspense>
             </div>
@@ -120,7 +119,6 @@ function Shell() {
       <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
       <SaveIndicator />
       <CustomAssets />
-      <span className="sr-only" aria-live="polite">{settings ? '' : ''}</span>
     </>
   );
 }

@@ -11,7 +11,7 @@ const TTL = 10 * 60 * 1000;
 export async function getNews(feeds, { limit = 40 } = {}) {
   const list = Array.isArray(feeds) ? feeds.filter((f) => f && f.url) : [];
   if (!list.length) {
-    return { status: 'unconfigured', reason: 'No feeds configured — add RSS/Atom feeds in Settings → Integrations.', items: [], errors: [] };
+    return { status: 'unconfigured', reason: 'No RSS or Atom feeds configured.', items: [], errors: [] };
   }
   const items = [];
   const errors = [];
