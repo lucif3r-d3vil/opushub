@@ -1,4 +1,42 @@
-# OpusHub — Design system (V1.1)
+# OpusHub — Design system (V1.2)
+
+## V1.2 decisions (Phase 2 real-data review, 2026-09-12)
+
+Validated against live Engine-shaped data (via the mock-engine harness — no real Engine exists in
+this sandbox; see `01-audit.md`) and real `/proc` host metrics. No redesign; only problems caused
+by real data were fixed:
+
+- **Socket paths never reach the browser — not even under Details.** This supersedes the V1.1
+  rule that parked probe text in a disclosure. Docker-off copy stays one human sentence +
+  "Configure Docker →"; the Details disclosure (where kept) shows only the generic public reason.
+  Rationale: §4 — the API enforces the boundary, not the UI's discretion.
+- **First-run is one banner, not a wizard and not a wall of empty states.** `SetupBanner`
+  (Hub, above search): "Welcome to OpusHub / Your control center is ready — N of 3 connected",
+  a Connected checklist (System · Configuration · Docker) + an Optional checklist
+  (Weather · News · Markets), one contextual Configure → and Dismiss. It appears only while a
+  *required* piece is missing (Docker off or zero services) and dismissal persists in
+  `layout.json` (`hub.setupDismissed`). Optional integrations keep their quiet one-line empty
+  states and never summon the banner.
+- **Optional ≠ failed, restated.** `unconfigured` renders as a plain sentence ("Not set up
+  yet." + gentle reason + Configure →), never the dashed `.alert` box. The alert box is reserved
+  for a *configured* provider that actually failed (all feeds down, daemon erroring).
+- **Discovered vs configured is typographic, not badged.** Auto-discovered compose projects get
+  their own "Discovered" section and a quiet `auto` note; standalone containers get a static
+  "Standalone containers" section (name · image · status · logs affordance, no fake detail
+  links). No pills, per the badge-spam rule.
+- **Real-data truncation rules.** Tiles: name ellipsizes, app/description clamps to 2 lines.
+  Stack rows: name/description ellipsize. Member image column ellipsizes. Detail titles and `kv`
+  values wrap (`overflow-wrap: anywhere`). Port/volume rows wrap; long host paths break at any
+  point. Log drawer wraps long lines, strips ANSI/control chars, caps rendered lines at 500
+  (with a "showing the last N" note), offers a timestamps toggle, and scrolls to the bottom on
+  first load only (never yanks the scroll on refresh).
+- **Unhealthy is amber, never red.** A degraded container (unhealthy, paused, restarting) gets
+  the `unhealthy` dot + word treatment; red is reserved for genuinely failed states
+  (exited-unexpectedly surfaces as Offline/down wording, errors as alerts). No exaggerated
+  error treatment for degraded-but-alive.
+- **Health honesty.** List-level status is running-state only (the list API carries no health);
+  health appears where inspect data exists (service page, stack-detail members). The UI never
+  implies a health verdict it cannot know.
 
 One sentence: *a private digital home, not an admin panel.* The interface should feel like a place
 someone visited — an editorial homepage for your infrastructure — rather than a grid of floating

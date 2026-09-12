@@ -61,7 +61,12 @@ export async function handleApi(req, res, url) {
       bootedAt: bootAt,
       configDir: CONFIG_DIR,
       dataDir: DATA_DIR,
-      env: { files: env.loaded.map((f) => ({ file: f.file, keys: f.keys, error: f.error || null })), note: 'values never leave the server' },
+      env: {
+        // FOUND files only (names + key names, never values); the full tried-order is logged
+        // on the server at boot. Absence of an entry here = NOT FOUND for that candidate.
+        files: env.loaded.map((f) => ({ file: f.file, keys: f.keys, error: f.error || null })),
+        note: 'values never leave the server',
+      },
       providers: {
         docker: dockerProv,
         system: { ok: true, note: 'reading /proc on this host' },
@@ -111,7 +116,7 @@ export async function handleApi(req, res, url) {
     const service = model.findService(data, group, name);
     if (!service) return send(res, 404, { error: `service not found: ${group}/${name}` });
     // full stack projection (same shape as GET /api/stacks) so the UI gets members + status
-    const stacksDoc = await handleStacksList();
+    const stacksDoc = await model.getStacksDoc();
     const stack = stacksDoc.stacks.find((s) =>
       (service.stack && s.name.toLowerCase() === service.stack.toLowerCase()) ||
       s.services.some((n) => n.toLowerCase() === service.name.toLowerCase())
@@ -139,51 +144,15 @@ export async function handleApi(req, res, url) {
   }
 
   if (route === 'GET /api/stacks') {
-    const { stacks } = model.readStacks();
-    const { groups } = model.readServices();
-    const { containers, reason } = await model.dockerContainers();
-    const all = groups.flatMap((g) => g.services.map((s) => ({ ...s, group: g.name })));
-    const out = stacks.map((st) => {
-      const members = st.services.map((name) => all.find((s) => s.name === name)).filter(Boolean);
-      const links = members.map((m) => {
-        const linked = containers?.find((c) => (m.container && (c.name === m.container || c.id === m.container)) || c.name === m.name || c.name.toLowerCase() === m.name.toLowerCase() || c.labels?.service?.toLowerCase() === m.name.toLowerCase());
-        return linked ? { container: linked, service: m.name } : { container: null, service: m.name };
-      });
-      const states = links.map((l) => l.container?.state || null);
-      const hasUnknown = states.some((s) => s == null);
-      const status = !containers ? 'unavailable'
-        : states.length && states.every((s) => s === 'running') ? (hasUnknown ? 'degraded' : 'operational')
-        : states.some((s) => s === 'running') ? 'degraded' : states.every((s) => s == null) ? 'unlinked' : 'attention';
-      return {
-        ...st,
-        members: links.map((l, i) => ({
-          service: members[i]?.name ?? l.service,
-          icon: members[i]?.icon ?? null,
-          group: members[i]?.group ?? null,
-          href: members[i]?.href ?? null,
-          container: l.container ? { name: l.container.name, id: l.container.id, state: l.container.state, status: l.container.status, health: l.container.health, image: l.container.image } : null,
-        })),
-        status,
-        statusReason: !containers ? reason : null,
-        containerCount: links.filter((l) => l.container).length,
-      };
-    });
-    return send(res, 200, { stacks: out, live: !!containers, statusReason: reason });
+    return send(res, 200, await model.getStacksDoc());
   }
   const stMatch = p.match(/^\/api\/stacks\/([^/]+)$/);
   if (method === 'GET' && stMatch) {
     const name = decodeURIComponent(stMatch[1]);
-    const data = await handleStacksList();
+    const data = await model.getStacksDoc();
     const stack = data.stacks.find((s) => s.name.toLowerCase() === name.toLowerCase());
     if (!stack) return send(res, 404, { error: `stack not found: ${name}` });
-    // aggregate per-member container detail
-    const members = await Promise.all(stack.members.map(async (m) => {
-      if (!m.container || !docker.availability().ok) return { ...m, stats: null, ports: [], networks: [], mounts: [] };
-      try {
-        const [insp, stats] = [await docker.inspectContainer(m.container.name), await docker.containerStats(m.container.name).catch(() => null)];
-        return { ...m, stats, ports: insp.ports, networks: insp.networks, mounts: insp.mounts, startedAt: insp.state.startedAt, restartCount: insp.restartCount, restartPolicy: insp.restartPolicy, entrypoint: insp.entrypoint, command: insp.command, created: insp.created, health: insp.state.health };
-      } catch { return { ...m, stats: null, error: true }; }
-    }));
+    const members = await model.enrichStackMembers(stack);
     return send(res, 200, { ...stack, members, live: data.live, statusReason: data.statusReason });
   }
   if (route === 'PUT /api/stacks') {
@@ -191,26 +160,6 @@ export async function handleApi(req, res, url) {
     const next = model.writeStacks(patch);
     logEvent({ source: 'config', type: 'stacks.updated', subject: 'stacks.yaml', message: `updated ${next.stacks.length} stack(s)` });
     return send(res, 200, next);
-  }
-  async function handleStacksList() {
-    // internal reuse of the list handler logic
-    const { stacks } = model.readStacks();
-    const { groups } = model.readServices();
-    const { containers, reason } = await model.dockerContainers();
-    const all = groups.flatMap((g) => g.services.map((s) => ({ ...s, group: g.name })));
-    const out = stacks.map((st) => {
-      const members = st.services.map((n) => all.find((s) => s.name === n)).filter(Boolean);
-      const links = members.map((m) => {
-        const linked = containers?.find((c) => (m.container && (c.name === m.container || c.id === m.container)) || c.name === m.name || c.name.toLowerCase() === m.name.toLowerCase() || c.labels?.service?.toLowerCase() === m.name.toLowerCase());
-        return { container: linked ? { name: linked.name, id: linked.id, state: linked.state, status: linked.status, health: linked.health, image: linked.image } : null, service: m.name, icon: m.icon ?? null, group: m.group ?? null, href: m.href ?? null };
-      });
-      const states = links.map((l) => l.container?.state ?? null);
-      const status = !containers ? 'unavailable'
-        : states.length && states.every((s) => s === 'running') ? 'operational'
-        : states.some((s) => s === 'running') ? 'degraded' : states.every((s) => s == null) ? 'unlinked' : 'attention';
-      return { ...st, members: links, status, statusReason: reason, containerCount: links.filter((l) => l.container).length };
-    });
-    return { stacks: out, live: !!containers, statusReason: reason };
   }
 
   // ---------- bookmarks ----------
@@ -239,17 +188,29 @@ export async function handleApi(req, res, url) {
   if (route === 'GET /api/docker/status') return send(res, 200, await dockerAvailabilityCached(true));
   if (route === 'GET /api/docker/containers') {
     const a = docker.availability();
-    if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.reason, containers: [] });
+    if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.public, containers: [] });
     try { return send(res, 200, { status: 'ok', containers: await docker.listContainers({ all: true }) }); }
-    catch (err) { return send(res, 200, { status: 'error', reason: String(err.message), containers: [] }); }
+    catch (err) {
+      if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] list failed: ${err.message}`);
+      return send(res, 200, { status: 'error', reason: 'Docker engine answered with an error.', containers: [] });
+    }
   }
   const logsMatch = p.match(/^\/api\/docker\/containers\/([^/]+)\/logs$/);
   if (method === 'GET' && logsMatch) {
     const a = docker.availability();
-    if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.reason, lines: [] });
+    if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.public, lines: [] });
     const tail = Math.min(500, Math.max(1, Number(url.searchParams.get('tail')) || 150));
-    try { return send(res, 200, { status: 'ok', lines: await docker.logs(decodeURIComponent(logsMatch[1]), { tail }) }); }
-    catch (err) { return send(res, 200, { status: 'error', reason: String(err.message), lines: [] }); }
+    const timestamps = url.searchParams.get('timestamps') === '1' || url.searchParams.get('timestamps') === 'true';
+    const ref = decodeURIComponent(logsMatch[1]);
+    if (!/^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,127}$/.test(ref)) {
+      return send(res, 200, { status: 'error', reason: 'invalid container reference', lines: [] });
+    }
+    try { return send(res, 200, { status: 'ok', lines: await docker.logs(ref, { tail, timestamps }) }); }
+    catch (err) {
+      if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] logs failed: ${err.message}`);
+      const missing = /404|no such container/i.test(String(err.message));
+      return send(res, 200, { status: 'error', reason: missing ? 'No such container (it may have been removed).' : 'Could not read container logs.', lines: [] });
+    }
   }
 
   // ---------- integrations ----------
@@ -347,11 +308,8 @@ async function dockerAvailabilityCached(force = false) {
   if (!force && Date.now() - dockerAvailCache.at < 30_000 && dockerAvailCache.value) return dockerAvailCache.value;
   const a = docker.availability();
   let value;
-  if (!a.ok) value = { ok: false, reason: a.reason };
-  else {
-    const p = await docker.probe();
-    value = p.ok ? { ok: true, version: p.version, api: p.apiVersion } : { ok: false, reason: p.reason };
-  }
+  if (!a.ok) value = docker.publicStatus(a);
+  else value = docker.publicStatus(await docker.probe());
   dockerAvailCache = { at: Date.now(), value };
   return value;
 }

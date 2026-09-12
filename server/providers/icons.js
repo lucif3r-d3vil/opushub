@@ -54,11 +54,23 @@ export function resolveIcon(ref, size = 24, color = 'currentColor') {
   return null;
 }
 
+/** Strip active content from third-party SVG before it reaches innerHTML in the client.
+ * Bundled collections are trusted but pass through the same filter for uniformity. */
+export function sanitizeSvg(xml) {
+  let out = String(xml || '');
+  out = out.replace(/<script[\s\S]*?<\/script\s*>/gi, '');
+  out = out.replace(/<foreignObject[\s\S]*?<\/foreignObject\s*>/gi, '');
+  out = out.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  out = out.replace(/(href|xlink:href)\s*=\s*("|')\s*javascript:[^"']*\2/gi, '$1=$2#$2');
+  return out;
+}
+
 export async function resolveRemote(set, name) {
   const hit = remoteCache.get(`${set}:${name}`);
   if (hit) return hit.svg ? { ...hit, cached: true } : null;
   try {
-    const xml = await fetchText(`https://api.iconify.design/${set}.svg?icon=${encodeURIComponent(name)}&height=64`, { timeoutMs: 6000 });
+    const raw = await fetchText(`https://api.iconify.design/${set}.svg?icon=${encodeURIComponent(name)}&height=64`, { timeoutMs: 6000 });
+    const xml = sanitizeSvg(raw);
     if (!xml.trim().startsWith('<svg')) return null;
     const val = { svg: xml };
     remoteCache.set(`${set}:${name}`, val, 30 * 24 * 3600_000);
@@ -142,7 +154,7 @@ export async function search(q, limit = 60) {
 
 export async function iconSvg(ref, size = 64) {
   const svg = resolveIcon(ref, size);
-  if (svg) return { svg };
+  if (svg) return { svg: sanitizeSvg(svg) };
   const m = String(ref).match(/^([a-z0-9-]+):([a-z0-9+._-]+)$/i);
   if (m) {
     const remote = await resolveRemote(m[1], m[2]);

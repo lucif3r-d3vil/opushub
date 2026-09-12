@@ -75,9 +75,16 @@ Every integration is a module with the same shape — the UI renders status, nev
 
 ```js
 { provider: "docker", status: "ok" | "unavailable" | "error",
-  reason?: "Docker socket not found at /var/run/docker.sock",
+  reason?: "Docker engine not connected — no socket found. …",
   checkedAt, cacheTtlMs, data? }
 ```
+
+Phase 2 rule: **public reasons never name socket paths, host paths, or secret values.**
+`server/providers/docker.js` keeps two reasons for every failure — `reason` (full detail, server
+logs only) and `public` (generic guidance) — and `publicStatus()` is the only shape allowed to
+cross `/api`. The one sanctioned exception is `.env` discovery, where `GET /api/health` reports
+FOUND file *paths* with key *names* (values never leave the server) so misconfiguration is
+observable instead of silent.
 
 `unavailable` is honest and styled (it is *not* an error dialog); data is only shown when `ok`.
 Providers cache on the server; the browser polls on sensible intervals and pauses when the tab is
@@ -142,12 +149,70 @@ Server: single process, no deps beyond `yaml`. ETag/`Cache-Control` on API json;
 Client: route-level `React.lazy`, fonts self-hosted via @fontsource (no external fetch), icon SVGs
 cached by browser, provider responses cached server-side, `IntersectionObserver` defers hub widgets.
 
+## Docker integration (Phase 2)
+
+```
+browser ──▶ /api ──▶ model join ──▶ server/providers/docker.js ──▶ Engine API (unix socket / TCP)
+                ▲                              │
+                │                 projection: allow-listed fields only
+                │                 (no Env, no entrypoint, redacted Cmd,
+                │                  no full IDs, no MACs, no compose paths)
+                └─ public-safe reasons only (no socket paths — see Provider contract)
+```
+
+- **Endpoint resolution** (`resolveEndpoint()`): `OPUSHUB_DOCKER_SOCKET` → `DOCKER_HOST`
+  (`unix://…` / `tcp://host:port`) → `/var/run/docker.sock` → `/run/docker.sock`. Nothing is
+  hard-coded; the environment decides. Unparseable `DOCKER_HOST` is its own state
+  (`invalid-endpoint`), not a silent fallthrough.
+- **Read-only, always.** The provider issues GETs only (`/version`, `/containers/json`,
+  `/containers/{id}/json`, `/containers/{id}/stats?stream=false`, `/containers/{id}/logs`,
+  `/events`, `/images/json`, `/system/df`). There is no POST/DELETE path and no restart/update
+  endpoint; the UI renders Open/Details/Logs only where genuinely implemented.
+- **List vs detail fidelity.** `/containers/json` carries no health — list-level status
+  (Hub tiles, Services rows, Stacks rows) is therefore *running-state only* by construction,
+  and `serviceStatus()`/`stackStatus()` document that. Health comes from inspect and surfaces
+  on the service page and in stack-detail member rows (which prefer the enriched value).
+  Fabricating list-level health from thin data would be worse than showing running state.
+- **CPU %** follows Docker's own formula (`cpuDelta/systemDelta × onlineCpus × 100`);
+  stopped containers yield `null` stats, never zeros-as-data; memory reports current `usage`
+  only (never the high-watermark as a substitute).
+- **Logs** demultiplex Docker's framed stdout/stderr stream (with raw-stream fallback for
+  TTY containers), cap at `tail ≤ 500` and 256 KB server-side, and support `?timestamps=1`.
+- **Stack discovery** (`model.getStacksDoc()`, the single stacks builder — the old duplicated
+  list logic in `api.js` was removed): configured stacks from `stacks.yaml` link live
+  containers; compose projects found via `com.docker.compose.project` labels with no
+  same-named configured stack surface as `source: "discovered"`; containers with no project
+  label and no configured link surface as `standalone`. Nothing is force-fit into a stack.
+- **Caching / polling.** `dockerContainers()` caches the fleet list 15s; availability probes
+  cache 30s; `/api/system/history` honors ETag 304. The browser polls system 5s (cheap
+  `/proc` reads), services/stacks 30s, logs 30s, and pauses when the tab is hidden. Detail
+  pages inspect on demand. Measured API latency against the mock engine: <15 ms per route.
+- **Validation without an Engine.** `test/mock-engine.js` serves the Engine API subset above
+  over a unix socket with fixtures for every state (§§5–6, §19). `npm test` runs 45 tests
+  (provider · model · env · API boundary incl. an offline process) against it; for visual
+  validation: `npm run mock-engine` + `OPUSHUB_DOCKER_SOCKET=/tmp/opushub-mock-docker.sock
+  npm start`. Fixtures are marked `MOCK DATA` and never touch production paths.
+
 ## Security posture
 
 Read-mostly by construction; no shell, no docker writes, no arbitrary file access (allow-listed
 config filenames only), `.env` values never serialized to any response, SPA served same-origin with
-CSP (self assets + user-configured inline custom css/js opt-in). Intended for LAN/VPN; a warning is
-shown if bound beyond localhost? — V1 documents this in README.
+CSP (self assets + user-configured inline custom css/js opt-in). Intended for LAN/VPN — V1
+documents this in README.
+
+Phase 2 boundary audit (all verified by tests and/or live probes):
+
+| Surface | Guarantee |
+| --- | --- |
+| Docker socket | never in any API response; public reasons are generic (`no-socket`, `socket-missing`, `invalid-endpoint`, `unreachable`) |
+| Container env | `Config.Env` never projected; `Cmd` redacted (`--flag=secret`, `KEY=secret`, `user:pass@` masked) |
+| Host paths | `workingDir` label, MACs, full container IDs, entrypoint dropped from projections; mount sources stay (the UI's Volumes view needs them) |
+| Logs ref | `^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,127}$` validated; unknown containers → clean error, no daemon text leaked |
+| RSS links/images | `http(s)`-only, blanked otherwise; client renders blank links as text, never `<a href="">` |
+| Remote icon SVG | `sanitizeSvg()` strips `<script>`, `<foreignObject>`, `on*` handlers, `javascript:` hrefs (bundled icons pass through the same filter) |
+| Config writes | `safeHref`/`safeIcon` reject `javascript:` etc. with 400 *before* any write; rejected PUTs leave files untouched (verified) |
+| Static user assets | `safeJoin` traversal guard; `..` requests 404 without content |
+| Log/activity rendering | text-only (`<pre>`, no `dangerouslySetInnerHTML` except sanitized icon SVG); ANSI/control chars stripped in the log drawer |
 
 ## What V1 explicitly is not
 

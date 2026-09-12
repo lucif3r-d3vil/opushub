@@ -30,6 +30,7 @@ export const DEFAULT_LAYOUT = {
     rail: ['weather', 'markets', 'news', 'bookmarks', 'activity'],
     hidden: [],
     sizes: { overview: 'md', services: 'md', weather: 'md', markets: 'md', news: 'md', activity: 'md' },
+    setupDismissed: false,
   },
   services: { groupOrder: null, order: {} },
 };
@@ -249,12 +250,19 @@ export async function dockerContainers({ refreshMs = 15000 } = {}) {
   }
   const at = Date.now();
   const avail = docker.availability();
-  if (!avail.ok) { dockerCache = { at, containers: null, reason: avail.reason }; return dockerCache; }
+  // NOTE: only `public` reasons cross the API boundary — `reason` may name socket paths
+  // and stays in server logs. See server/providers/docker.js.
+  if (!avail.ok) {
+    if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] unavailable: ${avail.reason}`);
+    dockerCache = { at, containers: null, reason: avail.public };
+    return dockerCache;
+  }
   try {
     const containers = await docker.listContainers({ all: true });
     dockerCache = { at, containers, reason: null };
   } catch (err) {
-    dockerCache = { at, containers: null, reason: `Docker engine error: ${err.message}` };
+    if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] engine error: ${err.message}`);
+    dockerCache = { at, containers: null, reason: 'Docker engine answered with an error. Check the daemon and try again.' };
   }
   return dockerCache;
 }
@@ -326,4 +334,136 @@ export function findService(data, group, name) {
 export function getStacksWithStatus() {
   const { stacks } = readStacks();
   return stacks;
+}
+
+// ---------------------------------------------------------------------------
+// Stacks document: configured stacks + discovered compose projects + standalone
+// ---------------------------------------------------------------------------
+
+function linkContainer(service, containers) {
+  if (!containers?.length) return null;
+  const byRef = (c) => (service.container && (c.name === service.container || c.id === service.container || c.id.startsWith(service.container)));
+  return (
+    containers.find(byRef) ||
+    containers.find((c) => c.name === service.name || c.name.toLowerCase() === service.name.toLowerCase()) ||
+    containers.find((c) => c.labels?.service?.toLowerCase() === service.name.toLowerCase()) ||
+    null
+  );
+}
+
+const briefOf = (c) => (c ? { name: c.name, id: c.id, state: c.state, status: c.status, health: c.health, image: c.image } : null);
+
+export function stackStatus(memberContainers, live) {
+  if (!live) return 'unavailable';
+  if (!memberContainers.length) return 'unlinked';
+  const states = memberContainers.map((c) => c?.state ?? null);
+  if (states.every((s) => s === 'running')) return states.some((s) => s == null) ? 'degraded' : 'operational';
+  if (states.some((s) => s === 'running')) return 'degraded';
+  if (states.every((s) => s == null)) return 'unlinked';
+  return 'attention';
+}
+
+/**
+ * The full stacks view the UI renders:
+ *  - configured stacks from stacks.yaml (members linked to live containers when possible)
+ *  - discovered compose projects (containers sharing a com.docker.compose.project label
+ *    whose project is NOT already covered by a same-named configured stack)
+ *  - standalone containers (no compose project, not linked to any configured member)
+ * `live` is false when the engine is unreachable; reasons are public-safe (no paths).
+ */
+export async function getStacksDoc() {
+  const { stacks } = readStacks();
+  const { groups } = readServices();
+  const { containers, reason } = await dockerContainers();
+  const live = !!containers;
+  const all = groups.flatMap((g) => g.services.map((s) => ({ ...s, group: g.name })));
+
+  const linkedIds = new Set();
+  const out = stacks.map((st) => {
+    const members = st.services.map((name) => all.find((s) => s.name === name)).filter(Boolean);
+    const links = members.map((m) => {
+      const c = linkContainer(m, containers);
+      if (c) linkedIds.add(c.id);
+      return { container: briefOf(c), service: m.name, icon: m.icon ?? null, group: m.group ?? null, href: m.href ?? null };
+    });
+    const states = links.map((l) => l.container);
+    return {
+      ...st,
+      source: 'configured',
+      members: links,
+      status: stackStatus(states, live),
+      statusReason: live ? null : reason,
+      containerCount: links.filter((l) => l.container).length,
+    };
+  });
+
+  // discovered compose projects + standalone containers (engine only)
+  const discovered = [];
+  const standalone = [];
+  if (containers) {
+    const configuredNames = new Set(stacks.map((s) => s.name.toLowerCase()));
+    const { projects, standalone: bare } = docker.groupByProject(containers);
+    for (const [project, members] of [...projects.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      // Same-named configured stacks absorb their project members; other projects surface
+      // as discovered stacks. Either way their containers are "accounted for".
+      if (configuredNames.has(project.toLowerCase())) {
+        for (const c of members) linkedIds.add(c.id);
+        continue;
+      }
+      const links = members.map((c) => {
+        linkedIds.add(c.id);
+        const svcName = c.labels?.service || c.name;
+        const svc = all.find((s) => s.name.toLowerCase() === String(svcName).toLowerCase());
+        return {
+          container: briefOf(c),
+          service: svc?.name ?? String(svcName),
+          icon: svc?.icon ?? null,
+          group: svc?.group ?? null,
+          href: svc?.href ?? null,
+          discovered: !svc,
+        };
+      });
+      discovered.push({
+        name: project,
+        description: null,
+        icon: null,
+        services: links.map((l) => l.service),
+        compose: null,
+        notes: null,
+        source: 'discovered',
+        members: links,
+        status: stackStatus(links.map((l) => l.container), true),
+        statusReason: null,
+        containerCount: links.length,
+      });
+    }
+    for (const c of bare) {
+      if (!linkedIds.has(c.id)) standalone.push(briefOf(c));
+    }
+  }
+
+  return { stacks: [...out, ...discovered], live, statusReason: live ? null : reason, standalone };
+}
+
+/** Enrich one stack's members with inspect-level detail (ports/networks/volumes/stats). */
+export async function enrichStackMembers(stack) {
+  if (!docker.availability().ok) {
+    return stack.members.map((m) => ({ ...m, stats: null, ports: [], networks: [], mounts: [] }));
+  }
+  return Promise.all(stack.members.map(async (m) => {
+    if (!m.container) return { ...m, stats: null, ports: [], networks: [], mounts: [] };
+    try {
+      const [insp, stats] = await Promise.all([
+        docker.inspectContainer(m.container.name),
+        docker.containerStats(m.container.name).catch(() => null),
+      ]);
+      return {
+        ...m,
+        stats, ports: insp.ports, networks: insp.networks, mounts: insp.mounts,
+        startedAt: insp.state.startedAt, restartCount: insp.state.restartCount,
+        restartPolicy: insp.restartPolicy, command: insp.command, created: insp.created,
+        health: insp.state.health,
+      };
+    } catch { return { ...m, stats: null, error: true }; }
+  }));
 }

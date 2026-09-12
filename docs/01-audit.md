@@ -85,3 +85,61 @@ numbers are introduced anywhere in production code.
    so `unavailable` is a first-class state the UI renders honestly.
 4. Do not add an auth layer, shell execution, or Docker write actions in V1. Infrastructure access
    is read-only and server-side.
+
+---
+
+# Phase 2 — real-environment audit (2026-09-12)
+
+Audited against branch `arena/01a094af-opushub` on the machine available to this session. The
+Phase 2 brief asks OpusHub to run "against the actual OpusGrid environment" — this section records
+what that environment actually is, because several Phase 2 assumptions do not hold here.
+
+## Method
+
+`cat /etc/os-release`, `uname`, `which docker`, socket probes at `/var/run/docker.sock` and
+`/run/docker.sock`, `env`, filesystem sweeps (`find / -maxdepth 6` for compose files, `.env*`,
+`*homepage*`, `*opus*`), `free`/`df`/`ip addr`, `sudo` + `apt-get update` + egress probes
+(`registry.npmjs.org`, `deb.debian.org`, `download.docker.com`, `open-meteo.com`, `stooq.com`).
+
+## Findings
+
+| Fact | Value |
+| --- | --- |
+| OS / arch | Debian 12 (bookworm), x86_64, kernel 6.1.158+ |
+| CPU / RAM | 2 vCPU (Xeon @ 2.60 GHz), 3.9 GB RAM, **no swap** |
+| Disk | 21 GB ext4 root, ~4% used |
+| Network | `lo` + `eth0` (169.254.0.21/30); no Docker bridges, no extra NICs |
+| Docker CLI | **absent** (`docker: command not found`) |
+| Docker socket | **absent** (`/var/run/docker.sock` and `/run/docker.sock` do not exist) |
+| Containers / networks / volumes / stacks | **none exist** — no Engine, nothing to list |
+| Compose files | **none anywhere** on the filesystem |
+| OpusGrid homelab / Homepage install | **not present** — no directories, no configs, no reverse proxy |
+| `.env` files | **none** (verified again; Phase 1 finding still holds) |
+| `sudo` | passwordless root available |
+| `apt` | unusable — `deb.debian.org` unreachable, so `docker.io` cannot be installed |
+| Egress | npm registry reachable; Docker downloads, Open-Meteo, Stooq, Iconify **blocked** |
+| `/proc`, `/sys`, `os.networkInterfaces()` | present — host metrics are real |
+| Thermal sensors / GPU | **absent** (`/sys/class/thermal` empty, no DRM cards, no NVIDIA driver) |
+
+## Consequences for Phase 2
+
+1. **There is no OpusGrid host to run against.** No container was stopped, restarted, modified or
+   created at any point — there is no production infrastructure in this sandbox to disturb (§2
+   holds trivially).
+2. **Docker could not be installed.** With `apt` broken and `download.docker.com` blocked, no
+   Engine binary is obtainable. Phase 2's live-Docker validation therefore runs the **real
+   provider code** (socket → Engine HTTP API → projection → API → UI) against
+   `test/mock-engine.js`, a mock Engine speaking the genuine Docker HTTP-over-unix-socket
+   protocol with fixtures for every state the UI must handle (running, stopped, healthy,
+   unhealthy, paused, created, standalone, long names, many/no ports, multi-network). Fixtures
+   are clearly marked `MOCK DATA` / `MOCK-FIXTURE-*` and are test-only — no fabricated value
+   exists in any production path.
+3. **Real host metrics are genuinely live** (`/proc`, `/sys`): CPU + per-core, load, memory,
+   ext4 `/`, `eth0` throughput, uptime, process count. Temperature, frequency beyond
+   `/proc/cpuinfo`, swap and GPU correctly report unavailable — nothing is invented.
+4. **Weather, markets, news and remote icons remain unreachable** (egress blocked), so those
+   providers were validated in their `unconfigured`/`unavailable` states only — which is
+   exactly what §§17–18 needed: the first-run banner and the quiet optional states.
+5. **`.env` discovery was validated for real** by placing and then removing a `config/.env`:
+   `GET /api/health` reported FOUND with the file path and key *names*; a full-response scan of
+   every endpoint confirmed no secret *value* leaks.

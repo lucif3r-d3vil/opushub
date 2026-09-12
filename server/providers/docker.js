@@ -1,39 +1,82 @@
 // DockerProvider — READ-ONLY Docker Engine access, server-side only. The socket is never
 // exposed to the browser; every response is projected through a safe shape (env vars, host
-// config secrets are stripped). If no socket exists, everything reports `unavailable` with
-// the actual reason — statuses and stats stay "Unavailable" in the UI. Never faked.
+// config secrets are stripped, host paths minimized). If no socket exists, everything
+// reports `unavailable` with a public-safe reason — statuses and stats stay "Unavailable"
+// in the UI. Never faked.
+//
+// Endpoint resolution (first hit wins):
+//   1. OPUSHUB_DOCKER_SOCKET=/path/to/docker.sock   (explicit socket path)
+//   2. DOCKER_HOST=unix:///path                     (unix socket)
+//   3. DOCKER_HOST=tcp://host:port                  (plain TCP; LAN/VPN only, no TLS in V1)
+//   4. /var/run/docker.sock, then /run/docker.sock  (well-known defaults, if present)
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
+import os from 'node:os';
 
-function resolveEndpoint() {
-  const sock = process.env.OPUSHUB_DOCKER_SOCKET;
+const API_VERSION = 'v1.43';
+
+// ---------------------------------------------------------------------------
+// Endpoint resolution
+// ---------------------------------------------------------------------------
+
+/** Resolve where the Engine lives. Never throws; callers check `.missing`. */
+export function resolveEndpoint() {
+  const sock = (process.env.OPUSHUB_DOCKER_SOCKET || '').trim();
   if (sock) return { socket: sock };
-  const dh = process.env.DOCKER_HOST;
+  const dh = (process.env.DOCKER_HOST || '').trim();
   if (dh) {
-    const m = dh.match(/^unix:\/\/(.+)$/);
-    if (m) return { socket: m[1] };
-    const t = dh.match(/^tcp:\/\/([^:/]+):(\d+)$/);
-    if (t) return { host: t[1], port: Number(t[2]) };
+    const unix = dh.match(/^unix:\/\/(.+)$/);
+    if (unix) return { socket: unix[1] };
+    const tcp = dh.match(/^tcp:\/\/([^:/[\]]+|\[[^\]]+\]):(\d{1,5})$/);
+    if (tcp) return { host: tcp[1].replace(/^\[|\]$/g, ''), port: Number(tcp[2]) };
+    return { invalid: dh };
   }
   const defaults = ['/var/run/docker.sock', '/run/docker.sock'];
-  for (const d of defaults) if (fs.existsSync(d)) return { socket: d };
-  if (process.env.OSTREE_TMP || fs.existsSync('/run/host-services/docker.sock')) return { socket: '/var/run/docker.sock' };
-  return { missing: '/var/run/docker.sock' };
+  for (const d of defaults) {
+    try {
+      if (fs.statSync(d).isSocket()) return { socket: d };
+    } catch { /* next */ }
+  }
+  return { missing: true };
 }
+
+// Public-safe reasons. Internal detail (socket paths, errno text) stays in server logs;
+// the browser only ever sees these generic strings plus a configuration hint.
+const PUBLIC_REASONS = {
+  'no-socket':
+    'Docker engine not connected — no socket found. Set the socket location in the server environment to enable live status.',
+  'socket-missing':
+    'Docker socket is configured but not present on the server. Check the engine and the configured socket location.',
+  'invalid-endpoint':
+    'DOCKER_HOST is set to something OpusHub cannot use. Expected unix:///path/to/docker.sock or tcp://host:port.',
+  unreachable:
+    'Docker socket is present but the engine is not responding. Check that the daemon is running.',
+};
 
 export function availability() {
   const ep = resolveEndpoint();
   if (ep.socket) {
     try {
-      fs.statSync(ep.socket);
-      return { ok: true, ep };
-    } catch {
-      return { ok: false, reason: `Docker socket configured at ${ep.socket} but not present` };
+      const st = fs.statSync(ep.socket);
+      if (!st.isSocket()) {
+        return { ok: false, state: 'socket-missing', reason: `configured path ${ep.socket} exists but is not a socket`, public: PUBLIC_REASONS['socket-missing'] };
+      }
+      return { ok: true, state: 'connected', ep };
+    } catch (err) {
+      return { ok: false, state: 'socket-missing', reason: `Docker socket configured at ${ep.socket} but not present (${err.code || err.message})`, public: PUBLIC_REASONS['socket-missing'] };
     }
   }
-  if (ep.host) return { ok: true, ep, tcp: true };
-  return { ok: false, reason: `no Docker socket found (${ep.missing}); set OPUSHUB_DOCKER_SOCKET or DOCKER_HOST to connect` };
+  if (ep.host) return { ok: true, state: 'connected', ep, tcp: true };
+  if (ep.invalid) return { ok: false, state: 'invalid-endpoint', reason: `unparseable DOCKER_HOST: ${ep.invalid}`, public: PUBLIC_REASONS['invalid-endpoint'] };
+  return { ok: false, state: 'no-socket', reason: 'no Docker socket found (checked OPUSHUB_DOCKER_SOCKET, DOCKER_HOST, /var/run/docker.sock, /run/docker.sock)', public: PUBLIC_REASONS['no-socket'] };
+}
+
+/** The only docker-availability shape allowed to cross the API boundary. */
+export function publicStatus(probed) {
+  if (probed?.ok) return { ok: true, state: 'connected', version: probed.version, api: probed.apiVersion };
+  const state = probed?.state && probed.state !== 'connected' ? probed.state : 'unreachable';
+  return { ok: false, state, reason: PUBLIC_REASONS[state] || PUBLIC_REASONS.unreachable };
 }
 
 function request(pathname, { timeoutMs = 6000 } = {}) {
@@ -41,13 +84,13 @@ function request(pathname, { timeoutMs = 6000 } = {}) {
     const { ok, ep, reason } = availability();
     if (!ok) return reject(Object.assign(new Error(reason), { unavailable: true }));
     const opts = ep.socket ? { socketPath: ep.socket } : { host: ep.host, port: ep.port };
-    const req = http.get({ ...opts, path: `/v1.43${pathname}`, headers: { host: 'docker' } }, (res) => {
-      let body = '';
-      res.setEncoding('utf8');
-      res.on('data', (c) => (body += c));
+    const req = http.get({ ...opts, path: `/${API_VERSION}${pathname}`, headers: { host: 'docker' } }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
-        if (res.statusCode >= 400) return reject(new Error(`docker API ${res.statusCode}: ${body.slice(0, 200)}`));
-        resolve(body);
+        const body = Buffer.concat(chunks);
+        if (res.statusCode >= 400) return reject(new Error(`docker API ${res.statusCode}: ${body.toString('utf8').slice(0, 200)}`));
+        resolve({ body, contentType: res.headers['content-type'] || '' });
       });
     });
     req.setTimeout(timeoutMs, () => req.destroy(new Error('docker request timed out')));
@@ -55,42 +98,60 @@ function request(pathname, { timeoutMs = 6000 } = {}) {
   });
 }
 
+async function requestJson(pathname, opts) {
+  const { body } = await request(pathname, opts);
+  return JSON.parse(body.toString('utf8'));
+}
+
 export async function probe() {
   const a = availability();
   if (!a.ok) return a;
   try {
-    const ver = JSON.parse(await request('/version', { timeoutMs: 2500 }));
-    return { ok: true, version: ver.Version, apiVersion: ver.ApiVersion };
+    const ver = await requestJson('/version', { timeoutMs: 2500 });
+    return { ok: true, state: 'connected', version: ver.Version, apiVersion: ver.ApiVersion };
   } catch (err) {
-    return { ok: false, reason: `socket present but engine unreachable: ${err.message}` };
+    return { ok: false, state: 'unreachable', reason: `socket present but engine unreachable: ${err.message}`, public: PUBLIC_REASONS.unreachable };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Projections (safe shapes — env vars and secrets never leave this module)
+// ---------------------------------------------------------------------------
 
 function labelsOf(cfgLabels) {
   const l = cfgLabels || {};
   return {
     project: l['com.docker.compose.project'] || null,
     service: l['com.docker.compose.service'] || null,
-    workingDir: l['com.docker.compose.project.config_files'] || null,
-    managedBy: l['com.opusgrid.stack'] || l['com.docker.compose.project'] ? 'compose' : null,
   };
 }
 
+/** Mask credential-looking tokens in a container command line. Conservative by design:
+// only `key=value` tokens whose key smells like a secret, `--flag=value` forms of known
+// credential flags, and `user:pass@` in URLs. Everything else passes through untouched. */
+export function redactCommand(cmd) {
+  if (!cmd) return cmd;
+  const eqFlags = /(--?(?:password|passwd|pass|token|secret|api-?key|auth-?token|client-?secret|access-?key)[\w-]*)=(\S+)/gi;
+  let out = String(cmd).replace(eqFlags, '$1=••••');
+  out = out.replace(/(^|\s)([A-Za-z_][A-Za-z0-9_]*(?:PASS(?:WOR?D)?|PASSWD|SECRET|TOKEN|API[_-]?KEY|CREDENTIALS?|PWD)[A-Za-z0-9_]*)=(\S+)/gi, '$1$2=••••');
+  out = out.replace(/([a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/\s:@]+:)([^/\s@]+)(@)/g, '$1••••$3');
+  return out;
+}
+
 export async function listContainers({ all = true } = {}) {
-  const body = await request(`/containers/json?all=${all ? 'true' : 'false'}`);
-  return JSON.parse(body).map((c) => {
+  const list = await requestJson(`/containers/json?all=${all ? 'true' : 'false'}`);
+  return list.map((c) => {
     const cfg = c.Labels || {};
     return {
-      id: c.Id.slice(0, 12),
-      fullId: c.Id,
+      id: String(c.Id).slice(0, 12),
       name: (c.Names?.[0] || '').replace(/^\//, ''),
       image: c.Image,
-      imageId: c.ImageID?.slice(7, 19) ?? null,
+      imageId: typeof c.ImageID === 'string' && c.ImageID.startsWith('sha256:') ? c.ImageID.slice(7, 19) : null,
       state: c.State,           // created|running|paused|restarting|removing|exited|dead
       status: c.Status,
+      // NOTE: /containers/json carries no health (see inspect); preserved if a daemon sends it.
       health: c.Health ?? null,
-      restartCount: null,
-      startedAt: null,
+      created: typeof c.Created === 'number' ? c.Created : null, // unix seconds, from the daemon
       ports: (c.Ports || []).map((p) => ({ ip: p.IP, private: p.PrivatePort, public: p.PublicPort, type: p.Type })),
       labels: { project: cfg['com.docker.compose.project'] || null, service: cfg['com.docker.compose.service'] || null },
     };
@@ -98,8 +159,7 @@ export async function listContainers({ all = true } = {}) {
 }
 
 export async function inspectContainer(ref) {
-  const body = await request(`/containers/${encodeURIComponent(ref)}/json`);
-  const c = JSON.parse(body);
+  const c = await requestJson(`/containers/${encodeURIComponent(ref)}/json`);
   const labels = labelsOf(c.Config?.Labels);
   const health = c.State?.Health?.Status ?? null;
   const mounts = (c.Mounts || []).map((m) => ({ type: m.Type, source: m.Source, target: m.Destination, rw: m.RW }));
@@ -112,18 +172,18 @@ export async function inspectContainer(ref) {
     ip: n.IPAddress,
     gateway: n.Gateway,
     aliases: n.Aliases || [],
-    mac: n.MacAddress?.slice(0, 8) ?? null,
   }));
   return {
-    id: c.Id.slice(0, 12),
+    id: String(c.Id).slice(0, 12),
     name: (c.Name || '').replace(/^\//, ''),
     image: c.Config?.Image ?? null,
-    entrypoint: c.Config?.Entrypoint?.join(' ') ?? null,
-    command: Array.isArray(c.Config?.Cmd) ? c.Config.Cmd.join(' ') : (c.Config?.Cmd ?? null),
+    // entrypoint/env deliberately omitted: env values are secrets, entrypoint is unused by the UI.
+    command: redactCommand(Array.isArray(c.Config?.Cmd) ? c.Config.Cmd.join(' ') : (c.Config?.Cmd ?? null)),
     state: {
       status: c.State?.Status, running: !!c.State?.Running, startedAt: c.State?.StartedAt || null,
       finishedAt: c.State?.FinishedAt && !c.State.FinishedAt.startsWith('0001') ? c.State.FinishedAt : null,
-      exitCode: c.State?.ExitCode ?? null, health, restartCount: c.HostConfig?.RestartPolicy?.MaximumRetryCount ? c.RestartCount : 0,
+      exitCode: c.State?.ExitCode ?? null, health,
+      restartCount: c.RestartCount ?? 0,
       oomKilled: !!c.State?.OOMKilled,
     },
     restartPolicy: c.HostConfig?.RestartPolicy?.Name ?? null,
@@ -135,50 +195,106 @@ export async function inspectContainer(ref) {
   };
 }
 
-export async function containerStats(ref, { prev } = {}) {
-  const body = await request(`/containers/${encodeURIComponent(ref)}/stats?stream=false`, { timeoutMs: 8000 });
-  const s = JSON.parse(body);
-  if (!s || s.error) throw new Error(s?.message || 'stats unavailable');
+export async function containerStats(ref) {
+  const s = await requestJson(`/containers/${encodeURIComponent(ref)}/stats?stream=false`, { timeoutMs: 8000 });
+  if (!s || s.error || !s.cpu_stats) throw new Error(s?.message || 'stats unavailable');
   const cpuDelta = (s.cpu_stats?.system_cpu_usage || 0) - (s.precpu_stats?.system_cpu_usage || 0);
-  const sysCpus = s.cpu_stats?.online_cpus || (s.cpu_stats?.cpu_usage?.percpu_usage || []).length || osLocal.cpus().length;
+  const sysCpus = s.cpu_stats?.online_cpus || (s.cpu_stats?.cpu_usage?.percpu_usage || []).length || os.cpus().length;
   let cpuPct = null;
   const usage = s.cpu_stats?.cpu_usage?.total_usage;
   const prevUsage = s.precpu_stats?.cpu_usage?.total_usage;
-  if (typeof usage === 'number' && typeof prevUsage === 'number' && cpuDelta > 0) {
-    cpuPct = Math.min(100 * sysCpus, Math.max(0, 100 * ((usage - prevUsage) / cpuDelta)));
+  if (typeof usage === 'number' && typeof prevUsage === 'number' && cpuDelta > 0 && sysCpus > 0) {
+    // Docker's own formula: (cpuDelta / systemDelta) * onlineCpus * 100.
+    // 100% = one core fully busy; a 4-core box tops out at 400%.
+    cpuPct = Math.min(100 * sysCpus, Math.max(0, (100 * sysCpus * (usage - prevUsage)) / cpuDelta));
   }
   const limit = s.memory_stats?.limit || null;
-  const memUsed = s.memory_stats?.usage ?? s.memory_stats?.max_usage ?? null;
+  const memUsed = s.memory_stats?.usage ?? null; // never substitute the high-watermark for current use
   const netAgg = { rx: 0, tx: 0 };
   for (const n of Object.values(s.networks || {})) { netAgg.rx += n.rx_bytes || 0; netAgg.tx += n.tx_bytes || 0; }
+  const blkio = Array.isArray(s.blkio_stats?.io_service_bytes_recursive)
+    ? s.blkio_stats.io_service_bytes_recursive.reduce((a, x) => a + (x.value || 0), 0)
+    : null;
   return {
     cpu: cpuPct,
-    memory: limit ? { used: memUsed, limit } : { used: memUsed, limit: null },
+    memory: { used: memUsed, limit },
     net: netAgg,
     pids: s.pids_stats?.current ?? null,
-    blockIo: s.blkio_stats?.io_service_bytes_recursive?.reduce((a, x) => a + (x.value || 0), 0) || null,
+    blockIo: blkio || null,
   };
 }
-let _cpus = null;
-function os_cpus() { return _cpus ??= osLocal.cpus().length; }
-void os_cpus;
-import osLocal from 'node:os';
 
-export async function logs(ref, { tail = 200 } = {}) {
-  const body = await request(`/containers/${encodeURIComponent(ref)}/logs?stdout=true&stderr=true&tail=${Math.min(500, Math.max(1, tail | 0))}`);
-  // Docker multiplexed-stream framing on some daemons; strip non-printable header bytes.
-  return body.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '').split('\n').slice(-tail);
+// ---------------------------------------------------------------------------
+// Logs — demultiplexed, bounded, paginated by tail
+// ---------------------------------------------------------------------------
+
+const MAX_LOG_BYTES = 256 * 1024;
+
+/** Parse Docker's multiplexed log stream (8-byte header per frame) into text lines.
+// Non-TTY containers return framed stdout/stderr; TTY containers return a raw stream.
+// Detects framing by attempting a strict parse and falls back to raw text. */
+export function demuxLogs(buf) {
+  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf ?? ''), 'utf8');
+  if (!b.length) return [];
+  // Strict probe: walk headers; if the structure holds for the whole buffer, it's framed.
+  let framed = b.length >= 8;
+  if (framed) {
+    let off = 0;
+    while (off + 8 <= b.length) {
+      const stream = b[off];
+      const zeros = b[off + 1] === 0 && b[off + 2] === 0 && b[off + 3] === 0;
+      const size = b.readUInt32BE(off + 4);
+      if ((stream !== 1 && stream !== 2) || !zeros || size > 16 * 1024 * 1024 || off + 8 + size > b.length) {
+        // allow a truncated final frame only if at least one full frame parsed
+        framed = off > 0 && off + 8 <= b.length && (stream === 1 || stream === 2) && zeros;
+        break;
+      }
+      off += 8 + size;
+      if (off === b.length) break;
+    }
+    if (off !== b.length && !(off > 0)) framed = false;
+  }
+  let text;
+  if (framed) {
+    const parts = [];
+    let off = 0;
+    while (off + 8 <= b.length) {
+      const size = b.readUInt32BE(off + 4);
+      const end = Math.min(b.length, off + 8 + size);
+      parts.push(b.toString('utf8', off + 8, end));
+      off += 8 + size;
+      if (off >= b.length) break;
+    }
+    text = parts.join('');
+  } else {
+    text = b.toString('utf8');
+  }
+  return text.split('\n').map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
+}
+
+export async function logs(ref, { tail = 200, timestamps = false } = {}) {
+  const n = Math.min(500, Math.max(1, tail | 0));
+  const { body } = await request(
+    `/containers/${encodeURIComponent(ref)}/logs?stdout=true&stderr=true&tail=${n}${timestamps ? '&timestamps=true' : ''}`,
+    { timeoutMs: 8000 },
+  );
+  const capped = body.length > MAX_LOG_BYTES ? body.subarray(body.length - MAX_LOG_BYTES) : body;
+  const lines = demuxLogs(capped);
+  if (lines.length && lines[lines.length - 1] === '') lines.pop(); // trailing newline, not a line
+  return lines.slice(-n);
 }
 
 export async function events({ sinceSec } = {}) {
-  const q = sinceSec ? `?since=${Math.floor(sinceSec)}` : '';
+  const params = new URLSearchParams();
+  if (sinceSec) params.set('since', String(Math.floor(sinceSec)));
+  params.set('until', String(Math.floor(Date.now() / 1000)));
   try {
-    const body = await request(`/events${q}&until=${Math.floor(Date.now() / 1000)}`, { timeoutMs: 4000 });
-    const lines = body.split('\n').filter(Boolean);
+    const { body } = await request(`/events?${params.toString()}`, { timeoutMs: 4000 });
+    const lines = body.toString('utf8').split('\n').filter(Boolean);
     return lines.slice(-100).map((l) => {
       try {
         const e = JSON.parse(l);
-        return { time: e.time * 1000, action: e.Action, type: e.Type, actor: (e.Actor?.Attributes?.name) || null, status: e.Actor?.Attributes?.exitCode ?? null };
+        return { time: e.time * 1000, action: e.Action, type: e.Type, actor: e.Actor?.Attributes?.name || null, status: e.Actor?.Attributes?.exitCode ?? null };
       } catch { return null; }
     }).filter(Boolean);
   } catch { return []; }
@@ -186,13 +302,17 @@ export async function events({ sinceSec } = {}) {
 
 export async function imagesSummary() {
   try {
-    const body = await request('/images/json');
-    return JSON.parse(body).slice(0, 400).map((i) => ({ id: i.Id.slice(7, 19), tags: i.RepoTags || [], size: i.Size }));
+    const list = await requestJson('/images/json');
+    return list.slice(0, 400).map((i) => ({
+      id: typeof i.Id === 'string' && i.Id.startsWith('sha256:') ? i.Id.slice(7, 19) : null,
+      tags: i.RepoTags || [],
+      size: i.Size,
+    }));
   } catch { return []; }
 }
 
 export async function systemDf() {
-  try { return JSON.parse(await request('/system/df?type=container&type=image&type=volume')); }
+  try { return await requestJson('/system/df'); }
   catch { return null; }
 }
 
@@ -206,4 +326,25 @@ export function netAvailable() {
     s.on('error', () => res(false));
     s.on('timeout', () => { s.destroy(); res(false); });
   }) : Promise.resolve(true);
+}
+
+// ---------------------------------------------------------------------------
+// Stack discovery — compose projects vs standalone containers
+// ---------------------------------------------------------------------------
+
+/** Group live containers by their compose project label. Containers without a project
+// label are standalone (or managed outside compose) — never force-fit into a stack. */
+export function groupByProject(containers) {
+  const projects = new Map(); // project name -> containers[]
+  const standalone = [];
+  for (const c of containers || []) {
+    const project = c.labels?.project;
+    if (project) {
+      if (!projects.has(project)) projects.set(project, []);
+      projects.get(project).push(c);
+    } else {
+      standalone.push(c);
+    }
+  }
+  return { projects, standalone };
 }

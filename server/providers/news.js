@@ -35,7 +35,15 @@ export async function getNews(feeds, { limit = 40 } = {}) {
     if (r.ok) {
       anyOk = true;
       const hostName = (() => { try { return new URL(r.feed.url).host; } catch { return null; } })();
-      for (const it of r.items) items.push({ ...it, source: it.source || r.feed.name || r.feedTitle || hostName });
+      // A compromised feed must not smuggle javascript:/data: URLs into the client's hrefs.
+      for (const it of r.items) {
+        items.push({
+          ...it,
+          link: /^https?:\/\//i.test(it.link || '') ? it.link : '',
+          image: it.image && /^https?:\/\//i.test(it.image) ? it.image : null,
+          source: it.source || r.feed.name || r.feedTitle || hostName,
+        });
+      }
     } else {
       errors.push({ url: r.feed.url, name: r.feed.name || null, error: r.error });
     }
