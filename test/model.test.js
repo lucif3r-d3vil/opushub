@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { startMockEngine } from './mock-engine.js';
+import { hostAddress } from '../server/lib/hostAddress.js';
 
 const ENGINE = await startMockEngine();
 process.env.OPUSHUB_DOCKER_SOCKET = ENGINE.socketPath;
@@ -33,6 +34,19 @@ test.after(async () => {
 async function view() {
   await m.invalidateDiscovery();
   return m.getServicesView();
+}
+
+// Drive the host-address resolver into a known state so its branches are tested deliberately,
+// never by accident of which network this machine happens to be on: `null` means “no usable
+// host address” (probes disabled), anything else becomes the operator env override.
+async function setHostAddress(address) {
+  if (address) {
+    process.env.OPUSHUB_HOST_ADDRESS = address;
+    await hostAddress({ force: true });                 // env wins, no probing
+  } else {
+    delete process.env.OPUSHUB_HOST_ADDRESS;
+    await hostAddress({ force: true, probes: false });  // deterministic “none”
+  }
 }
 
 // ── the join: one canonical object per container ──────────────────────────────
@@ -156,6 +170,8 @@ test('stacks are compose projects; the overlay renames the project its container
 });
 
 test('every stack member carries the URL discovery resolved, so the stack page needs no config', async () => {
+  await setHostAddress(null);          // deliberate: no usable host address, so the published port cannot resolve yet
+  await m.invalidateDiscovery();
   const doc = await m.getStacksDoc();
   const media = doc.stacks.find((s) => s.project === 'opustream');
   const jf = media.members.find((mm) => mm.containerName === 'jellyfin');
@@ -187,24 +203,34 @@ test('enrichStackMembers adds inspect detail per member', async () => {
 // ── settings and diagnostics ──────────────────────────────────────────────────
 
 test('the host address in settings changes discovered URLs, and nothing else', async () => {
+  // no usable host address → the resolver refuses to invent a URL, and says exactly what to set
+  await setHostAddress(null);
   const before = await view();
   const navidrome = byName(before, 'navidrome');
-  if (before.hostAddress) {
-    assert.equal(navidrome.url, `http://${before.hostAddress}:4533`, 'published-port resolves against the host we can name');
-  } else {
-    assert.equal(navidrome.url, null, 'no usable host address → no invented URL');
-    assert.match(navidrome.urlNote, /Settings → System|OPUSHUB_HOST_ADDRESS/);
-  }
+  assert.equal(navidrome.url, null, 'no usable host address → no invented URL');
+  assert.match(navidrome.urlNote, /Settings → System|OPUSHUB_HOST_ADDRESS/);
+
+  // a host the resolver can name (operator env override) → published ports resolve against it
+  await setHostAddress('203.0.113.7');
+  const detected = await view();
+  assert.equal(byName(detected, 'navidrome').url, 'http://203.0.113.7:4533', 'published-port resolves against the host we can name');
+
+  // a configured host address wins over detection, and every published port lights up at once
   const settings = await m.putSettings({ infrastructure: { hostAddress: '198.51.100.20' } });
   assert.equal(settings.infrastructure.hostAddress, '198.51.100.20');
   const after = await view();
   assert.equal(byName(after, 'navidrome').url, 'http://198.51.100.20:4533', '…and appears the moment a real host is named');
   assert.equal(byName(after, 'jellyfin').url, 'http://stream.lab.internal', 'proxy-derived URLs never depend on the host address');
   assert.equal(byName(await view(), 'qbittorrent').url, 'http://198.51.100.20:8080', 'every published port lights up at once');
+
+  // leave the world as we found it
   await m.putSettings({ infrastructure: { hostAddress: null } });
+  await setHostAddress(null);
 });
 
 test('getDiscoveryStatus reports engine, sources and overlays without leaking the config dir', async () => {
+  await setHostAddress('203.0.113.7');  // a nameable host → published-port resolutions are counted, not zero
+  await m.invalidateDiscovery();
   const doc = await m.getDiscoveryStatus();
   assert.equal(doc.engine.ok, true);
   assert.equal(doc.engine.state, 'connected');
