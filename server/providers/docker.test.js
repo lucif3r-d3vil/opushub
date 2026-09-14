@@ -143,11 +143,9 @@ test('containerStats: sane cpu/mem/net for running containers', async () => {
   assert.ok(s.blockIo > 0);
 });
 
-test('containerStats: stopped containers yield nulls, never zeros-as-data', async () => {
-  const s = await docker.containerStats('paperless');
-  assert.equal(s.cpu, null);
-  assert.equal(s.memory.used, null);
-  assert.equal(s.pids, null);
+test('containerStats: stopped containers are unavailable, never zeros-as-data', async () => {
+  // the daemon answers with empty cgroup objects for a stopped container — that is not data
+  await assert.rejects(() => docker.containerStats('paperless'), /unavailable/);
 });
 
 test('logs: multiplexed framing is demuxed, tail honored', async () => {
@@ -217,7 +215,7 @@ test('groupByProject separates compose stacks from standalone', async () => {
   const { projects, standalone } = docker.groupByProject(list);
   assert.deepEqual([...projects.keys()].sort(), ['cloud', 'home', 'observability', 'opustream', 'photos', 'secure', 'update']);
   assert.equal(projects.get('opustream').length, 8);
-  assert.deepEqual(standalone.map((c) => c.name).sort(), ['nightly-backup-runner-with-a-remarkably-long-name', 'opushub', 'traefik']);
+  assert.deepEqual(standalone.map((c) => c.name).sort(), ['nightly-backup-runner-with-a-remarkably-long-name', 'opushub', 'restart-loop', 'traefik']);
 });
 
 test('listContainers keeps raw labels server-side unless explicitly asked for them', async () => {

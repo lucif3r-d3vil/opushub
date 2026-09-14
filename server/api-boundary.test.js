@@ -112,7 +112,7 @@ test('GET /api/discovery: counters + URL sources, no engine internals', async ()
   const { json } = await get('/api/discovery');
   assert.equal(json.engine.ok, true);
   assert.equal(json.engine.version, '26.1.0-mock');
-  assert.equal(json.engine.containers, 24);
+  assert.equal(json.engine.containers, 25);
   assert.ok(json.urlDiscovery.sources.traefik >= 4);
   assert.ok(json.inventory.applications > 0);
   const blob = JSON.stringify(json);

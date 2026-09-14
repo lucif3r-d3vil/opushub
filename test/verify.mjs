@@ -360,6 +360,73 @@ async function main() {
       check('search: subsequence matching still finds distant matches', fuzzy.status === 200);
     }
 
+    // ---- 8b. Phase 3: read-only service intelligence ----------
+    if (engineLive) {
+      // service detail carries the runtime facts Docker actually has
+      const jf = await get('/api/services/Other/jellyfin');
+      check('service detail: inspect-level facts (healthcheck, started, restarts) cross the boundary',
+        jf.status === 200 && jf.body?.container?.state?.health === 'healthy'
+        && jf.body?.container?.state?.healthcheck?.status === 'healthy'
+        && typeof jf.body?.container?.state?.restartCount === 'number'
+        && !!jf.body?.container?.state?.startedAt, JSON.stringify(jf.body?.container?.state || {}).slice(0, 120));
+      check('service detail: published vs exposed ports stay distinct facts',
+        Array.isArray(jf.body?.container?.ports) && Array.isArray(jf.body?.container?.exposedPorts));
+      check('service detail: image facts arrive without config env',
+        !!jf.body?.image?.tags?.length && !JSON.stringify(jf.body).includes('SHOULD_NEVER_LEAVE_SERVER'));
+
+      const nav = await get('/api/services/Other/navidrome');
+      check('service detail: unhealthy is a health verdict on a running container',
+        nav.body?.service?.status === 'unhealthy' && nav.body?.container?.state?.status === 'running');
+      const seerr = await get('/api/services/Other/seerr');
+      check('service detail: no healthcheck is reported as such, never as unhealthy',
+        seerr.body?.container?.state?.health === null && seerr.body?.service?.status === 'up');
+      const loop = await get('/api/services/Other/restart-loop');
+      check('service detail: a restart loop is visible (restarting + restart count)',
+        loop.body?.container?.state?.status === 'restarting' && (loop.body?.container?.state?.restartCount ?? 0) > 5);
+
+      // stats: on demand, honest, bounded
+      const stats = await get('/api/services/Other/jellyfin/stats');
+      check('stats: fetched on demand with real metrics', stats.body?.status === 'ok' && stats.body?.stats?.cpu != null);
+      const noStats = await get('/api/services/Other/paperless/stats');
+      check('stats: a stopped container reports unavailable, never zeros-as-data', noStats.body?.status === 'unavailable' && noStats.body?.stats === null);
+      const hist = await get('/api/services/Other/jellyfin/stats/history');
+      check('stats history: samples exist only because somebody asked', Array.isArray(hist.body?.samples) && hist.body.samples.length >= 1);
+
+      // logs: read-only, bounded, timestamps optional
+      const logs = await get('/api/services/Other/nextcloud/logs?tail=50');
+      check('logs: a large log stays under the tail cap', logs.body?.status === 'ok' && logs.body.lines.length <= 50 && logs.body.lines.length > 0);
+      const emptyLogs = await get('/api/services/Other/restart-loop/logs');
+      check('logs: an empty log says so honestly', emptyLogs.body?.status === 'ok' && emptyLogs.body.lines.length === 0);
+
+      // service history: real events + the moment watching began
+      const sh = await get('/api/services/Other/jellyfin/history');
+      check('service history: answers with events + watchingSince (never invented)',
+        sh.status === 200 && Array.isArray(sh.body?.events) && 'watchingSince' in (sh.body || {}));
+
+      // stacks: the deterministic status model
+      const stacksDoc = (await get('/api/stacks')).body;
+      const secure = stacksDoc.stacks.find((s) => s.project === 'secure');
+      const opus = stacksDoc.stacks.find((s) => s.project === 'opustream');
+      check('stacks: deterministic statuses (operational vs degraded)',
+        secure?.status === 'operational' && opus?.status === 'degraded', `${secure?.status} / ${opus?.status}`);
+      check('stacks: rollup counts travel with the doc',
+        typeof opus?.unhealthyCount === 'number' && typeof opus?.stoppedCount === 'number' && typeof opus?.attentionCount === 'number');
+
+      // activity: grouping + the watching-since marker
+      const act = await get('/api/activity?grouped=1&limit=50');
+      check('activity: grouped mode answers and reports when watching began',
+        act.status === 200 && Array.isArray(act.body?.items) && 'watchingSince' in (act.body || {}));
+    }
+    {
+      const prov = await get('/api/providers');
+      check('providers: one honest health doc for docker/system/news/weather/markets',
+        prov.status === 200 && JSON.stringify(prov.body?.providers?.map((p) => p.name)) === JSON.stringify(['docker', 'system', 'news', 'weather', 'markets'])
+        && prov.body.providers.every((p) => ['available', 'unavailable', 'degraded', 'idle'].includes(p.state)),
+        JSON.stringify(prov.body?.providers || {}).slice(0, 140));
+      check('providers: docker state matches the engine we are talking to',
+        prov.body?.providers?.find((p) => p.name === 'docker')?.state === (engineLive ? 'available' : 'unavailable'));
+    }
+
     // ---- 9. custom CSS/JS stay opt-in frontend-only ----------
     {
       const off = await send('PUT', '/api/settings', { advanced: { customCss: false, customJs: false } });

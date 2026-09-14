@@ -7,10 +7,13 @@ import { Icon } from '../components/Icon';
 import { OpenLink, PageHero, ProviderNote, StatusDot, StatusLine } from '../components/ui';
 import { LogsDrawer } from '../lib/dockerStatus';
 
+// The deterministic model from server/discovery.js, in user-facing words
 const STATUS_HINT: Record<string, string> = {
-  operational: 'every container in the project is running',
-  degraded: 'some containers up, others not',
-  attention: 'one or more containers are not running',
+  operational: 'every container is running, none unhealthy',
+  degraded: 'at least one container running, others unhealthy or not running',
+  stopped: 'every container is stopped — nothing is running',
+  attention: 'nothing running and at least one container in an unusual state',
+  unknown: 'the engine reports no readable state for one or more containers',
   unlinked: 'this project has no containers on the engine',
   unavailable: 'Docker not connected — status unavailable',
 };
@@ -164,6 +167,8 @@ function StackRow({ stack: s, onOpen, onService }: { stack: Stack; onOpen: () =>
         </div>
         <span className="stale-note" style={{ whiteSpace: 'nowrap' }}>
           {s.runningCount}/{s.containerCount} up
+          {!!s.unhealthyCount && ` · ${s.unhealthyCount} unhealthy`}
+          {!!s.attentionCount && ` · ${s.attentionCount} attention`}
         </span>
       </div>
     </li>

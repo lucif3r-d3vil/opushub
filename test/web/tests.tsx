@@ -63,6 +63,69 @@ const searchResults = (query: string) => ({
     : [{ title: 'Widgets', subtitle: 'Hub Layout', kind: 'setting', href: '/settings/widgets' }],
 });
 
+/* Phase 3 fixtures: on-demand readings for the detail page. */
+const waveContainer = {
+  name: 'wave', id: 'fixturewave', image: 'ghcr.io/example/wave:1.0', imageId: 'sha256:ab12cd34',
+  created: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+  state: {
+    status: 'running', health: 'healthy' as const, healthcheck: { status: 'healthy', failingStreak: 0 },
+    startedAt: new Date(Date.now() - 86_400_000).toISOString(), finishedAt: null,
+    restartCount: 2, exitCode: null, oomKilled: false,
+  },
+  restartPolicy: 'unless-stopped', networkMode: 'bridge', logDriver: 'json-file',
+  command: '/usr/bin/wave --config /data/config.yaml',
+  labels: { project: 'media', service: 'wave' },
+  ports: [{ ip: '0.0.0.0', private: 8096, public: 8096, type: 'tcp' }],
+  exposedPorts: [{ private: 8096, type: 'tcp' }],
+  networks: [{ name: 'media_default', ip: '172.20.0.4', gateway: '172.20.0.1' }],
+  mounts: [{ type: 'bind', source: '/srv/wave/data', destination: '/data', mode: 'rw', size: null }],
+};
+const statsSamples = {
+  service: 'wave',
+  watchingSince: Date.now() - 12 * 60_000,
+  capped: false,
+  samples: [
+    { t: Date.now() - 25_000, cpu: 12.5, mem: 220_000_000, memLimit: 4_000_000_000, netRx: 10_000, netTx: 2_000, pids: 8, blockIo: null },
+    { t: Date.now() - 20_000, cpu: 14.1, mem: 224_000_000, memLimit: 4_000_000_000, netRx: 30_000, netTx: 4_000, pids: 8, blockIo: null },
+    { t: Date.now() - 15_000, cpu: 11.9, mem: 221_000_000, memLimit: 4_000_000_000, netRx: 52_000, netTx: 7_000, pids: 9, blockIo: null },
+    { t: Date.now() - 10_000, cpu: 18.2, mem: 228_000_000, memLimit: 4_000_000_000, netRx: 76_000, netTx: 9_000, pids: 9, blockIo: null },
+    { t: Date.now() - 5_000, cpu: 16.0, mem: 226_000_000, memLimit: 4_000_000_000, netRx: 99_000, netTx: 12_000, pids: 9, blockIo: null },
+  ],
+};
+const liveStats = { status: 'ok', at: Date.now(), stats: { cpu: 16.0, memory: { used: 226_000_000, limit: 4_000_000_000 }, net: { rx: 99_000, tx: 12_000 }, pids: 9, blockIo: null } };
+const serviceHistoryDoc = {
+  service: 'wave',
+  watchingSince: Date.now() - 3_600_000,
+  logStarted: Date.now() - 3_600_000,
+  events: [
+    { id: 'h2', t: Date.now() - 300_000, iso: new Date().toISOString(), source: 'docker', type: 'container.health', subject: 'wave', message: 'health now healthy' },
+    { id: 'h1', t: Date.now() - 3_500_000, iso: new Date().toISOString(), source: 'docker', type: 'container.started', subject: 'wave', message: 'running' },
+  ],
+};
+const logLines = [
+  'Starting server on port 8096',
+  'WARN cache miss for /library',
+  'ERROR database connection refused',
+  'Reconnected to database',
+  'Playback session opened',
+];
+const logsRoute = (_body: unknown, path: string) => ({
+  status: 'ok',
+  lines: path.includes('timestamps=1')
+    ? logLines.map((l, i) => `2026-09-14T09:0${i}:00Z ${l}`)
+    : logLines,
+});
+const providersFixture = {
+  at: Date.now(),
+  providers: [
+    { name: 'docker', state: 'available' as const, lastOk: Date.now() - 2000, lastTry: Date.now() - 2000, staleMs: 2000, reason: null },
+    { name: 'system', state: 'available' as const, lastOk: Date.now() - 2000, lastTry: Date.now() - 2000, staleMs: 2000, reason: null },
+    { name: 'news', state: 'unavailable' as const, lastOk: null, lastTry: Date.now() - 2000, staleMs: null, reason: 'feeds unreachable' },
+    { name: 'weather', state: 'idle' as const, lastOk: null, lastTry: null, staleMs: null, reason: null },
+    { name: 'markets', state: 'idle' as const, lastOk: null, lastTry: null, staleMs: null, reason: null },
+  ],
+};
+
 function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) => unknown)> {
   return {
     '/api/settings': settings,
@@ -99,7 +162,12 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
       ],
       layout, spacing: layout.hub.spacing, groupNames: ['Media'],
     },
-    '/api/services/Music/wave': serviceDetail,
+    '/api/services/Music/wave': { ...serviceDetail, dockerAvailable: true, container: waveContainer, containerStats: liveStats.stats },
+    '/api/services/Music/wave/stats': liveStats,
+    '/api/services/Music/wave/stats/history': statsSamples,
+    '/api/services/Music/wave/history': serviceHistoryDoc,
+    '/api/docker/containers/wave/logs': logsRoute,
+    '/api/providers': providersFixture,
     '/api/services/Media/photos': noWebDetail,
     '/api/services/Music/navidrome': {
       ...serviceDetail,
@@ -462,6 +530,86 @@ export async function runWebTests(): Promise<WebResult> {
     await h.waitFor(() => text().includes('Media'), 'the stack page');
     expect(text().includes('Wave') || text().includes('wave'), 'the stack members are missing');
     expect(!/Docker isn.t connected/.test(text()) || stackDetail.live === false, 'a live stack reported as disconnected');
+  });
+
+  /* 15 — Phase 3: resources arrive on demand, as sparklines, with real sample counts */
+  await test('service resources: sparklines only while the page is being looked at', async (h) => {
+    await h.mount(<TestApp entry="/services/Music/wave"><Hub /></TestApp>);
+    await h.waitFor(() => text().includes('Wave'), 'the service page');
+    await h.waitFor(() => text().includes('samples'), 'the resource history');
+    expect(qa('.spark').length >= 2, 'cpu and memory sparklines did not render');
+    expect(text().includes('5 samples'), 'the sample count is not the real one');
+    // polling stops when the page is left: count requests, unmount, count again
+    const before = h.calls.filter((c) => c.path.startsWith('/api/services/Music/wave/stats/history')).length;
+    await h.unmount();
+    await h.flush(80);
+    const after = h.calls.filter((c) => c.path.startsWith('/api/services/Music/wave/stats/history')).length;
+    expect(after === before, `resource history kept polling after unmount (${before} → ${after})`);
+
+    // no readings → an honest note, never zeros-as-data
+    const routes = {
+      ...stubRoutes(),
+      '/api/services/Music/wave': { ...serviceDetail, dockerAvailable: true, container: waveContainer, containerStats: null },
+      '/api/services/Music/wave/stats/history': { status: 'unavailable', reason: 'stats unavailable: container is stopped', samples: [] },
+    };
+    const h2 = await createHarness({ routes, fallback: () => ({}) });
+    try {
+      await h2.mount(<TestApp entry="/services/Music/wave"><Hub /></TestApp>);
+      await h2.waitFor(() => text().includes('Wave'), 'the service page');
+      await h2.waitFor(() => text().includes('no stats for this container'), 'the unavailable note');
+    } finally {
+      await h2.unmount();
+    }
+  });
+
+  /* 16 — Phase 3: the log drawer filters locally, honors timestamps, invents nothing */
+  await test('logs drawer: search and level filtering happen in the browser', async (h) => {
+    await h.mount(<TestApp entry="/services/Music/wave"><Hub /></TestApp>);
+    await h.waitFor(() => text().includes('Wave'), 'the service page');
+    const logsBtn = qa('button').find((b) => text(b).trim() === 'Logs');
+    expect(logsBtn, 'no Logs button on the service page');
+    click(logsBtn!);
+    await h.waitFor(() => !!q('.drawer'), 'the logs drawer');
+    await h.waitFor(() => text().includes('Starting server on port 8096'), 'the log lines');
+    expect(qa('.logline').length === 5, `expected 5 log lines, saw ${qa('.logline').length}`);
+    expect(text().includes('read-only'), 'the drawer does not say it is read-only');
+
+    // search narrows locally — no extra request goes out
+    const callsBefore = h.calls.length;
+    type(q<HTMLInputElement>('input.logbar-search')!, 'database');
+    await h.flush(30);
+    expect(qa('.logline').length === 2, 'search should keep only matching lines');
+    expect(h.calls.length === callsBefore, 'filtering must not fetch from the server');
+
+    // errors only — one matching line, the warning stays out
+    type(q<HTMLInputElement>('input.logbar-search')!, '');
+    const errorsBtn = qa('.seg button').find((b) => text(b).startsWith('Errors'));
+    expect(errorsBtn, 'the level filter buttons are missing');
+    click(errorsBtn!);
+    await h.flush(30);
+    expect(qa('.logline').length === 1 && text().includes('ERROR database connection refused'), 'errors-only should show exactly the error');
+
+    // timestamps: a real refetch (new tail parameter), and the prefix is lifted into its own cell
+    const tsChk = qa('.logbar-chk input')[0];
+    expect(tsChk, 'the timestamps toggle is missing');
+    click(tsChk!);
+    await h.waitFor(() => !!q('.log-ts'), 'timestamp cells');
+    expect(text().includes('2026-09-14T09:0'), 'timestamp prefixes did not render');
+
+    // copy/refresh/clear live in the header; only the two legitimate fetches happened
+    expect(qa('.drawer-head button').length >= 3, 'refresh/copy/clear controls missing');
+    const logFetches = h.calls.filter((c) => c.path.startsWith('/api/docker/containers/wave/logs')).length;
+    expect(logFetches === 2, `logs were fetched ${logFetches} times (open + timestamps toggle), expected 2`);
+  });
+
+  /* 17 — Phase 3: settings report provider health for all five providers */
+  await test('settings: the System tab shows honest provider health', async (h) => {
+    await h.mount(<TestApp entry="/settings/system"><Settings /></TestApp>);
+    await h.waitFor(() => text().includes('Providers'), 'the providers block');
+    expect(text().includes('Docker') && text().includes('News'), 'provider rows are missing');
+    expect(text().includes('Unavailable'), 'the failed provider is not marked unavailable');
+    expect(text().includes('feeds unreachable'), 'the failure reason is hidden');
+    expect(h.calls.some((c) => c.path.startsWith('/api/providers')), 'the settings page never asked for provider health');
   });
 
   for (const r of results) {

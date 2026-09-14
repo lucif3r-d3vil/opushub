@@ -143,10 +143,15 @@ export interface Stack {
   compose: string | null;
   source: 'configured' | 'discovered';
   configured: boolean;
-  status: 'operational' | 'degraded' | 'attention' | 'unlinked' | 'unavailable' | string;
+  /** deterministic model — see server/discovery.js stackStatusOf:
+   *  unavailable > unlinked > unknown > { operational | degraded | stopped | attention } */
+  status: 'operational' | 'degraded' | 'attention' | 'stopped' | 'unknown' | 'unlinked' | 'unavailable' | string;
   statusReason: string | null;
   containerCount: number;
   runningCount: number;
+  unhealthyCount?: number;
+  stoppedCount?: number;
+  attentionCount?: number;
   services: string[];
   members: StackMember[];
 }
@@ -219,6 +224,21 @@ export interface ActivityEvent {
   subject: string | null;
   message: string | null;
   meta?: Record<string, unknown> | null;
+}
+
+/** A burst of same-type docker events folded into one row (see server/activity.js groupEvents).
+ *  The underlying events stay accessible — grouping is presentation, not deletion. */
+export interface ActivityGroup {
+  grouped: true;
+  id: string; t: number; iso: string;
+  source: 'docker'; type: string;
+  subject: string | null;
+  project: string | null;
+  count: number;
+  subjects: string[];
+  message: string | null;
+  meta?: Record<string, unknown> | null;
+  events: ActivityEvent[];
 }
 
 export interface NewsItem { title: string; link: string; source: string | null; publishedAt: string | null; summary: string | null; image: string | null }
@@ -354,3 +374,61 @@ export interface HealthDoc {
 
 export interface IconSearchResult { ref: string; set: string; name: string; label: string; local: boolean }
 export interface IconSearchDoc { results: IconSearchResult[]; total?: number; remote: { status: string; reason?: string } }
+
+/* ---------------- Phase 3: read-only service intelligence ---------------- */
+
+/** One sample of a container's resource history — real readings only, taken while somebody
+ *  was looking at this service (never by a background loop; see server/statsHistory.js). */
+export interface StatsSample {
+  t: number;
+  cpu: number | null;
+  mem: number | null;
+  memLimit: number | null;
+  netRx: number | null;
+  netTx: number | null;
+  pids: number | null;
+  blockIo: number | null;
+}
+export interface StatsHistoryDoc {
+  service: string;
+  samples: StatsSample[];
+  watchingSince: number | null;
+  capped: number;
+}
+export interface StatsDoc { status: 'ok' | 'unavailable' | string; stats: ContainerStats | null; at?: number }
+export interface ContainerStats {
+  cpu: number | null;
+  memory: { used: number | null; limit: number | null };
+  net: { rx: number; tx: number };
+  pids: number | null;
+  blockIo: number | null;
+}
+
+/** Real events OpusHub witnessed for one service, plus when it started watching. */
+export interface ServiceHistoryDoc {
+  service: string;
+  events: ActivityEvent[];
+  watchingSince: number | null; // null → the log is empty: NO history exists yet
+  logStarted: number | null;
+}
+
+export interface ProviderHealth {
+  name: 'docker' | 'system' | 'news' | 'weather' | 'markets' | string;
+  state: 'available' | 'unavailable' | 'degraded' | 'idle';
+  lastOk: number | null;
+  lastTry: number | null;
+  staleMs: number | null;
+  reason: string | null;
+}
+export interface ProvidersDoc { at: number; providers: ProviderHealth[] }
+
+/** Image facts from the engine — read-only, never an action surface. */
+export interface ImageInfo {
+  id: string | null;
+  tags: string[];
+  digests: string[];
+  arch: string | null;
+  os: string | null;
+  created: string | null;
+  size: number | null;
+}

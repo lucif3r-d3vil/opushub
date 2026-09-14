@@ -275,12 +275,36 @@ export function toService(record, overlay, ctx) {
 // 4. stacks: compose projects, enriched by (never created by) config
 // ---------------------------------------------------------------------------
 
+/**
+ * THE STACK STATUS MODEL — deterministic, no vague heuristics. One status per stack, computed
+ * only from what the engine says about its member containers:
+ *
+ *   unavailable   the engine is unreachable — there is no data to judge with
+ *   unlinked      the stack has no member containers at all
+ *   unknown       the engine is live but one or more members report no readable state
+ *   operational   EVERY member is running AND no member is unhealthy
+ *                 (a member with no healthcheck counts as running — "no healthcheck" is
+ *                  never treated as unhealthy)
+ *   degraded      at least one member running, and at least one member that is either
+ *                 running-but-unhealthy or not running (exited / created / paused /
+ *                 restarting / dead)
+ *   stopped       no member running and every member exited — cleanly down, together
+ *   attention     no member running and at least one member in a transitional or unusual
+ *                 state (created / paused / restarting / dead) — not running, but not a
+ *                 clean stop either
+ *
+ * Precedence: unavailable > unlinked > unknown > { operational | degraded | stopped | attention }.
+ */
 export function stackStatusOf(records) {
   if (!records.length) return 'unlinked';
-  const running = records.filter((r) => r.state === 'running').length;
-  const unhealthy = records.some((r) => r.state === 'running' && r.health === 'unhealthy');
-  if (running === records.length) return unhealthy ? 'degraded' : 'operational';
-  if (running === 0) return records.every((r) => r.state === 'created') ? 'unlinked' : 'attention';
+  if (records.some((r) => r.state == null)) return 'unknown';
+  const running = records.filter((r) => r.state === 'running');
+  if (running.length === records.length) {
+    return running.some((r) => r.health === 'unhealthy') ? 'degraded' : 'operational';
+  }
+  if (running.length === 0) {
+    return records.every((r) => r.state === 'exited') ? 'stopped' : 'attention';
+  }
   return 'degraded';
 }
 
@@ -356,6 +380,10 @@ export function buildStacks(records, stacksOverlay, ctx = {}) {
   for (const s of stacks) {
     s.containerCount = s.members.length;
     s.runningCount = s.members.filter((r) => r.state === 'running').length;
+    s.unhealthyCount = s.members.filter((r) => r.state === 'running' && r.health === 'unhealthy').length;
+    s.stoppedCount = s.members.filter((r) => r.state === 'exited').length;
+    // paused / restarting / created / dead — neither running nor cleanly stopped
+    s.attentionCount = s.members.filter((r) => r.state !== 'running' && r.state !== 'exited').length;
     s.status = ctx.live === false ? 'unavailable' : stackStatusOf(s.members);
     s.services = s.members.map((m) => m.__service?.displayName || deriveDisplayName(m)).slice(0, 40);
     s.members = s.members.map((m) => {

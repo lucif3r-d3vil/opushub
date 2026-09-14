@@ -2,7 +2,7 @@
 // interface, keyboard-native, and everything comes from already-configured OpusHub data.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, invalidateShared, post } from '../lib/api';
 import { groupBy, type SearchEntry } from '../lib/search';
 import { useSettings } from '../lib/theme';
 import { Icon } from './Icon';
@@ -57,13 +57,26 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
   const listRef = useRef<HTMLDivElement>(null);
 
   const actions = useMemo<ServerResult[]>(() => [
+    // navigation — every page is one keystroke away
+    { title: 'Go Home', subtitle: 'The Hub', kind: 'action', href: '/', keywords: ['hub', 'home', 'start'] },
+    { title: 'Go Services', subtitle: 'Everything you run', kind: 'action', href: '/services', keywords: ['apps', 'containers'] },
+    { title: 'Go Stacks', subtitle: 'Compose projects', kind: 'action', href: '/stacks', keywords: ['projects'] },
+    { title: 'Go System', subtitle: 'Host vitals', kind: 'action', href: '/system', keywords: ['cpu', 'memory', 'host'] },
+    { title: 'Go Activity', subtitle: 'What happened, when', kind: 'action', href: '/activity', keywords: ['events', 'timeline'] },
+    { title: 'Go Settings', subtitle: 'Everything you can change', kind: 'action', href: '/settings/appearance', keywords: ['preferences', 'config'] },
+    { title: 'Go Icons', subtitle: 'Icon browser', kind: 'action', href: '/icons', keywords: ['glyphs', 'logos'] },
+    // presentation — no infrastructure mutation, ever
     {
       title: settings?.appearance.theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode',
-      subtitle: 'Appearance', kind: 'action',
+      subtitle: 'Appearance', kind: 'action', keywords: ['theme'],
       action: () => update({ appearance: { theme: settings?.appearance.theme === 'light' ? 'dark' : 'light' } }),
     },
+    {
+      title: 'Reset Hub layout', subtitle: 'Back to the default composition', kind: 'action', keywords: ['layout', 'default', 'factory'],
+      action: () => { void post('/api/layout/reset').then(() => invalidateShared('/api/layout')); },
+    },
+    { title: 'Open templates', subtitle: 'Hub composition presets', kind: 'action', href: '/settings/templates', keywords: ['preset', 'composition'] },
     { title: 'Arrange Hub widgets', subtitle: 'Add, hide, resize, reorder', kind: 'action', href: '/settings/widgets' },
-    { title: 'Apply a Hub template', subtitle: 'Minimal, balanced, media…', kind: 'action', href: '/settings/templates' },
     { title: 'Customize a service', subtitle: 'Name, icon, group, URL', kind: 'action', href: '/settings/services' },
     { title: 'Browse icons', subtitle: 'Find one and apply it to a service', kind: 'action', href: '/icons' },
     { title: 'Integrations', subtitle: 'News, weather, markets', kind: 'action', href: '/settings/integrations' },
@@ -92,9 +105,12 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
   const entries = useMemo<ServerResult[]>(() => {
     const acts = q.trim()
       ? actions
-      : actions.slice(0, 3);
+      : actions.slice(0, 6);
     const needle = q.toLowerCase();
-    const localHits = acts.filter((a) => !needle || a.title.toLowerCase().includes(needle) || a.subtitle?.toLowerCase().includes(needle));
+    const localHits = acts.filter((a) => !needle
+      || a.title.toLowerCase().includes(needle)
+      || a.subtitle?.toLowerCase().includes(needle)
+      || (a.keywords || []).some((k) => k.includes(needle)));
     return [...localHits, ...results];
   }, [q, actions, results]);
 

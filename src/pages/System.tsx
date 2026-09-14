@@ -127,7 +127,13 @@ export default function SystemPage() {
 
       {/* Storage */}
       <section className="sys-band">
-        <div className="sys-band-head"><h2>Storage</h2><span className="hint">{realDiskCount ? `${realDiskCount} mounted volume${realDiskCount === 1 ? '' : 's'}` : ''}</span></div>
+        <div className="sys-band-head">
+          <h2>Storage</h2>
+          <span className="hint">
+            {realDiskCount ? `${realDiskCount} mounted volume${realDiskCount === 1 ? '' : 's'}` : ''}
+            {realDiskCount ? ' · live readings only — no reliable history source for mounts' : ''}
+          </span>
+        </div>
         {s?.disks.length ? (
           <div style={{ maxWidth: 900 }}>
             {s.disks.map((dk) => (

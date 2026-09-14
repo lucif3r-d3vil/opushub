@@ -12,8 +12,8 @@ const raw = (name, opts = {}) => ({
   id: opts.id || createHash('sha1').update(name).digest('hex').slice(0, 12),
   name,
   image: opts.image || `library/${name}:latest`,
-  state: opts.state || 'running',
-  status: opts.status || `Up 2 hours${opts.health ? ` (${opts.health})` : ''}`,
+  state: opts.state === undefined ? 'running' : opts.state,
+  status: opts.status === undefined ? (opts.state ? `${opts.state} fixture` : null) : opts.status,
   health: opts.health ?? null,
   created: 1789000000,
   ports: opts.ports || [],
@@ -275,16 +275,34 @@ test('a legacy friendly-name stack merges into the project its containers live i
   assert.equal(inv.unmatchedStackOverlays.length, 0);
 });
 
-test('status aggregates honestly across a project', () => {
-  const inv = run([
+test('status aggregates honestly across a project (documented deterministic model)', () => {
+  // some running + one exited → degraded
+  const mixed = run([
     raw('a', { project: 'p', state: 'running' }),
     raw('b', { project: 'p', state: 'exited', status: 'Exited (1) 2 hours ago' }),
   ]);
-  assert.equal(inv.stacks[0].status, 'degraded');
-  assert.equal(inv.stacks[0].runningCount, 1);
-  assert.equal(run([raw('x', { project: 'q', state: 'exited', status: 'Exited (0) 1 hour ago' })]).stacks[0].status, 'attention');
+  assert.equal(mixed.stacks[0].status, 'degraded');
+  assert.equal(mixed.stacks[0].runningCount, 1);
+  // every member exited → stopped (a clean, deliberate stop — not "attention")
+  assert.equal(run([raw('x', { project: 'q', state: 'exited', status: 'Exited (0) 1 hour ago' })]).stacks[0].status, 'stopped');
+  // all running but one unhealthy → degraded
   assert.equal(run([raw('x', { project: 'q' }), raw('y', { project: 'q', health: 'unhealthy' })]).stacks[0].status, 'degraded');
+  // all running, healthy or no-healthcheck → operational ("no healthcheck" never counts against it)
+  assert.equal(run([raw('x', { project: 'q' }), raw('y', { project: 'q', health: 'healthy' })]).stacks[0].status, 'operational');
+  // no engine → no verdict
   assert.equal(run([raw('x', { project: 'q' })], { live: false }).stacks[0].status, 'unavailable');
+  // nothing running, one paused (transitional) → attention, not stopped
+  assert.equal(run([
+    raw('x', { project: 'q', state: 'exited', status: 'Exited (0) 1 hour ago' }),
+    raw('y', { project: 'q', state: 'paused', status: 'Up 2 hours (Paused)' }),
+  ]).stacks[0].status, 'attention');
+  // a restarting member while others run is degraded, not operational
+  assert.equal(run([
+    raw('x', { project: 'q' }),
+    raw('y', { project: 'q', state: 'restarting', status: 'Restarting (1) 2 seconds ago' }),
+  ]).stacks[0].status, 'degraded');
+  // a member with no readable state → unknown, never a guess
+  assert.equal(run([raw('x', { project: 'q' }), raw('y', { project: 'q', state: null, status: null })]).stacks[0].status, 'unknown');
 });
 
 test('containers with no compose project are standalone, not force-fit into a stack', () => {

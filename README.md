@@ -94,6 +94,8 @@ docs/01-audit.md            what was found in the repo before any change (an emp
 docs/02-architecture.md     seams: providers, config store, API
 docs/03-design-system.md    type, color, space, motion — the anti-"AI dashboard" rules
 docs/04-discovery.md        the inventory contract: Docker decides existence, config decides appearance
+docs/05-service-intelligence.md  Phase 3: read-only depth — stats, logs, history, stack health,
+                            provider health — and the read-only boundary that bounds all of it
 Dockerfile                  multi-stage build; runtime config is a mount, never a COPY
 scripts/opusgrid-inspect.sh read-only inspection of the metadata discovery reads, on your host
 server/                     HTTP API + discovery + providers + atomic config store
@@ -117,6 +119,16 @@ OpusHub is V1 of the OpusGrid vision: visibility and safe navigation, not orches
 VMs, backups and automation belong to the future control plane — this app is its front door, and
 the provider/registry seams are drawn so it can grow into that without a rewrite.
 
+**Phase 3 — read-only service intelligence.** The service page now answers what a container is
+doing right now: state and health (a container *without* a healthcheck is never called unhealthy),
+uptime, restart count, on-demand resource readings with compact sparklines, read-only logs with
+local search/level filtering, published vs exposed ports, mounts and image facts. Stacks get a
+documented deterministic status (Operational / Degraded / Attention / Stopped / Unknown) and
+rollups; the Activity page is a witnessed timeline with burst grouping and honest *watching since*
+markers; Settings → System reports provider health. All of it is strictly observational — no
+restart, exec, pull, deploy or write of any kind was added; see
+`docs/05-service-intelligence.md` for the boundary and the rules.
+
 Run it on the LAN or behind a VPN. It ships with no auth by design (it is your homelab's
 entrypoint, not a public service); put a reverse proxy with auth in front if you expose it.
 
@@ -124,9 +136,10 @@ entrypoint, not a public service); put a reverse proxy with auth in front if you
 
 ```
 npm run check               # tsc + production build
-npm test                    # 147 tests: label grammar, URL precedence, the discovery join, layout v2
+npm test                    # 174 tests: label grammar, URL precedence, the discovery join, layout v2
                             # normalisation and templates, model integration (with and without
-                            # overlays), provider, env, API boundary, and the offline contract —
+                            # overlays), provider, env, API boundary, the offline contract, and the
+                            # Phase 3 contract (detail/stats/logs/history/activity/stacks/security) —
                             # all against the mock engine
 npm run test:web            # DOM interaction checks in jsdom: search hotkeys/arrows/Enter, widget
                             # menus writing the layout, keyboard reordering, preview inertness,
@@ -136,9 +149,10 @@ npm run verify              # the whole API surface against a *scratch* config d
                             # detail pages, provider-unavailable paths. Safe on a live host — your
                             # config/ is never touched. OPUSHUB_DOCKER_SOCKET=/var/run/docker.sock
                             # npm run verify points it at the real engine
-npm run smoke               # server-render checks: every route renders; the Hub under nine data
+npm run smoke               # server-render checks: every route renders; the Hub under thirteen data
                             # states (empty, docker off, providers down, unconfigured, hidden,
-                            # reordered, unknown widget type, preview, loading)
+                            # reordered, unknown widget type, preview, loading, stacks rollup,
+                            # attention surfacing incl. provider failures)
 npm run smoke:live          # fetches a *running* OpusHub and renders the real Hub from its payloads
                             # (OPUSHUB_URL=http://host:3000 points it at another instance)
 npm run mock-engine         # standalone fake Engine API for live validation:

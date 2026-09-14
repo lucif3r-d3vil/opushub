@@ -174,32 +174,67 @@ export async function inspectContainer(ref) {
   for (const [priv, binds] of Object.entries(c.HostConfig?.PortBindings || {})) {
     for (const b of binds || []) ports.push({ private: priv, host: b.HostIp || '0.0.0.0', hostPort: b.HostPort });
   }
+  // EXPOSE (config-declared) ports are informational — NOT reachable from outside the host.
+  // The UI must present them differently from published bindings; never as web endpoints.
+  const exposedPorts = Object.keys(c.Config?.ExposedPorts || {}).map((k) => {
+    const [port, proto = 'tcp'] = String(k).split('/');
+    return { private: Number(port), type: proto };
+  }).filter((p) => Number.isFinite(p.private));
   const nets = Object.entries(c.NetworkSettings?.Networks || {}).map(([name, n]) => ({
     name,
     ip: n.IPAddress,
     gateway: n.Gateway,
-    aliases: n.Aliases || [],
+    aliases: (n.Aliases || []).filter((a) => typeof a === 'string'),
   }));
+  const healthcheck = c.State?.Health ? {
+    status: c.State.Health.Status ?? null,
+    failingStreak: Number.isFinite(c.State.Health.FailingStreak) ? c.State.Health.FailingStreak : null,
+    // Health.Log contents deliberately omitted: probe output is arbitrary app data.
+  } : null;
   return {
     id: String(c.Id).slice(0, 12),
     name: (c.Name || '').replace(/^\//, ''),
     image: c.Config?.Image ?? null,
+    imageId: typeof c.Image === 'string' && c.Image.startsWith('sha256:') ? c.Image.slice(7, 19) : null,
     // entrypoint/env deliberately omitted: env values are secrets, entrypoint is unused by the UI.
     command: redactCommand(Array.isArray(c.Config?.Cmd) ? c.Config.Cmd.join(' ') : (c.Config?.Cmd ?? null)),
     state: {
       status: c.State?.Status, running: !!c.State?.Running, startedAt: c.State?.StartedAt || null,
       finishedAt: c.State?.FinishedAt && !c.State.FinishedAt.startsWith('0001') ? c.State.FinishedAt : null,
       exitCode: c.State?.ExitCode ?? null, health,
+      healthcheck,
       restartCount: c.RestartCount ?? 0,
       oomKilled: !!c.State?.OOMKilled,
     },
     restartPolicy: c.HostConfig?.RestartPolicy?.Name ?? null,
+    logDriver: c.HostConfig?.LogConfig?.Type ?? null,
     labels,
     ports,
+    exposedPorts,
     mounts,
     networks: nets,
     created: c.Created,
   };
+}
+
+/** Image facts, projected safe: no config env, no labels (people put tokens in both).
+ *  Best-effort — callers treat null as “the engine didn’t tell us”. */
+export async function imageInfo(ref) {
+  try {
+    const j = await requestJson(`/images/${encodeURIComponent(ref)}/json`, { timeoutMs: 5000 });
+    const id = typeof j.Id === 'string' && j.Id.startsWith('sha256:') ? j.Id.slice(7, 19) : null;
+    return {
+      id,
+      tags: Array.isArray(j.RepoTags) ? j.RepoTags.slice(0, 8) : [],
+      digests: Array.isArray(j.RepoDigests) ? j.RepoDigests.slice(0, 4) : [],
+      arch: j.Architecture ?? null,
+      os: j.Os ?? null,
+      created: j.Created ?? null,
+      size: Number.isFinite(j.Size) ? j.Size : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function containerStats(ref) {
@@ -222,6 +257,9 @@ export async function containerStats(ref) {
   const blkio = Array.isArray(s.blkio_stats?.io_service_bytes_recursive)
     ? s.blkio_stats.io_service_bytes_recursive.reduce((a, x) => a + (x.value || 0), 0)
     : null;
+  // An all-null sample is not data: stopped containers answer with empty cgroup objects.
+  // Report that as unavailable so the UI says so instead of rendering 0%.
+  if (cpuPct == null && memUsed == null) throw new Error('stats unavailable: engine returned no readable metrics');
   return {
     cpu: cpuPct,
     memory: { used: memUsed, limit },

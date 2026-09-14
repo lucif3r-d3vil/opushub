@@ -1,27 +1,43 @@
-import { useState } from 'react';
+// Service Detail — a complete READ-ONLY view of one service.
+//
+// What it answers: what is this, is it running, for how long, is it healthy, where does it come
+// from, how is it reached, what is it using, what relates to it, what changed recently.
+// What it never does: restart, exec, create, delete, update, deploy. Observation only.
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, usePolled } from '../lib/api';
 import { bytes, pct, relTime, uptime } from '../lib/format';
 import { useSettings } from '../lib/theme';
-import type { ActivityEvent, Service, Stack, SystemSnapshot } from '../lib/types';
+import type { ActivityEvent, ContainerStats, ImageInfo, Service, ServiceHistoryDoc, Stack, StatsSample, SystemSnapshot } from '../lib/types';
 import { Icon } from '../components/Icon';
-import { MeterBar } from '../components/Charts';
+import { MeterBar, Sparkline } from '../components/Charts';
 import { Freshness, OpenLink, ProviderNote, SectionHead, StatusLine } from '../components/ui';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
 
+interface InspectedContainer {
+  id: string; name: string; image: string | null; imageId?: string | null;
+  state: {
+    status: string; running: boolean; startedAt: string | null; finishedAt: string | null;
+    health: string | null;
+    healthcheck: { status: string | null; failingStreak: number | null } | null;
+    exitCode: number | null; restartCount?: number | null; oomKilled?: boolean;
+  };
+  restartPolicy: string | null; logDriver?: string | null;
+  labels: { project: string | null; service: string | null };
+  ports: { private: string; host: string; hostPort: string }[];
+  exposedPorts: { private: number; type: string }[];
+  mounts: { type: string; source: string; target: string; rw: boolean }[];
+  networks: { name: string; ip: string; gateway: string; aliases: string[] }[];
+  command: string | null; created: string | null;
+}
+
 interface Detail {
   service: Service;
   stack: Stack | null;
-  container: {
-    id: string; name: string; image: string | null; state: { status: string; running: boolean; startedAt: string | null; health: string | null; exitCode: number | null; restartCount?: number | null };
-    restartPolicy: string | null; labels: { project: string | null; service: string | null };
-    ports: { private: string; host: string; hostPort: string }[];
-    mounts: { type: string; source: string; target: string; rw: boolean }[];
-    networks: { name: string; ip: string; gateway: string; aliases: string[] }[];
-    command: string | null; created: string | null;
-  } | null;
-  containerStats: { cpu: number | null; memory: { used: number | null; limit: number | null }; net: { rx: number; tx: number }; pids: number | null; blockIo: number | null } | null;
+  container: InspectedContainer | null;
+  containerStats: ContainerStats | null;
+  image: ImageInfo | null;
   dockerAvailable: boolean;
   url: string | null;
   urlSource: string;
@@ -35,43 +51,56 @@ const URL_SOURCE_WORDS: Record<string, string> = {
   none: 'nothing to reach',
 };
 
+/** The one place state + health become words. "No healthcheck" is never "unhealthy". */
+function runtimeWords(c: InspectedContainer | null, fallback: string): { stateWord: string; healthWord: string | null; tone: string } {
+  if (!c) return { stateWord: 'Unavailable', healthWord: null, tone: 'unavailable' };
+  const st = c.state.status;
+  if (st === 'running') {
+    if (c.state.health === 'unhealthy') return { stateWord: 'Unhealthy', healthWord: `failing${c.state.healthcheck?.failingStreak ? ` ×${c.state.healthcheck.failingStreak}` : ''}`, tone: 'unhealthy' };
+    if (c.state.health === 'healthy') return { stateWord: 'Running', healthWord: 'healthy', tone: 'up' };
+    if (c.state.health === 'starting') return { stateWord: 'Running', healthWord: 'healthcheck starting', tone: 'up' };
+    return { stateWord: 'Running', healthWord: 'no healthcheck', tone: 'up' };
+  }
+  if (st === 'exited') return { stateWord: 'Stopped', healthWord: null, tone: 'down' };
+  if (st === 'paused') return { stateWord: 'Paused', healthWord: null, tone: 'paused' };
+  if (st === 'restarting') return { stateWord: 'Restarting', healthWord: null, tone: 'restarting' };
+  if (st === 'created') return { stateWord: 'Created — never started', healthWord: null, tone: 'unmanaged' };
+  return { stateWord: fallback || st || 'Unknown', healthWord: null, tone: 'unmanaged' };
+}
+
 export default function ServiceDetail() {
   const { group = '', name = '' } = useParams();
   const { settings } = useSettings();
   const [showLogs, setShowLogs] = useState(false);
-  const { data, error, loading, refresh, fetchedAt } = usePolled<Detail>(
-    `/api/services/${encodeURIComponent(group)}/${encodeURIComponent(name)}`,
-    (settings?.behavior?.refresh?.system ?? 5) * 2000,
-  );
+  const basePath = `/api/services/${encodeURIComponent(group)}/${encodeURIComponent(name)}`;
+  const { data, error, loading, refresh, fetchedAt } = usePolled<Detail>(basePath, (settings?.behavior?.refresh?.system ?? 5) * 2000);
+  // stats + history poll ONLY while this page is mounted — unmounting stops both (§29)
+  const statsHist = usePolled<{ samples: StatsSample[]; watchingSince: number | null }>(data?.container ? `${basePath}/stats/history` : null, 5000);
+  const history = usePolled<ServiceHistoryDoc>(data?.service ? `${basePath}/history?limit=12` : null, 60_000);
   const activity = usePolled<{ items: ActivityEvent[] }>(`/api/activity?limit=40`, 60_000);
   const sys = usePolled<SystemSnapshot>('/api/system', 10_000);
 
   if (loading && !data) return <div className="stale-note" style={{ padding: 'var(--sp-12) 0' }}>Loading service…</div>;
-  if (error && !data) {
-    return (
-      <ProviderNote
-        status="error"
-        reason={error}
-        fixHref="/services"
-        fixLabel="Back to Services →"
-      />
-    );
-  }
+  if (error && !data) return <ProviderNote status="error" reason={error} fixHref="/services" fixLabel="Back to Services →" />;
   if (!data) return <ProviderNote status="error" reason="Service not found." fixHref="/services" fixLabel="Back to Services →" />;
 
   const s = data.service;
   const c = data.container;
   const st = data.containerStats;
-  const memUsed = st?.memory.used ?? null;
-  const memLimit = st?.memory.limit ?? null;
+  const words = runtimeWords(c, s.status);
   const related = (activity.data?.items || []).filter((e) => e.subject === s.name || e.subject === c?.name || e.subject === s.displayName);
   const now = Date.now();
-  const startedMs = c?.state.startedAt ? new Date(c.state.startedAt).getTime() : null;
-  const proxyRoutes = s.container?.labels?.proxy || [];
+  const startedMs = c?.state.startedAt && !c.state.startedAt.startsWith('0001') ? new Date(c.state.startedAt).getTime() : null;
+  const createdMs = c?.created ? new Date(c.created).getTime() : null;
+  const running = c?.state.status === 'running';
   const restartCount = c?.state?.restartCount ?? s.container?.restartCount ?? null;
+  const restartLoop = c?.state.status === 'restarting' || (running && (restartCount ?? 0) >= 5 && startedMs != null && now - startedMs < 5 * 60_000);
+  const samples = statsHist.data?.samples || [];
+  const logLaunch = () => { if (settings?.behavior?.logLaunches) void api(basePath, { method: 'POST' }).catch(() => undefined); };
 
   return (
     <>
+      {/* ── header: identity first, technology second ─────────────────────── */}
       <div className="detail-hero">
         <Icon ref={s.icon} name={s.displayName} size={68} />
         <div style={{ minWidth: 0, flex: 1 }}>
@@ -86,20 +115,20 @@ export default function ServiceDetail() {
           <h1 className="detail-title">{s.displayName}</h1>
           {s.description && <p className="detail-sub">{s.description}</p>}
           <div className="detail-meta">
-            {(s.app || s.container.composeService) && <span className="chip">{s.app || s.container.composeService}</span>}
-            <StatusLine state={s.status || 'unavailable'} note={s.statusReason} />
-            {c && <span className="mono-meta">{c.state.status}{c.state.health ? ` · ${c.state.health}` : ''}</span>}
+            <StatusLine state={words.tone === 'up' ? 'up' : words.tone === 'down' ? 'down' : words.tone} note={words.stateWord} />
+            <span className={`chip svc-health svc-health--${words.healthWord === 'healthy' ? 'ok' : words.stateWord === 'Unhealthy' ? 'bad' : 'quiet'}`}>
+              {words.stateWord === 'Unhealthy' ? 'Unhealthy' : words.healthWord || words.stateWord}
+            </span>
+            {restartLoop && <span className="chip svc-health svc-health--bad" role="status">possible restart loop</span>}
+            {running && startedMs != null && <span className="stale-note">up {uptime((now - startedMs) / 1000)}</span>}
+            <span className="mono-meta" title="actual container name">{s.name}</span>
             <button className="btn btn-quiet btn-sm" onClick={refresh}>Refresh</button>
             {fetchedAt && <span className="stale-note">{relTime(fetchedAt)}</span>}
           </div>
         </div>
         <div className="detail-actions">
           {s.url ? (
-            <OpenLink
-              href={s.url}
-              label={`Open ${s.displayName}`}
-              onOpen={() => { if (settings?.behavior?.logLaunches) void api(`/api/services/${encodeURIComponent(group)}/${encodeURIComponent(name)}`, { method: 'POST' }).catch(() => undefined); }}
-            />
+            <OpenLink href={s.url} label={`Open ${s.displayName}`} onOpen={logLaunch} />
           ) : (
             <span className="stale-note" title={s.urlNote || undefined} style={{ alignSelf: 'center' }}>No web endpoint detected</span>
           )}
@@ -115,57 +144,72 @@ export default function ServiceDetail() {
 
       <div className="detail-grid">
         <div>
-          {/* runtime */}
-          <section className="detail-block">
-            <SectionHead title="Runtime" right={data.dockerAvailable ? <Freshness at={sys.fetchedAt} /> : undefined} />
+          {/* ── runtime: the honest facts about right now ─────────────────── */}
+          <section className="detail-block" aria-labelledby="rt-head">
+            <SectionHead id="rt-head" title="Runtime" right={data.dockerAvailable ? <Freshness at={sys.fetchedAt} /> : undefined} />
             {data.dockerAvailable ? (
-              <div className="stat-strip" style={{ gridAutoFlow: 'row', gridAutoColumns: 'auto' }}>
-                <div className="stat">
-                  <div className="stat-k">CPU</div>
-                  <div className="stat-v">{st?.cpu != null ? pct(st.cpu, 1) : 'Unavailable'}</div>
-                  <MeterBar value={st?.cpu ?? null} />
-                </div>
-                <div className="stat">
-                  <div className="stat-k">Memory</div>
-                  <div className="stat-v">
-                    {memUsed != null ? bytes(memUsed) : 'Unavailable'}
-                    {memLimit ? <small>of {bytes(memLimit)}</small> : null}
+              c ? (
+                <>
+                  <div className="stat-strip" style={{ gridAutoFlow: 'row', gridAutoColumns: 'auto' }}>
+                    <div className="stat">
+                      <div className="stat-k">State</div>
+                      <div className="stat-v" style={{ fontSize: 16 }}>{words.stateWord}</div>
+                      <div className="stat-sub">{c.state.status}{c.state.oomKilled ? ' · OOM killed' : ''}</div>
+                    </div>
+                    <div className="stat">
+                      <div className="stat-k">Uptime</div>
+                      <div className="stat-v" style={{ fontSize: 16 }}>{running && startedMs ? uptime((now - startedMs) / 1000) : 'Not available'}</div>
+                      <div className="stat-sub">{running && startedMs ? `since ${new Date(startedMs).toLocaleString()}` : c.state.status === 'exited' && c.state.finishedAt ? `stopped ${new Date(c.state.finishedAt).toLocaleString()}` : ''}</div>
+                    </div>
+                    <div className="stat">
+                      <div className="stat-k">Restarts</div>
+                      <div className="stat-v" style={{ fontSize: 16 }}>{restartCount != null ? restartCount : 'Not available'}</div>
+                      <div className="stat-sub">{c.restartPolicy ? `${c.restartPolicy} policy` : ''}</div>
+                    </div>
+                    <div className="stat">
+                      <div className="stat-k">Health</div>
+                      <div className="stat-v" style={{ fontSize: 16 }}>
+                        {c.state.health === 'healthy' ? 'Healthy' : c.state.health === 'unhealthy' ? 'Unhealthy' : c.state.health === 'starting' ? 'Starting' : c.state.status !== 'running' ? 'Not available' : 'No healthcheck'}
+                      </div>
+                      <div className="stat-sub">
+                        {c.state.health === 'unhealthy' && c.state.healthcheck?.failingStreak ? `${c.state.healthcheck.failingStreak} failed check(s) in a row` : c.state.health ? 'declared by the container' : c.state.status === 'running' ? 'this container defines none' : ''}
+                      </div>
+                    </div>
                   </div>
-                  {memLimit ? <MeterBar value={100 * (memUsed! / memLimit)} /> : null}
-                </div>
-                <div className="stat">
-                  <div className="stat-k">Network</div>
-                  <div className="stat-v" style={{ fontSize: 16 }}>{st ? `${bytes(st.net.rx)} ↓ · ${bytes(st.net.tx)} ↑` : 'Unavailable'}<small>lifetime</small></div>
-                </div>
-                <div className="stat">
-                  <div className="stat-k">Uptime</div>
-                  <div className="stat-v" style={{ fontSize: 16 }}>{startedMs ? uptime((now - startedMs) / 1000) : 'Unavailable'}</div>
-                  <div className="stat-sub">{startedMs ? `since ${new Date(startedMs).toLocaleString()}` : ''}</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-k">Restarts</div>
-                  <div className="stat-v" style={{ fontSize: 16 }}>{restartCount != null ? restartCount : 'Unavailable'}</div>
-                  <div className="stat-sub">{c?.restartPolicy ? `${c.restartPolicy} policy` : ''}</div>
-                </div>
-              </div>
+                  <dl className="kv" style={{ marginTop: 'var(--sp-4)' }}>
+                    <Pair k="Started" v={startedMs ? new Date(startedMs).toLocaleString() : 'Not available'} />
+                    <Pair k="Created" v={createdMs ? new Date(createdMs).toLocaleString() : 'Not available'} />
+                    {c.state.status === 'exited' && <Pair k="Exit code" v={<>{c.state.exitCode ?? 'Not available'}{c.state.oomKilled ? ' · killed by out-of-memory' : ''}</>} />}
+                    {c.logDriver && <Pair k="Log driver" v={<span className="mono-meta">{c.logDriver}</span>} />}
+                  </dl>
+                </>
+              ) : (
+                <ProviderNote status="unavailable" reason={`No container matches “${s.displayName}” any more — it was removed from the engine.`} />
+              )
             ) : (
               <DockerOffNote reason={s.statusReason || null} />
             )}
           </section>
 
-          {/* config-level facts */}
-          {(s.meta?.length ?? 0) > 0 && (
-            <section className="detail-block">
-              <SectionHead title="About" />
-              <dl className="kv">
-                {(s.meta || []).map((m, i) => <Pair key={i} k={m.label} v={m.value} />)}
-              </dl>
-            </section>
-          )}
+          {/* ── resources: live readings + compact history, on demand only ── */}
+          <section className="detail-block" aria-labelledby="res-head">
+            <SectionHead
+              id="res-head"
+              title="Resource usage"
+              right={samples.length > 0 ? <span className="stale-note">{samples.length} sample{samples.length === 1 ? '' : 's'} while viewing</span> : undefined}
+            />
+            {!data.dockerAvailable ? (
+              <DockerOffNote reason={s.statusReason || null} />
+            ) : !running ? (
+              <ProviderNote compact status="unavailable" reason={c ? `Stats are only reported while the container is running — this one is ${words.stateWord.toLowerCase()}.` : 'Connect Docker to see live resource use.'} />
+            ) : (
+              <ResourceGrid stats={st} samples={samples} />
+            )}
+          </section>
 
-          {/* infrastructure */}
-          <section className="detail-block">
-            <SectionHead title="Infrastructure" right={c && <span className="stale-note">from Docker inspect</span>} />
+          {/* ── infrastructure: ports, networks, mounts (read-only) ───────── */}
+          <section className="detail-block" aria-labelledby="infra-head">
+            <SectionHead id="infra-head" title="Infrastructure" right={c && <span className="stale-note">from Docker inspect</span>} />
             {c ? (
               <dl className="kv">
                 <Pair k="Container" v={<span className="mono-meta">{c.name} <span style={{ opacity: 0.6 }}>({c.id})</span></span>} />
@@ -175,20 +219,38 @@ export default function ServiceDetail() {
                 )}
                 {c.command && <Pair k="Command" v={<span className="mono-meta">{c.command}</span>} />}
                 {c.restartPolicy && <Pair k="Restart policy" v={c.restartPolicy} />}
-                {c.ports.length > 0 && (
+
+                {(c.ports.length > 0 || c.exposedPorts.length > 0) && (
                   <div style={{ gridColumn: '1 / -1' }}>
                     <dt>Ports</dt>
                     <dd>
-                      {c.ports.map((p, i) => (
-                        <div className="port-row" key={i}>
-                          <span>{p.host === '0.0.0.0' ? 'all' : p.host}:{p.hostPort}</span>
-                          <span className="port-arrow">→</span>
-                          <span>{p.private}</span>
-                        </div>
-                      ))}
+                      {c.ports.length > 0 && (
+                        <>
+                          <div className="micro-label">Published — reachable on the host</div>
+                          {c.ports.map((p, i) => (
+                            <div className="port-row" key={i}>
+                              <span>{p.host === '0.0.0.0' ? 'all' : p.host}:{p.hostPort}</span>
+                              <span className="port-arrow">→</span>
+                              <span>{p.private}</span>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                      {c.exposedPorts.length > 0 && (
+                        <>
+                          <div className="micro-label" style={{ marginTop: c.ports.length ? 8 : 0 }}>Exposed — declared in the image, not reachable from outside</div>
+                          {c.exposedPorts.map((p, i) => (
+                            <div className="port-row" key={`e${i}`}>
+                              <span className="mono-meta">{p.private}/{p.type}</span>
+                              <span className="stale-note" style={{ fontSize: 11 }}>internal only</span>
+                            </div>
+                          ))}
+                        </>
+                      )}
                     </dd>
                   </div>
                 )}
+
                 {c.networks.length > 0 && (
                   <div style={{ gridColumn: '1 / -1' }}>
                     <dt>Networks</dt>
@@ -198,20 +260,23 @@ export default function ServiceDetail() {
                           <span>{n.name}</span>
                           <span className="port-arrow">·</span>
                           <span className="mono-meta">{n.ip}{n.gateway ? ` gw ${n.gateway}` : ''}</span>
+                          {n.aliases?.length > 0 && <span className="stale-note" title={n.aliases.join(', ')}>aliases: {n.aliases.slice(0, 3).join(', ')}{n.aliases.length > 3 ? '…' : ''}</span>}
                         </div>
                       ))}
                     </dd>
                   </div>
                 )}
+
                 {c.mounts.length > 0 && (
                   <div style={{ gridColumn: '1 / -1' }}>
-                    <dt>Volumes</dt>
+                    <dt>Mounts</dt>
                     <dd>
                       {c.mounts.map((m, i) => (
                         <div className="port-row" key={i}>
                           <span className="mono-meta" style={{ wordBreak: 'break-all' }}>{m.source}</span>
                           <span className="port-arrow">→</span>
                           <span className="mono-meta">{m.target}{!m.rw ? ' (ro)' : ''}</span>
+                          <span className="stale-note" style={{ fontSize: 11 }}>{m.type}</span>
                         </div>
                       ))}
                     </dd>
@@ -225,31 +290,22 @@ export default function ServiceDetail() {
             )}
           </section>
 
-          {/* activity */}
-          <section className="detail-block">
-            <SectionHead title="Recent activity" right={<Link className="section-link" to="/activity">All →</Link>} />
-            {related.length ? (
-              <div className="hub-act">
-                {related.slice(0, 8).map((e) => (
-                  <div className="ha-row" key={e.id}>
-                    <span className="ha-t">{relTime(e.t)}</span>
-                    <span className="ha-msg">{humanEvent(e)}{e.message && e.type.startsWith('container') ? <span> · {e.message}</span> : null}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="stale-note">No recorded events for this service yet.</div>
-            )}
+          {/* ── change history: real events only ───────────────────────────── */}
+          <section className="detail-block" aria-labelledby="hist-head">
+            <SectionHead id="hist-head" title="Change history" right={<Link className="section-link" to="/activity">All activity →</Link>} />
+            <ServiceHistory doc={history.data} containerName={s.name} related={related} />
           </section>
         </div>
 
         <div>
+          {/* ── access: where this service lives, and how we know ─────────── */}
           <section className="detail-block">
-            <SectionHead title="Application" right={<span className="stale-note">{URL_SOURCE_WORDS[data.urlSource] || data.urlSource}</span>} />
+            <SectionHead title="Access" right={<span className="stale-note">{URL_SOURCE_WORDS[data.urlSource] || data.urlSource}</span>} />
             {s.url ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
-                <OpenLink href={s.url} label={`Open ${s.displayName}`} onOpen={() => { void api(`/api/services/${encodeURIComponent(group)}/${encodeURIComponent(name)}`, { method: 'POST' }).catch(() => undefined); }} />
+                <OpenLink href={s.url} label={`Open ${s.displayName}`} onOpen={logLaunch} />
                 <span className="mono-meta" style={{ wordBreak: 'break-all', opacity: 0.8 }}>{s.url}</span>
+                <span className="stale-note">Source: {URL_SOURCE_WORDS[data.urlSource] || data.urlSource}</span>
               </div>
             ) : (
               <ProviderNote
@@ -261,6 +317,37 @@ export default function ServiceDetail() {
                 details={s.urlNote || undefined}
               />
             )}
+            {((s.container?.labels?.proxy?.length ?? 0) > 0 || s.urlNote) && (
+              <details className="tech" style={{ marginTop: 'var(--sp-4)' }}>
+                <summary>How this URL was found</summary>
+                <code>
+                  {[
+                    `url: ${s.url || '(none)'}`,
+                    `urlSource: ${s.urlSource}`,
+                    s.urlNote ? `detail: ${s.urlNote}` : null,
+                    ...(s.container?.labels?.proxy || []).map((r) => `traefik router ${r.router}: host(s) ${r.hosts.join(', ')} · entrypoints ${r.entrypoints.join('/') || '—'} · tls ${r.tls} · container port ${r.servicePort ?? '—'}${r.path ? ` · path ${r.path}` : ''}`),
+                  ].filter(Boolean).join('\n')}
+                </code>
+              </details>
+            )}
+          </section>
+
+          {/* ── image ──────────────────────────────────────────────────────── */}
+          <section className="detail-block">
+            <SectionHead title="Image" />
+            {data.image || c?.image ? (
+              <dl className="kv">
+                <Pair k="Image" v={<span className="mono-meta" style={{ wordBreak: 'break-all' }}>{data.image?.tags?.[0] || c?.image || '—'}</span>} />
+                {!!data.image?.digests?.length && <Pair k="Digest" v={<span className="mono-meta" style={{ wordBreak: 'break-all' }}>{data.image.digests[0]}</span>} />}
+                {data.image?.arch && <Pair k="Architecture" v={`${data.image.arch}${data.image.os ? ` · ${data.image.os}` : ''}`} />}
+                <Pair k="Pulled image created" v={data.image?.created ? new Date(data.image.created).toLocaleDateString() : 'Not available'} />
+                {data.image?.size != null && <Pair k="Size" v={bytes(data.image.size)} />}
+                {c?.imageId && <Pair k="Image id" v={<span className="mono-meta">sha256:{c.imageId}…</span>} />}
+              </dl>
+            ) : (
+              <div className="stale-note">Not available — the engine did not report image metadata.</div>
+            )}
+            <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>Observation only — OpusHub does not pull, update or recreate images.</p>
           </section>
 
           {data.stack && (
@@ -288,24 +375,148 @@ export default function ServiceDetail() {
               {(s.keywords?.length ?? 0) > 0 && <Pair k="Keywords" v={s.keywords!.join(', ')} />}
               <Pair k="Source" v={s.configured ? 'Docker container + overlay' : 'Docker container (discovered)'} />
             </dl>
-            {(proxyRoutes.length > 0 || s.urlNote) && (
-              <details className="tech" style={{ marginTop: 'var(--sp-4)' }}>
-                <summary>How this URL was found</summary>
-                <code>
-                  {[
-                    `url: ${s.url || '(none)'}`,
-                    `urlSource: ${s.urlSource}`,
-                    s.urlNote ? `detail: ${s.urlNote}` : null,
-                    ...proxyRoutes.map((r) => `traefik router ${r.router}: host(s) ${r.hosts.join(', ')} · entrypoints ${r.entrypoints.join('/') || '—'} · tls ${r.tls} · container port ${r.servicePort ?? '—'}${r.path ? ` · path ${r.path}` : ''}`),
-                  ].filter(Boolean).join('\n')}
-                </code>
-              </details>
-            )}
           </section>
         </div>
       </div>
       {showLogs && c && <LogsDrawer container={c.name} onClose={() => setShowLogs(false)} />}
     </>
+  );
+}
+
+/* ---------------- resources: values + compact sparklines ---------------- */
+
+function ResourceGrid({ stats, samples }: { stats: ContainerStats | null; samples: StatsSample[] }) {
+  const memUsed = stats?.memory.used ?? null;
+  const memLimit = stats?.memory.limit ?? null;
+  const cpuSeries = samples.map((s) => s.cpu).filter((v): v is number => v != null);
+  const memSeries = samples.map((s) => (s.mem != null && s.memLimit ? 100 * s.mem / s.memLimit : s.mem)).filter((v): v is number => v != null);
+  // net rx/tx are cumulative counters — rates come from consecutive real samples, never guessed
+  const netRates = useMemo(() => {
+    const out: { rx: number; tx: number }[] = [];
+    for (let i = 1; i < samples.length; i++) {
+      const a = samples[i - 1], b = samples[i];
+      const dt = (b.t - a.t) / 1000;
+      if (dt <= 0 || a.netRx == null || b.netRx == null || a.netTx == null || b.netTx == null) continue;
+      if (b.netRx < a.netRx || b.netTx < a.netTx) continue; // counter reset — skip, don't fake
+      out.push({ rx: (b.netRx - a.netRx) / dt, tx: (b.netTx - a.netTx) / dt });
+    }
+    return out;
+  }, [samples]);
+  const lastRate = netRates[netRates.length - 1] || null;
+
+  if (!stats) {
+    return <ProviderNote compact status="unavailable" reason="The engine has no stats for this container right now." />;
+  }
+  return (
+    <div className="stat-strip" style={{ gridAutoFlow: 'row', gridAutoColumns: 'auto' }}>
+      <div className="stat">
+        <div className="stat-k">CPU</div>
+        <div className="stat-v">{stats.cpu != null ? pct(stats.cpu, 1) : 'Not available'}</div>
+        <MeterBar value={stats.cpu ?? null} />
+        {cpuSeries.length >= 2 && <Sparkline values={cpuSeries.slice(-60)} width={120} height={22} />}
+      </div>
+      <div className="stat">
+        <div className="stat-k">Memory</div>
+        <div className="stat-v">
+          {memUsed != null ? bytes(memUsed) : 'Not available'}
+          {memLimit ? <small>of {bytes(memLimit)}</small> : null}
+        </div>
+        {memLimit && memUsed != null ? <MeterBar value={100 * (memUsed / memLimit)} /> : null}
+        {memSeries.length >= 2 && <Sparkline values={memSeries.slice(-60)} width={120} height={22} />}
+      </div>
+      <div className="stat">
+        <div className="stat-k">Network</div>
+        <div className="stat-v" style={{ fontSize: 15 }}>
+          {lastRate ? `${bytes(lastRate.rx, true)} ↓ · ${bytes(lastRate.tx, true)} ↑` : 'Not available yet'}
+        </div>
+        <div className="stat-sub">lifetime {bytes(stats.net.rx)} ↓ · {bytes(stats.net.tx)} ↑</div>
+        {netRates.length >= 2 && <Sparkline values={netRates.slice(-60).map((r) => r.rx)} width={120} height={22} color="var(--ok)" />}
+      </div>
+      <div className="stat">
+        <div className="stat-k">Block I/O</div>
+        <div className="stat-v" style={{ fontSize: 15 }}>{stats.blockIo != null ? bytes(stats.blockIo) : 'Not available'}</div>
+        <div className="stat-sub">{stats.pids != null ? `${stats.pids} processes` : 'processes not reported'}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- history: distinguish no-data from nothing-happened ---------------- */
+
+/** Map a witnessed event to the state it implies for the strip that follows it. */
+function stateAfter(e: ActivityEvent): { word: string; cls: string } {
+  if (e.type === 'container.started') return { word: 'running', cls: 'up' };
+  if (e.type === 'container.exited') return { word: 'stopped', cls: 'down' };
+  if (e.type === 'container.health') {
+    if (/unhealthy/i.test(e.message || '')) return { word: 'unhealthy', cls: 'unhealthy' };
+    if (/healthy/i.test(e.message || '')) return { word: 'running', cls: 'up' };
+    return { word: 'health changed', cls: 'unmanaged' };
+  }
+  const m = String(e.message || '');
+  if (/^restarting/i.test(m)) return { word: 'restarting', cls: 'unhealthy' };
+  if (/^paused/i.test(m)) return { word: 'paused', cls: 'unmanaged' };
+  if (/^running/i.test(m)) return { word: 'running', cls: 'up' };
+  if (/^exited/i.test(m)) return { word: 'stopped', cls: 'down' };
+  return { word: e.message || 'changed', cls: 'unmanaged' };
+}
+
+/** A compact state strip drawn ONLY from witnessed events — no invented gaps, no
+ *  backfilled history. Unknown stretches say they are unknown. */
+function UptimeStrip({ events, watchingSince }: { events: ActivityEvent[]; watchingSince: number | null }) {
+  const ordered = [...events].sort((a, b) => a.t - b.t).slice(-24);
+  if (!ordered.length) return null;
+  const now = Date.now();
+  const start = Math.min(watchingSince ?? ordered[0].t, ordered[0].t);
+  const span = Math.max(1, now - start);
+  const segs: { from: number; to: number; word: string; cls: string }[] = [];
+  let cursor = start;
+  let cur = { word: 'unknown — no event yet', cls: 'unknown' };
+  for (const e of ordered) {
+    if (e.t > cursor) segs.push({ from: cursor, to: e.t, ...cur });
+    cur = stateAfter(e);
+    cursor = e.t;
+  }
+  segs.push({ from: cursor, to: now, ...cur });
+  return (
+    <div className="uptime-strip" role="img" aria-label={`Uptime history: ${segs.map((s) => s.word).join(', then ')}`}>
+      {segs.map((s, i) => (
+        <span
+          key={i}
+          className={`useg useg--${s.cls}`}
+          style={{ flexGrow: Math.max(0.35, (s.to - s.from) / span * 100) }}
+          title={`${s.word} · ${new Date(s.from).toLocaleTimeString()} – ${new Date(s.to).toLocaleTimeString()}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ServiceHistory({ doc, containerName, related }: { doc: ServiceHistoryDoc | null; containerName: string; related: ActivityEvent[] }) {
+  const events = doc?.events?.length ? doc.events : related.filter((e) => e.source === 'docker');
+  if (!doc) return <div className="stale-note">Loading history…</div>;
+  if (!events.length) {
+    // the two honest sentences, and they mean different things
+    if (!doc.watchingSince) {
+      return <div className="stale-note" role="status">No historical data yet — OpusHub has recorded nothing since it started, so there is no history to show (this is not the same as “nothing happened”).</div>;
+    }
+    return <div className="stale-note" role="status">No events recorded for this service since OpusHub started watching ({new Date(doc.watchingSince).toLocaleString()}). Earlier changes were not observed.</div>;
+  }
+  return (
+    <div className="hub-act">
+      <UptimeStrip events={events} watchingSince={doc.watchingSince} />
+      {events.slice(0, 8).map((e) => (
+        <div className="ha-row" key={e.id}>
+          <span className="ha-t">{relTime(e.t)}</span>
+          <span className="ha-msg">
+            {humanEvent(e)}
+            {e.message && e.type.startsWith('container') && !e.message.startsWith('health') ? <span> · {e.message}</span> : null}
+          </span>
+        </div>
+      ))}
+      <span className="stale-note" style={{ display: 'block', marginTop: 'var(--sp-2)' }}>
+        {containerName} — history begins {doc.watchingSince ? new Date(doc.watchingSince).toLocaleString() : 'when OpusHub boots'}; earlier changes are unknown, never invented.
+      </span>
+    </div>
   );
 }
 

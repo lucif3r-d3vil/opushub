@@ -208,9 +208,9 @@ test('getDiscoveryStatus reports engine, sources and overlays without leaking th
   const doc = await m.getDiscoveryStatus();
   assert.equal(doc.engine.ok, true);
   assert.equal(doc.engine.state, 'connected');
-  assert.equal(doc.engine.containers, 24);
+  assert.equal(doc.engine.containers, 25);
   assert.equal(doc.engine.running, 20);
-  assert.equal(doc.engine.stopped, 4);
+  assert.equal(doc.engine.stopped, 5);
   assert.ok(doc.engine.version, 'the engine told us its version');
   assert.match(String(doc.engine.api), /^\d+\.\d+$/, 'API version is echoed');
   assert.equal(doc.urlDiscovery.sources.traefik > 0, true);

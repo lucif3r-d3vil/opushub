@@ -31,7 +31,7 @@ test('no overlay data at all: every container is still listed, named and reachab
   const doc = await m.getServicesView();
   assert.equal(doc.live, true);
   assert.equal(doc.stats.configured, 0);
-  assert.equal(doc.stats.discovered, 24, 'one row per container, nothing invented');
+  assert.equal(doc.stats.discovered, 25, 'one row per container, nothing invented');
   assert.equal(doc.groups.length > 0, true);
   assert.deepEqual(doc.unmatched, []);
 
@@ -85,7 +85,7 @@ test('stacks come from compose projects with no stacks.yaml, and nothing more', 
   assert.equal(photos.containerCount, 3);
   assert.equal(photos.runningCount, 2);
   assert.equal(photos.status, 'degraded');
-  assert.deepEqual(doc.standalone.map((c) => c.name).sort(), ['nightly-backup-runner-with-a-remarkably-long-name', 'opushub', 'traefik']);
+  assert.deepEqual(doc.standalone.map((c) => c.name).sort(), ['nightly-backup-runner-with-a-remarkably-long-name', 'opushub', 'restart-loop', 'traefik']);
 });
 
 test('infrastructure rails are inventoried, labelled with why, and excluded from the app grid', async () => {
@@ -100,7 +100,7 @@ test('infrastructure rails are inventoried, labelled with why, and excluded from
   assert.equal(apps.includes('redis'), false);
   assert.equal(apps.includes('redis'), false, 'a bare cache is not an app');
   assert.ok(apps.includes('observability-grafana-1'), 'grafana is deliberately routed, so it reads as an app');
-  assert.equal(doc.stats.applications + doc.stats.infrastructure, 24);
+  assert.equal(doc.stats.applications + doc.stats.infrastructure, 25);
 });
 
 test('a missing config file is not an error — the overlay is simply empty', async () => {
@@ -109,7 +109,7 @@ test('a missing config file is not an error — the overlay is simply empty', as
   await m.invalidateDiscovery();
   const doc = await m.getServicesView();
   assert.equal(doc.live, true);
-  assert.equal(doc.stats.containers, 24, 'the inventory is Docker’s, files or not');
+  assert.equal(doc.stats.containers, 25, 'the inventory is Docker’s, files or not');
   assert.deepEqual(doc.skipped, []);
   const stacks = await m.getStacksDoc();
   assert.equal(stacks.stacks.length, 7);

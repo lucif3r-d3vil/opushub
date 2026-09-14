@@ -14,6 +14,7 @@ interface StackDetailDoc {
   id: string; project: string | null; name: string; displayName: string; description: string | null; icon: string | null; notes: string | null; compose: string | null;
   status: string; statusReason: string | null; live: boolean; source: 'configured' | 'discovered'; configured: boolean;
   containerCount: number; runningCount: number;
+  unhealthyCount?: number; stoppedCount?: number; attentionCount?: number;
   members: {
     service: string; containerName: string; icon: string | null; group: string | null; url: string | null; urlSource: string; kind: string; route: string | null; configured: boolean;
     container: { name: string; id: string; state: string; status: string; health: string | null; image: string } | null;
@@ -79,6 +80,15 @@ export default function StackDetailPage() {
             {totals.hasAny && <span className="mono-meta">{pct(totals.cpu, 0)} cpu · {bytes(totals.mem)} mem</span>}
             <button className="btn btn-quiet btn-sm" onClick={refresh}>Refresh</button>
             {fetchedAt && <span className="stale-note">{relTime(fetchedAt)}</span>}
+          </div>
+          {/* compact rollup — the page stays readable; deep detail lives on the service pages */}
+          <div className="stack-rollup" role="group" aria-label="Stack health summary">
+            <span className="roll-cell"><b>{data.containerCount}</b> containers</span>
+            <span className="roll-cell roll-run"><b>{data.runningCount}</b> running</span>
+            {!!data.unhealthyCount && <span className="roll-cell roll-bad"><b>{data.unhealthyCount}</b> unhealthy</span>}
+            {!!data.stoppedCount && <span className="roll-cell roll-stop"><b>{data.stoppedCount}</b> stopped</span>}
+            {!!data.attentionCount && <span className="roll-cell roll-warn"><b>{data.attentionCount}</b> attention</span>}
+            {totals.hasAny && <span className="roll-cell"><b>{pct(totals.cpu, 1)}</b> cpu · <b>{bytes(totals.mem)}</b> mem</span>}
           </div>
         </div>
         <div className="detail-actions">
