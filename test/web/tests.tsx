@@ -15,6 +15,7 @@ import Settings from '../../src/pages/Settings';
 import IconsPage from '../../src/pages/Icons';
 import ServiceDetail from '../../src/pages/ServiceDetail';
 import StackDetail from '../../src/pages/StackDetail';
+import SystemPage from '../../src/pages/System';
 import type { LayoutDoc, WidgetInstance } from '../../src/lib/types';
 import type { HubData } from '../../src/lib/hubData';
 import App from '../../src/App';
@@ -211,6 +212,7 @@ function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: strin
             <Route path="/icons" element={<IconsPage />} />
             <Route path="/activity" element={<div data-test="activity">activity</div>} />
             <Route path="/stacks/:name" element={<StackDetail />} />
+            <Route path="/system" element={<SystemPage />} />
             <Route path="/services/:group/:name" element={<ServiceDetail />} />
           </Routes>
         </LayoutProvider>
@@ -626,6 +628,30 @@ export async function runWebTests(): Promise<WebResult> {
     } finally {
       await h2.unmount();
     }
+  });
+
+  /* 15b — Phase 5: System shows the machinery behind it, and the load history it holds */
+  await test('system: provider health, load history, and no invented GPU or thermal data', async (h) => {
+    h.setRoutes({
+      ...stubRoutes(),
+      '/api/system/history': {
+        points: [
+          { t: Date.now() - 10_000, cpu: 12, memUsedPct: 40, load: 0.4, rx: 1000, tx: 200, temp: 41, procs: 120 },
+          { t: Date.now() - 5_000, cpu: 14, memUsedPct: 41, load: 0.62, rx: 1400, tx: 260, temp: 41, procs: 121 },
+        ],
+      },
+    });
+    await h.mount(<TestApp entry="/system"><Hub /></TestApp>);
+    await h.waitFor(() => text().includes('Load average'), 'the load history chart');
+    expect(qa('.sys-band--providers .prov-row').length >= 3, 'the provider band did not render');
+    expect(text().includes('read 2s ago'), 'provider freshness is not shown');
+    expect(text().includes('nothing on this page needs it'), 'an idle provider is not described as idle');
+    expect(text().includes('feeds unreachable'), 'a failing provider hides its reason');
+    expect(text().includes('no discrete GPU'), 'the GPU row invented a device');
+    expect(text().includes('41°C'), 'a real thermal reading was not shown');
+    // two measured charts (cpu + load), each in its own box
+    expect(qa('.chart svg').length >= 2, 'the charts did not render');
+    for (const c of qa('.chart')) expect(!!c.getAttribute('style')?.includes('height'), 'a chart box was not sized');
   });
 
   /* 16 — Phase 3: the log drawer filters locally, honors timestamps, invents nothing */

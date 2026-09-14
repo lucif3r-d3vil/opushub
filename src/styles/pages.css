@@ -266,6 +266,10 @@
 
 /* provider health table (Settings → System) */
 .prov-table { display: grid; gap: 2px; }
+/* provider health band on System: a quiet row of states, not a status-card grid */
+.sys-band--providers { padding-top: 0; border-top: 0; }
+.prov-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 var(--sp-8); }
+.prov-list .micro-label { grid-column: 1 / -1; }
 .prov-row { display: flex; align-items: center; gap: var(--sp-4); padding: 8px 2px; border-top: 1px solid var(--hair); flex-wrap: wrap; }
 .prov-row:first-child { border-top: 0; }
 .prov-name { font-weight: 590; min-width: 84px; }
