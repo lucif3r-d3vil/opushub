@@ -82,7 +82,12 @@ const noWebDetail = { ...serviceDetail, service: noWebService, url: null, urlSou
 const searchResults = (query: string) => ({
   results: query.includes('nav')
     ? [{ title: 'Navidrome', subtitle: 'Music · running', kind: 'service', href: '/services/Music/navidrome', icon: null, status: 'up' }]
-    : [{ title: 'Widgets', subtitle: 'Hub Layout', kind: 'setting', href: '/settings/widgets' }],
+    : query.includes('stream')
+      ? [
+        { title: 'Stream', subtitle: 'Media · running', kind: 'service', href: '/services/Media/stream', icon: null, status: 'up' },
+        { title: 'stream', subtitle: 'Activity · started · 2h ago', kind: 'activity', href: '/activity?service=stream' },
+      ]
+      : [{ title: 'Widgets', subtitle: 'Hub Layout', kind: 'setting', href: '/settings/widgets' }],
 });
 
 /* Phase 3 fixtures: on-demand readings for the detail page. */
@@ -191,6 +196,12 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
     '/api/docker/containers/wave/logs': logsRoute,
     '/api/providers': providersFixture,
     '/api/services/Media/photos': noWebDetail,
+    '/api/services/Media/stream': {
+      ...serviceDetail,
+      service: { ...servicesDoc.services[0], name: 'stream', displayName: 'Stream', group: 'Media' },
+    },
+    '/api/services/Media/stream/stats/history': { samples: [], watchingSince: null, capped: 360 },
+    '/api/services/Media/stream/history': { service: 'stream', events: [], watchingSince: null, logStarted: null },
     '/api/services/Music/navidrome': {
       ...serviceDetail,
       service: { ...servicesDoc.services[0], name: 'navidrome', displayName: 'Navidrome', description: 'Music streaming', group: 'Music' },
@@ -341,6 +352,29 @@ export async function runWebTests(): Promise<WebResult> {
     await h.flush(60);
     expect(!dialog(), 'Enter did not close the overlay');
     expect(qa('h1.detail-title').some((el) => text(el).includes('Navidrome')), 'Enter did not open the service page');
+  });
+
+  /* 3b — Phase 5: the palette finds a service, offers its activity, and deep-links the filter */
+  await test('search: ⌘K → “stream” → the service, with its activity one row below', async (h) => {
+    await h.mount(<TestApp><SearchHost /></TestApp>);
+    key(window, '/');
+    await h.flush(40);
+    await type(searchInput()!, 'stream');
+    await h.waitFor(() => text().includes('Stream'), 'results for “stream”');
+    await h.flush(260);
+    // the service and the activity destination are separate rows, in separate groups
+    expect(text().includes('Recent activity'), 'the activity group is not shown');
+    const rows = qa('.cmdk-item').map((el) => text(el));
+    expect(rows.some((r) => r.includes('Stream') && r.includes('Media')), 'the service result is missing');
+    expect(rows.some((r) => r.includes('started')), 'the activity result is missing');
+
+    // choosing the service navigates to the service page
+    const serviceRow = qa('.cmdk-item').find((el) => text(el).includes('Stream') && text(el).includes('Media'))!;
+    click(serviceRow);
+    await h.flush(80);
+    expect(!dialog(), 'the overlay stayed open');
+    expect(qa('h1.detail-title').some((el) => text(el).includes('Stream')), 'the service page did not open');
+    expect(!h.calls.some((c) => text(JSON.stringify(c.body ?? {})).includes('restart')), 'a destructive command reached the API');
   });
 
   /* 4 — Escape closes from the input, and focus comes back to the page */

@@ -12,13 +12,13 @@ interface ServerResult extends SearchEntry { group?: string; status?: string }
 
 const KIND_LABEL: Record<string, string> = {
   action: 'Actions', page: 'Pages', service: 'Services', stack: 'Stacks', setting: 'Settings',
-  bookmark: 'Bookmarks', news: 'News',
+  activity: 'Recent activity', bookmark: 'Bookmarks', news: 'News',
 };
-const ORDER = ['Actions', 'Services', 'Stacks', 'Pages', 'Settings', 'Bookmarks', 'News'];
+const ORDER = ['Actions', 'Services', 'Stacks', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
 
 const KIND_ICON: Record<string, string> = {
   page: 'lucide:house', stack: 'lucide:layers', bookmark: 'lucide:bookmark', news: 'lucide:newspaper',
-  action: 'lucide:command', setting: 'lucide:sliders-horizontal',
+  action: 'lucide:command', setting: 'lucide:sliders-horizontal', activity: 'lucide:activity',
 };
 
 /** ⌘K on a Mac, Ctrl K everywhere else — the overlay should not teach the wrong muscle memory. */
@@ -62,7 +62,7 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     { title: 'Go Services', subtitle: 'Everything you run', kind: 'action', href: '/services', keywords: ['apps', 'containers'] },
     { title: 'Go Stacks', subtitle: 'Compose projects', kind: 'action', href: '/stacks', keywords: ['projects'] },
     { title: 'Go System', subtitle: 'Host vitals', kind: 'action', href: '/system', keywords: ['cpu', 'memory', 'host'] },
-    { title: 'Go Activity', subtitle: 'What happened, when', kind: 'action', href: '/activity', keywords: ['events', 'timeline'] },
+    { title: 'Go Activity', subtitle: 'What happened, when', kind: 'action', href: '/activity', keywords: ['events', 'timeline', 'history', 'log'] },
     { title: 'Go Settings', subtitle: 'Everything you can change', kind: 'action', href: '/settings/appearance', keywords: ['preferences', 'config'] },
     { title: 'Go Icons', subtitle: 'Icon browser', kind: 'action', href: '/icons', keywords: ['glyphs', 'logos'] },
     // presentation — no infrastructure mutation, ever
@@ -80,6 +80,9 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     { title: 'Customize a service', subtitle: 'Name, icon, group, URL', kind: 'action', href: '/settings/services' },
     { title: 'Browse icons', subtitle: 'Find one and apply it to a service', kind: 'action', href: '/icons' },
     { title: 'Integrations', subtitle: 'News, weather, markets', kind: 'action', href: '/settings/integrations' },
+    { title: 'Account & sessions', subtitle: 'Password and signed-in browsers', kind: 'action', href: '/settings/authentication', keywords: ['password', 'security', 'sessions', 'sign out', 'revoke'] },
+    { title: 'Install identity', subtitle: 'Name and greeting', kind: 'action', href: '/settings/general', keywords: ['name', 'title', 'about'] },
+    { title: 'Environment', subtitle: 'Engine status and URL sources', kind: 'action', href: '/settings/environment', keywords: ['docker', 'engine', 'socket', 'discovery', 'homepage'] },
   ], [settings, update]);
 
   useEffect(() => {
@@ -161,7 +164,7 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search services, stacks, pages, news…"
+            placeholder="Search services, stacks, settings, activity…"
             aria-label="Search"
             autoComplete="off"
             spellCheck={false}

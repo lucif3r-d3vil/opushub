@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { usePolled } from '../lib/api';
 import { dayLabel, relTime, timeOfDay } from '../lib/format';
 import type { ActivityEvent, ActivityGroup } from '../lib/types';
@@ -54,11 +55,13 @@ interface ActivityDoc {
 }
 
 export default function ActivityPage() {
+  // deep links from the command palette and the service/stack pages: /activity?service=wave
+  const [params, setParams] = useSearchParams();
   const [source, setSource] = useState<Source>('all');
-  const [service, setService] = useState('');
-  const [stack, setStack] = useState('');
-  const [type, setType] = useState('');
-  const [windowMs, setWindowMs] = useState(0);
+  const [service, setService] = useState(() => params.get('service') || '');
+  const [stack, setStack] = useState(() => params.get('stack') || '');
+  const [type, setType] = useState(() => params.get('type') || '');
+  const [windowMs, setWindowMs] = useState(() => Number(params.get('since')) || 0);
   const [open, setOpen] = useState<Set<string>>(new Set());
 
   // The window is pinned when it is chosen (not recomputed on every render) so the query path — and
@@ -83,6 +86,18 @@ export default function ActivityPage() {
     windowMs && { key: 'time', label: WINDOWS.find((w) => w.ms === windowMs)?.label || 'window', clear: () => setWindowMs(0) },
   ].filter(Boolean) as { key: string; label: string; clear: () => void }[];
   const filtered = active.length > 0 || source !== 'all';
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (service.trim()) next.set('service', service.trim());
+    if (stack.trim()) next.set('stack', stack.trim());
+    if (type) next.set('type', type);
+    if (windowMs) next.set('since', String(windowMs));
+    const current = params.toString();
+    const wanted = next.toString();
+    // replace, not push: filtering is not navigation, and Back should leave the page
+    if (current !== wanted) setParams(next, { replace: true });
+  }, [service, stack, type, windowMs, params, setParams]);
 
   const days = useMemo(() => {
     const out: [string, Row[]][] = [];
