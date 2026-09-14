@@ -23,7 +23,7 @@ import { logEvent, readEvents, firstEventAt } from './activity.js';
 import { searchAll } from './search.js';
 import { loadEnv } from './env.js';
 import { DATA_DIR } from './configStore.js';
-import { statsWithHistory, statsHistory } from './statsHistory.js';
+import { statsWithHistory, statsHistory, aggregateHistory } from './statsHistory.js';
 import { providerHealthDoc, reportProvider } from './providers/health.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
@@ -480,7 +480,28 @@ export async function handleApi(req, res, url) {
     const stack = data.stacks.find((s) => String(s.id).toLowerCase() === key || s.name.toLowerCase() === key || String(s.project || '').toLowerCase() === key);
     if (!stack) return send(res, 404, { error: `stack not found: ${name}` });
     const members = await model.enrichStackMembers(stack);
-    return send(res, 200, { ...stack, members, live: data.live, statusReason: data.statusReason });
+    return send(res, 200, {
+      ...stack,
+      members,
+      // counts + aggregate CPU/memory/network + uptime, all derived from the members above
+      rollup: model.stackRollup(members),
+      live: data.live,
+      statusReason: data.statusReason,
+    });
+  }
+
+  const stHistory = p.match(/^\/api\/stacks\/([^/]+)\/history$/);
+  if (method === 'GET' && stHistory) {
+    const name = decodeURIComponent(stHistory[1]);
+    const data = await model.getStacksDoc();
+    const key = name.toLowerCase();
+    const stack = data.stacks.find((s) => String(s.id).toLowerCase() === key || s.name.toLowerCase() === key || String(s.project || '').toLowerCase() === key);
+    if (!stack) return send(res, 404, { error: `stack not found: ${name}` });
+    // No Docker calls here: this reads the shared per-container buffers, which the stack detail
+    // poll keeps warm. A member nobody has looked at simply contributes nothing.
+    const refs = stack.members.filter((m) => m.container?.state === 'running').map((m) => m.container.id || m.container.name);
+    const win = Math.min(30 * 60_000, Math.max(60_000, Number(url.searchParams.get('window')) || 30 * 60_000));
+    return send(res, 200, { stack: stack.id, ...aggregateHistory(refs, { windowMs: win }) });
   }
   if (route === 'PUT /api/stacks') {
     const patch = await jsonBody();

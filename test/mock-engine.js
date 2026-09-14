@@ -277,10 +277,18 @@ function findRef(ref) {
   return FLEET.find((f) => f.Names[0] === `/${ref}` || f.Id === ref || f.Id.startsWith(ref));
 }
 
-export function createHandler() {
+/**
+ * A handler plus a log of what was asked of it.
+ *
+ * The log exists so tests can assert *Docker call budgets* — "this poll must not re-inspect a
+ * container it inspected a second ago" is a behavioural rule, and the only honest way to test it
+ * is to count what the client actually did.
+ */
+export function createHandler({ log = null } = {}) {
   return (req, res) => {
     const url = new URL(req.url, 'http://docker');
     const p = url.pathname.replace(/^\/v1\.\d+/, '');
+    if (log) log.push(`${req.method} ${p}`);
     const send = (code, obj, contentType = 'application/json') => {
       const body = typeof obj === 'string' || Buffer.isBuffer(obj) ? obj : JSON.stringify(obj);
       res.writeHead(code, { 'content-type': contentType, 'content-length': Buffer.byteLength(body) });
@@ -362,7 +370,8 @@ export function createHandler() {
 export async function startMockEngine(socketPath) {
   const sock = socketPath || path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mock-docker-')), 'docker.sock');
   try { fs.unlinkSync(sock); } catch { /* fresh */ }
-  const server = http.createServer(createHandler());
+  const log = [];
+  const server = http.createServer(createHandler({ log }));
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(sock, resolve);
@@ -370,6 +379,11 @@ export async function startMockEngine(socketPath) {
   return {
     socketPath: sock,
     url: sock,
+    /** every Docker API call the server made, in order */
+    log,
+    /** how many calls matched a substring (e.g. '/stats' or '/containers/x/json') */
+    count(needle) { return log.filter((line) => line.includes(needle)).length; },
+    reset() { log.length = 0; },
     async stop() {
       await new Promise((r) => server.close(r));
       try { fs.unlinkSync(sock); } catch { /* ok */ }

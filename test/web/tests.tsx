@@ -58,7 +58,22 @@ const serviceDetail = {
   urlSource: servicesDoc.services[0].urlSource,
   urlNote: null,
 };
-const stackDetail = { ...stacksDoc.stacks[0], live: true, statusReason: null };
+const stackDetail = {
+  ...stacksDoc.stacks[0], live: true, statusReason: null,
+  rollup: {
+    containers: 3, running: 3, stopped: 0, unhealthy: 1, reporting: 2,
+    cpu: 21.4, memory: 512_000_000, memoryLimit: 2_000_000_000,
+    netRx: 4_500_000, netTx: 900_000, upSince: Date.now() - 6 * 3600_000,
+  },
+};
+const stackHistory = {
+  stack: 'media', containers: 2, reporting: 2, watchingSince: Date.now() - 8 * 60_000, bucketMs: 2000,
+  samples: [
+    { t: Date.now() - 15_000, cpu: 18.0, mem: 500_000_000, memLimit: 2_000_000_000, netRx: 4_000_000, netTx: 800_000, count: 2 },
+    { t: Date.now() - 10_000, cpu: 20.2, mem: 505_000_000, memLimit: 2_000_000_000, netRx: 4_200_000, netTx: 850_000, count: 2 },
+    { t: Date.now() - 5_000, cpu: 21.4, mem: 512_000_000, memLimit: 2_000_000_000, netRx: 4_500_000, netTx: 900_000, count: 2 },
+  ],
+};
 const noWebService = servicesDoc.services.find((s) => s.url == null)!;
 const noWebDetail = { ...serviceDetail, service: noWebService, url: null, urlSource: 'none', container: null };
 
@@ -179,6 +194,7 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
       service: { ...servicesDoc.services[0], name: 'navidrome', displayName: 'Navidrome', description: 'Music streaming', group: 'Music' },
     },
     '/api/stacks/media': stackDetail,
+    '/api/stacks/media/history': stackHistory,
   };
 }
 
@@ -541,11 +557,27 @@ export async function runWebTests(): Promise<WebResult> {
   });
 
   /* 13 — a stack page still lists its real members */
-  await test('stack detail renders the members of the project', async (h) => {
+  await test('stack detail renders the project, its rollup, and an aggregate chart', async (h) => {
     await h.mount(<TestApp entry="/stacks/media"><Hub /></TestApp>);
     await h.waitFor(() => text().includes('Media'), 'the stack page');
+    await h.waitFor(() => text().includes('aggregated sample'), 'the aggregate history');
     expect(text().includes('Wave') || text().includes('wave'), 'the stack members are missing');
     expect(!/Docker isn.t connected/.test(text()) || stackDetail.live === false, 'a live stack reported as disconnected');
+
+    // the rollup states its own coverage instead of implying the whole project reported,
+    // and it carries the unhealthy count through from the per-member health
+    expect(text().includes('2/3 reporting'), 'the rollup does not say how many containers reported');
+    expect(text().includes('1'), 'the unhealthy member is not counted');
+    expect(text().includes('net'), 'lifetime network I/O is missing from the rollup');
+    expect(/up \d+[hms]/.test(text()), 'stack uptime is missing');
+
+    // the aggregate chart is measured (fixed box) and honest about what it covers
+    const chart = q('.res-history .chart');
+    expect(!!chart && !!chart.querySelector('svg'), 'the stack history chart did not render');
+    expect(text().includes('members nobody has looked at contribute nothing'), 'the aggregate chart does not explain its own limits');
+
+    // and the page says out loud that a compose project is not a presentation group
+    expect(text().includes('Compose project is infrastructure'), 'the compose-project ≠ group note is missing');
   });
 
   /* 15 — Phase 3: resources arrive on demand, as sparklines, with real sample counts */
