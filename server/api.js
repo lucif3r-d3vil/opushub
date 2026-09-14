@@ -91,12 +91,28 @@ export async function handleApi(req, res, url) {
     return send(res, 200, { file: 'settings.yaml', text: readConfigText('settings.yaml') || '' });
   }
 
-  // ---------- layout ----------
+  // ---------- layout (composition of the Hub: widgets, ordering, visibility) ----------
   if (route === 'GET /api/layout') return send(res, 200, model.getLayout());
   if (route === 'PUT /api/layout') {
     const patch = await jsonBody();
     const next = model.putLayout(patch);
-    logEvent({ source: 'config', type: 'layout.updated', subject: 'layout.json', message: layoutSummary(patch) });
+    logEvent({ source: 'config', type: 'layout.updated', subject: 'layout.json', message: model.describeLayoutPatch(patch) });
+    return send(res, 200, next);
+  }
+  if (route === 'GET /api/widgets') return send(res, 200, model.getWidgetDoc());
+  if (route === 'POST /api/layout/reset') {
+    const next = model.resetLayout();
+    logEvent({ source: 'config', type: 'layout.updated', subject: 'layout.json', message: 'hub composition reset to defaults' });
+    return send(res, 200, next);
+  }
+
+  // ---------- configuration templates (layout presets — never infrastructure) ----------
+  if (route === 'GET /api/templates') return send(res, 200, await model.getTemplates());
+  if (route === 'POST /api/layout/template') {
+    const body = await jsonBody();
+    const id = String(body?.id || '').trim();
+    const next = await model.applyLayoutTemplate(id);
+    logEvent({ source: 'config', type: 'layout.updated', subject: 'layout.json', message: `template applied: ${id}` });
     return send(res, 200, next);
   }
 
@@ -351,15 +367,6 @@ function summarizeSettingsPatch(patch) {
   walk(patch);
   const s = parts.slice(0, 6).join(', ');
   return parts.length > 6 ? `${s} … (+${parts.length - 6})` : s || 'settings updated';
-}
-
-function layoutSummary(patch) {
-  const what = [];
-  if (patch?.hub?.main || patch?.hub?.rail) what.push('hub order');
-  if (patch?.hub?.hidden) what.push('visibility');
-  if (patch?.hub?.sizes) what.push('sizes');
-  if (patch?.services?.order || patch?.services?.groupOrder) what.push('service order');
-  return `layout updated: ${what.join(', ') || 'fine-tuned'}`;
 }
 
 export function markBoot(t) { bootAt = t; }

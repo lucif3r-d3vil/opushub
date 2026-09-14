@@ -110,7 +110,7 @@ export function Modal({ title, onClose, children, footer, wide }: { title: React
   );
 }
 
-export interface MenuItem { label?: string; icon?: ReactNode; action?: () => void; href?: string; danger?: boolean; sep?: boolean }
+export interface MenuItem { label?: string; icon?: ReactNode; action?: () => void; href?: string; danger?: boolean; sep?: boolean; active?: boolean }
 
 export function Menu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -131,7 +131,7 @@ export function Menu({ x, y, items, onClose }: { x: number; y: number; items: Me
             it.href ? (
               <a className="menu-item" key={i} href={it.href} role="menuitem" onClick={onClose}>{it.icon}{it.label}</a>
             ) : (
-              <button key={i} role="menuitem" className={it.danger ? 'danger' : ''} onClick={() => { it.action?.(); onClose(); }}>{it.icon}{it.label}</button>
+              <button key={i} role="menuitem" data-hl={it.active || undefined} aria-checked={it.active} className={it.danger ? 'danger' : ''} onClick={() => { it.action?.(); onClose(); }}>{it.icon}{it.label}</button>
             ))}
     </div>
   );

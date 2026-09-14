@@ -40,7 +40,9 @@ export function Sortable({
     const rects: Rect[] = [];
     const idx = new Map<string, number>();
     let i = 0;
-    root.querySelectorAll<HTMLElement>('[data-sortable-id]').forEach((li) => {
+    // direct children only: sortables nest (groups contain their services), and an unscoped
+    // query would measure a grandchild's box as if it were a sibling's slot.
+    root.querySelectorAll<HTMLElement>(':scope > [data-sortable-id]').forEach((li) => {
       const r = li.getBoundingClientRect();
       rects.push({ x: r.left - cres.left, y: r.top - cres.top, w: r.width, h: r.height });
       idx.set(li.dataset.sortableId!, i++);
@@ -90,7 +92,9 @@ export function Sortable({
     const root = rootRef.current;
     if (!root) return;
     const { rects, idx, id } = drag.current;
-    root.querySelectorAll<HTMLElement>('[data-sortable-id]').forEach((li) => {
+    // direct children only: sortables nest (groups contain their services), and an unscoped
+    // query would measure a grandchild's box as if it were a sibling's slot.
+    root.querySelectorAll<HTMLElement>(':scope > [data-sortable-id]').forEach((li) => {
       const lid = li.dataset.sortableId!;
       const own = idx.get(lid);
       if (own == null) return;
@@ -133,14 +137,14 @@ export function Sortable({
       if (id && preview && preview.some((p, i) => p !== ids[i])) {
         // commit, then FLIP from pre-drop visual positions to true new positions
         const before = new Map<string, Rect>();
-        root!.querySelectorAll<HTMLElement>('[data-sortable-id]').forEach((li) => before.set(li.dataset.sortableId!, rectOf(li, root!)));
+        root!.querySelectorAll<HTMLElement>(':scope > [data-sortable-id]').forEach((li) => before.set(li.dataset.sortableId!, rectOf(li, root!)));
         d.id = null;
         setDragId(null);
         onReorder(preview);
         requestAnimationFrame(() => {
           const root2 = rootRef.current;
           if (!root2) return;
-          root2.querySelectorAll<HTMLElement>('[data-sortable-id]').forEach((li) => {
+          root2.querySelectorAll<HTMLElement>(':scope > [data-sortable-id]').forEach((li) => {
             const lid = li.dataset.sortableId!;
             const b = before.get(lid);
             li.classList.remove('dragging');
@@ -158,7 +162,7 @@ export function Sortable({
       } else {
         d.id = null;
         setDragId(null);
-        root?.querySelectorAll<HTMLElement>('[data-sortable-id]').forEach((li) => { li.style.transform = ''; li.classList.remove('sortable-shift'); });
+        root?.querySelectorAll<HTMLElement>(':scope > [data-sortable-id]').forEach((li) => { li.style.transform = ''; li.classList.remove('sortable-shift'); });
       }
     };
     const lastPointer = { x: null as number | null, y: null as number | null };

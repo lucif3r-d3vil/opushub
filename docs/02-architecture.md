@@ -17,7 +17,8 @@ opushub/
 │   ├── stacks.yaml            optional overlay: rename/describe a compose project the engine reported
 │   ├── settings.yaml          appearance, integrations, behavior (theme, accent, feeds, …)
 │   ├── bookmarks.yaml         flat link collection
-│   ├── layout.json            hub section order / widget visibility / service order (persisted by drag&drop)
+│   ├── layout.json            hub composition v2: widget instances (id/type/zone/size/visible/config),
+│   │                          spacing, group + service order (persisted by drag & drop)
 │   ├── theme.css              optional custom CSS (Homepage-style)
 │   ├── app.js                 optional custom JS (disabled unless explicitly allowed)
 │   ├── icons/                 local icon files, served at /user/icons/*
@@ -104,7 +105,10 @@ results are cached briefly (60s) so an unreachable source is retried gently rath
 | --- | --- |
 | `GET /api/health` | version, paths, env-file names, provider availability summary |
 | `GET/PUT /api/settings` | appearance/integrations/behavior; PUT = partial deep-merge, atomic YAML write, logged to Activity |
-| `GET/PUT /api/layout` | hub section order, widget visibility/size, service order overrides |
+| `GET/PUT /api/layout` | the hub composition (v2): `hub.widgets[]`, `hub.spacing`, `services.groupOrder/order/hiddenGroups`. PUT = partial deep-merge + normalisation (unknown widget types dropped, sizes clamped) |
+| `POST /api/layout/reset` | back to the shipped composition |
+| `GET /api/widgets` | widget catalogue (types, category — system/grid/information/personal — default zone/size, allowed sizes, config schema) + the current instances |
+| `GET /api/templates` · `POST /api/layout/template {id}` | composition presets: layout-only, previews included, unknown id → 404. A template can never create, rename or install anything |
 | `GET /api/services` | the canonical inventory: one object per container, enriched by overlays; `groups`, flat `services`, `infrastructure`, `unmatched`, `stats` |
 | `GET /api/discovery` | engine + URL-source diagnostics for Settings → System |
 | `GET /api/services/:group/:name` | detail incl. container/stack join |
@@ -130,17 +134,26 @@ none — everything is Open/Details/Logs where real).
 - **Routing**: React Router with pages per §6 of the brief; hub is `/`, not a dashboard island.
   Pages: `/`, `/services`, `/services/:group/:name`, `/stacks`, `/stacks/:id`, `/system`,
   `/activity`, `/settings/:tab`, `/icons`.
-- **Data**: tiny typed fetch client + `usePolledQuery(path, ttl)` (stale-while-revalidate,
-  visibility-paused). No global store — provider data is local to what asks for it; theme/layout
-  live in two contexts. This keeps re-renders scoped and avoids a state library.
+- **Data**: tiny typed fetch client + `useSharedQuery(path, ttl)` (stale-while-revalidate,
+  visibility-paused, **one poller per path shared by every consumer** — the Hub and its live preview
+  are two subscribers of one request, not two requests). `useHubData` decides what a page needs from
+  the widget types it is actually showing, so a hidden widget costs nothing. No global store —
+  provider data is keyed by path; theme/layout live in two contexts.
+- **Hub composition**: `HubSurface` is the only implementation of the Hub — `/` renders it with live
+  data and drag enabled, Settings renders the same component with the layout being edited and
+  interaction off. Widgets are instances (`{id,type,zone,size,visible,config}`) resolved through a
+  renderer registry, never hardcoded in the page; a type this build does not know degrades to a
+  quiet line instead of breaking the page. Zones: main column + sidebar; sizes S/M/L per zone;
+  spacing (cozy/comfortable/airy) is part of the composition.
 - **Theme**: CSS custom properties in `tokens.css` ([data-theme] + [data-density] + `--accent`);
   a JS applier reads settings, applies instantly (live preview) and persists on debounce. Fonts:
   Inter Variable (UI) + a serif display face used *only* for the greeting and stack/service heroes.
 - **Charts**: hand-rolled SVG (sparkline, area with gradient-to-baseline, meter bars). No chart lib.
-- **Drag & drop**: pointer-events sortable built in-house (`SortableList`): grab handle appears on
-  hover, 2px drop indicator, FLIP animation on settle, keyboard movable (space to pick, arrows to
-  move), writes order to `/api/layout`. Reordering hub sections, widgets and services — one
-  mechanism.
+- **Drag & drop**: pointer-events sortable built in-house (`Sortable`): grab handle appears on
+  hover, drop preview via transforms, FLIP animation on settle, keyboard movable (Space/Enter to pick
+  up, arrows to move, Esc to drop), reduced motion honoured, writes order to `/api/layout`.
+  Reordering widgets, launcher groups and services — one mechanism. Sortables nest (groups inside
+  the launcher), so measurement is scoped to direct children.
 - **Search**: `/` or ⌘K opens the command overlay. Index built client-side from data already on
   the page + `/api/search` for anything remote (news). Fuzzy subsequence scoring, grouped results,
   arrows/Enter navigation; actions ("Toggle theme", "Edit services.yaml") appear as results.

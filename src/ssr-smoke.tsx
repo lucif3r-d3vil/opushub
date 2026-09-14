@@ -3,7 +3,13 @@ import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 
-const routes = ['/', '/services', '/services/Media/Stream', '/stacks', '/stacks/Media', '/system', '/activity', '/settings/appearance', '/settings/services', '/settings/integrations', '/settings/system', '/icons', '/nope'];
+const routes = [
+  '/', '/services', '/services/Media/Stream', '/stacks', '/stacks/Media', '/system', '/activity',
+  '/settings/appearance', '/settings/background', '/settings/hub', '/settings/widgets', '/settings/templates',
+  '/settings/services', '/settings/groups', '/settings/bookmarks', '/settings/integrations', '/settings/system',
+  '/settings/advanced',
+  '/icons', '/nope',
+];
 let failed = 0;
 for (const route of routes) {
   try {
@@ -13,6 +19,7 @@ for (const route of routes) {
       </MemoryRouter>,
     );
     if (!html.includes('root') && html.length < 10) throw new Error('empty render');
+    // note: lazy pages resolve during hydration, so this asserts the shell + module graph
     console.log(`✓ ${route} — rendered ${html.length} bytes`);
   } catch (e) {
     failed++;

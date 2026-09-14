@@ -7,4 +7,5 @@ config/.env
 *.log
 .DS_Store
 dist-ssr/
+dist-web/
 config/layout.json.tmp*

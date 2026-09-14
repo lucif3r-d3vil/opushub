@@ -11,13 +11,22 @@ import { STATUS_WORDS, StatusDot } from './ui';
 interface ServerResult extends SearchEntry { group?: string; status?: string }
 
 const KIND_LABEL: Record<string, string> = {
-  page: 'Pages', service: 'Services', stack: 'Stacks', bookmark: 'Bookmarks', news: 'News', action: 'Actions',
+  action: 'Actions', page: 'Pages', service: 'Services', stack: 'Stacks', setting: 'Settings',
+  bookmark: 'Bookmarks', news: 'News',
 };
-const ORDER = ['Actions', 'Pages', 'Services', 'Stacks', 'Bookmarks', 'News'];
+const ORDER = ['Actions', 'Services', 'Stacks', 'Pages', 'Settings', 'Bookmarks', 'News'];
 
 const KIND_ICON: Record<string, string> = {
-  page: 'lucide:house', stack: 'lucide:layers', bookmark: 'lucide:bookmark', news: 'lucide:newspaper', action: 'lucide:command',
+  page: 'lucide:house', stack: 'lucide:layers', bookmark: 'lucide:bookmark', news: 'lucide:newspaper',
+  action: 'lucide:command', setting: 'lucide:sliders-horizontal',
 };
+
+/** ⌘K on a Mac, Ctrl K everywhere else — the overlay should not teach the wrong muscle memory. */
+export function searchShortcutLabel(): string {
+  if (typeof navigator === 'undefined') return 'Ctrl K';
+  const platform = `${navigator.platform || ''} ${navigator.userAgent || ''}`;
+  return /Mac|iPhone|iPad|iPod/i.test(platform) ? '⌘K' : 'Ctrl K';
+}
 
 export function useGlobalSearchHotkey(onOpen: () => void) {
   useEffect(() => {
@@ -53,10 +62,11 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
       subtitle: 'Appearance', kind: 'action',
       action: () => update({ appearance: { theme: settings?.appearance.theme === 'light' ? 'dark' : 'light' } }),
     },
-    { title: 'Edit services', subtitle: 'Groups, icons, URLs', kind: 'action', href: '/settings/services' },
-    { title: 'Appearance settings', subtitle: 'Theme, accent, density', kind: 'action', href: '/settings/appearance' },
+    { title: 'Arrange Hub widgets', subtitle: 'Add, hide, resize, reorder', kind: 'action', href: '/settings/widgets' },
+    { title: 'Apply a Hub template', subtitle: 'Minimal, balanced, media…', kind: 'action', href: '/settings/templates' },
+    { title: 'Customize a service', subtitle: 'Name, icon, group, URL', kind: 'action', href: '/settings/services' },
+    { title: 'Browse icons', subtitle: 'Find one and apply it to a service', kind: 'action', href: '/icons' },
     { title: 'Integrations', subtitle: 'News, weather, markets', kind: 'action', href: '/settings/integrations' },
-    { title: 'Browse icons', subtitle: 'Find an icon for a service', kind: 'action', href: '/icons' },
   ], [settings, update]);
 
   useEffect(() => {
@@ -144,7 +154,18 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
           <kbd className="kbd">esc</kbd>
         </div>
         <div className="cmdk-list" ref={listRef}>
-          {!flat.length && <div className="cmdk-empty">{q ? `Nothing found for “${q}”.` : 'Type to search everything OpusHub knows.'}</div>}
+          {!flat.length && (
+            <div className="cmdk-empty">
+              {q ? (
+                <>
+                  Nothing matches “{q}”.
+                  <div className="stale-note" style={{ marginTop: 6 }}>Try a container name, a group, or a setting like “widgets”.</div>
+                </>
+              ) : (
+                'Search services, stacks, pages and settings — everything comes from the same discovered inventory the pages use.'
+              )}
+            </div>
+          )}
           {groups.map(([label, items]) => (
             <div key={label}>
               <div className="cmdk-group">{label}</div>
@@ -184,7 +205,7 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
         <div className="cmdk-foot">
           <span><kbd className="kbd">↑</kbd><kbd className="kbd">↓</kbd> navigate</span>
           <span><kbd className="kbd">↵</kbd> open</span>
-          <span style={{ marginLeft: 'auto' }}>⌘K anywhere · / from the Hub</span>
+          <span style={{ marginLeft: 'auto' }}>{searchShortcutLabel()} anywhere · / everywhere</span>
         </div>
       </div>
     </div>

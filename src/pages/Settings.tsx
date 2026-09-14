@@ -1,29 +1,56 @@
-import { useCallback, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, post, put, usePolled, useSave } from '../lib/api';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { api, invalidateShared, post, put, usePolled, useSave } from '../lib/api';
 import { relTime } from '../lib/format';
 import { useLayout, useSettings, type DeepPartial } from '../lib/theme';
-import type { DiscoveryDoc, HealthDoc, LayoutDoc, Service, ServicesDoc, SettingsDoc } from '../lib/types';
+import type {
+  DiscoveryDoc, HealthDoc, LayoutDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
+  TemplatesDoc, WidgetCatalogueEntry, WidgetDoc, WidgetInstance, WidgetZone,
+} from '../lib/types';
 import { Icon } from '../components/Icon';
 import { IconPickerModal } from '../components/IconPicker';
 import { Menu, type MenuItem, Modal, PageHero, ProviderNote, Segmented, Switch } from '../components/ui';
+import { Sortable } from '../components/Sortable';
+import { HubPreview } from '../components/hub/HubPreview';
+import {
+  addWidget, configSummary, hiddenWidgets, moveWidget, removeWidget, setSpacing, setWidget, visibleInZone,
+} from '../lib/hubLayout';
+import {
+  assignGroup, clearGroup, ensureOverlay, overlayFromInventory, removeEntry, removeGroup, renameGroup,
+  saveOverlay, setGroupDescription, setIcon, type DraftGroup, type DraftService,
+} from '../lib/overlay';
 
 const TABS = [
   { id: 'appearance', label: 'Appearance' },
-  { id: 'hub', label: 'Hub' },
+  { id: 'background', label: 'Background' },
+  { id: 'hub', label: 'Hub layout' },
+  { id: 'widgets', label: 'Widgets' },
+  { id: 'templates', label: 'Templates' },
   { id: 'services', label: 'Services' },
+  { id: 'groups', label: 'Groups' },
   { id: 'bookmarks', label: 'Bookmarks' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'system', label: 'System' },
+  { id: 'advanced', label: 'Advanced' },
 ];
+
+/** Tabs where seeing the result is the point. */
+const PREVIEW_TABS = new Set(['appearance', 'background', 'hub', 'widgets', 'templates']);
 
 export default function SettingsPage() {
   const { tab = 'appearance' } = useParams();
   const nav = useNavigate();
+  const [previewTemplate, setPreviewTemplate] = useState<TemplateEntry | null>(null);
+  const { layout } = useLayout();
+  const showPreview = PREVIEW_TABS.has(tab);
+
   return (
     <>
-      <PageHero title="Settings" desc="OpusHub reads config/*.yaml — every change here writes the file it belongs in. Comments survive." />
-      <div className="settings-grid">
+      <PageHero
+        title="Settings"
+        desc="Everything here is presentation: OpusHub reads your infrastructure and never writes to it. Changes save themselves to config/*.yaml as you make them."
+      />
+      <div className={`settings-grid${showPreview ? ' settings-grid--preview' : ''}`}>
         <nav className="settings-nav" aria-label="Settings sections">
           {TABS.map((t) => (
             <Link key={t.id} to={`/settings/${t.id}`} className={t.id === tab ? 'active' : ''}>{t.label}</Link>
@@ -31,12 +58,31 @@ export default function SettingsPage() {
           <Link to="/icons" style={{ marginTop: 'var(--sp-4)' }}>Icon browser</Link>
         </nav>
         <div className="settings-pane">
+          {showPreview && (
+            <div className="settings-preview">
+              <HubPreview
+                layout={previewTemplate ? previewTemplate.preview : layout}
+                label={previewTemplate ? `previewing “${previewTemplate.name}” — not applied yet` : 'updates as you change settings'}
+                height={400}
+              />
+              {previewTemplate && (
+                <button className="btn btn-quiet btn-sm settings-preview-clear" onClick={() => setPreviewTemplate(null)}>
+                  Stop previewing “{previewTemplate.name}”
+                </button>
+              )}
+            </div>
+          )}
           {tab === 'appearance' && <AppearanceTab />}
+          {tab === 'background' && <BackgroundTab />}
           {tab === 'hub' && <HubTab />}
+          {tab === 'widgets' && <WidgetsTab />}
+          {tab === 'templates' && <TemplatesTab onPreview={setPreviewTemplate} />}
           {tab === 'services' && <ServicesTab />}
+          {tab === 'groups' && <GroupsTab />}
           {tab === 'bookmarks' && <BookmarksTab />}
           {tab === 'integrations' && <IntegrationsTab />}
           {tab === 'system' && <SystemTab />}
+          {tab === 'advanced' && <AdvancedTab />}
           {!TABS.some((t) => t.id === tab) && (
             <p className="stale-note">Unknown section. <button className="section-link" onClick={() => nav('/settings/appearance')}>Go to Appearance →</button></p>
           )}
@@ -47,7 +93,7 @@ export default function SettingsPage() {
 }
 
 /* ============ row primitives ============ */
-function Row({ label, desc, children, tight }: { label: string; desc?: string; children: React.ReactNode; tight?: boolean }) {
+function Row({ label, desc, children, tight }: { label: string; desc?: string; children: ReactNode; tight?: boolean }) {
   return (
     <div className="form-row" style={tight ? { padding: '10px 0' } : undefined}>
       <div>
@@ -58,7 +104,7 @@ function Row({ label, desc, children, tight }: { label: string; desc?: string; c
     </div>
   );
 }
-function Block({ title, children, aside }: { title: string; children: React.ReactNode; aside?: React.ReactNode }) {
+function Block({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
   return (
     <section style={{ marginBottom: 'var(--section-gap)' }}>
       <div className="section-head" style={{ marginBottom: 2 }}><h2 className="section-title">{title}</h2><span className="section-aside">{aside}</span></div>
@@ -72,23 +118,23 @@ const ACCENTS = [
   { id: 'sage', name: 'Sage' }, { id: 'slate', name: 'Slate' }, { id: 'teal', name: 'Teal' },
   { id: 'amber', name: 'Amber' }, { id: 'rose', name: 'Rose' }, { id: 'clay', name: 'Clay' }, { id: 'moss', name: 'Moss' },
 ];
+const ACCENT_HEX: Record<string, string> = {
+  sage: '#7ea074', slate: '#68809b', teal: '#4e928d', amber: '#c08f43', rose: '#b76b74', clay: '#a3715a', moss: '#7c8f57',
+};
 
 function AppearanceTab() {
   const { settings, update, resolvedTheme } = useSettings();
-  const { data: bgs } = usePolled<{ files: { name: string; url: string }[] }>('/api/backgrounds', 0);
   const a = settings?.appearance;
   const set = useCallback((patch: DeepPartial<SettingsDoc>) => update(patch), [update]);
   if (!settings || !a) return <p className="stale-note">Loading settings…</p>;
   return (
     <>
-      <p className="lede">Changes preview instantly and save themselves to <span className="mono-meta">settings.yaml</span>. No restarts.</p>
-
       <Block title="Theme">
-        <Row label="Mode" desc="Auto follows the OS, with a manual cycle from the rail.">
+        <Row label="Mode" desc="Auto follows the OS; the rail button cycles it too.">
           <Segmented value={a.theme} onChange={(v) => set({ appearance: { theme: v } })} ariaLabel="Theme mode"
             options={[{ value: 'system', label: 'Auto' }, { value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }]} />
         </Row>
-        <Row label="Accent" desc="One quiet hue for focus, selection and charts.">
+        <Row label="Accent" desc="One quiet hue: focus, selection, charts.">
           <div className="swatches">
             {ACCENTS.map((c) => (
               <button
@@ -114,127 +160,409 @@ function AppearanceTab() {
           <Switch checked={a.transparency} onChange={(v) => set({ appearance: { transparency: v } })} label="Translucency" />
         </Row>
       </Block>
+      <p className="stale-note">Rendering as <b>{resolvedTheme}</b> right now.</p>
+    </>
+  );
+}
 
+/* ============ Background ============ */
+function BackgroundTab() {
+  const { settings, update } = useSettings();
+  const { data: bgs } = usePolled<{ files: { name: string; url: string }[] }>('/api/backgrounds', 0);
+  const a = settings?.appearance;
+  const set = (patch: DeepPartial<SettingsDoc>) => update(patch);
+  if (!settings || !a) return <p className="stale-note">Loading settings…</p>;
+  return (
+    <>
       <Block title="Background">
-        <Row label="Style">
+        <Row label="Style" desc="Quiet is flat. Horizon is one muted ramp. Photo uses your own image behind an automatic scrim.">
           <Segmented value={a.background.mode} onChange={(v) => set({ appearance: { background: { mode: v } } })} ariaLabel="Background mode"
             options={[{ value: 'quiet', label: 'Quiet' }, { value: 'horizon', label: 'Horizon' }, { value: 'photo', label: 'Photo' }]} />
         </Row>
-        {a.background.mode === 'photo' && (
-          <>
-            <div style={{ marginTop: 'var(--sp-4)' }}>
-              <div className="bg-tile-grid">
-                <button className={`bg-tile ${!a.background.photo ? 'sel' : ''}`} onClick={() => set({ appearance: { background: { photo: null } } })}>
-                  <span className="none">None</span>
-                </button>
-                {(bgs?.files || []).map((f) => (
-                  <button
-                    key={f.url} className={`bg-tile ${a.background.photo === f.url ? 'sel' : ''}`}
-                    style={{ backgroundImage: `url("${f.url}")` }} title={f.name}
-                    onClick={() => set({ appearance: { background: { photo: f.url } } })}
-                  />
-                ))}
-              </div>
-              <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>
-                Drop images into <code className="mono-meta">config/backgrounds/</code>, or paste a URL.
-              </p>
-              <div className="field" style={{ marginTop: 'var(--sp-4)', maxWidth: 420 }}>
-                <label htmlFor="bgurl">Background URL</label>
-                <input id="bgurl" className="input mono-meta" placeholder="https://… or /user/backgrounds/photo.jpg"
-                  defaultValue={a.background.photo || ''}
-                  onKeyDown={(e) => { if (e.key === 'Enter') set({ appearance: { background: { photo: (e.target as HTMLInputElement).value.trim() || null } } }); }}
-                  onBlur={(e) => { if (e.target.value.trim() !== (a.background.photo || '')) set({ appearance: { background: { photo: e.target.value.trim() || null } } }); }}
-                />
-              </div>
-            </div>
-            <Row label="Blur" desc="Applied to the photo so text keeps contrast.">
-              <input type="range" min={0} max={48} value={a.background.blur} onChange={(e) => set({ appearance: { background: { blur: Number(e.target.value) } } })} aria-label="Background blur" />
-              <span className="mono-meta" style={{ width: 40 }}>{a.background.blur}px</span>
-            </Row>
-            <Row label="Scrim" desc="Dark (or light) veil between photo and content.">
-              <input type="range" min={0} max={100} value={a.background.scrim} onChange={(e) => set({ appearance: { background: { scrim: Number(e.target.value) } } })} aria-label="Background scrim" />
-              <span className="mono-meta" style={{ width: 40 }}>{a.background.scrim}%</span>
-            </Row>
-          </>
-        )}
       </Block>
+      {a.background.mode === 'photo' && (
+        <Block title="Image">
+          <div className="bg-tile-grid">
+            <button className={`bg-tile ${!a.background.photo ? 'sel' : ''}`} onClick={() => set({ appearance: { background: { photo: null } } })}>
+              <span className="none">None</span>
+            </button>
+            {(bgs?.files || []).map((f) => (
+              <button
+                key={f.url} className={`bg-tile ${a.background.photo === f.url ? 'sel' : ''}`}
+                style={{ backgroundImage: `url("${f.url}")` }} title={f.name}
+                onClick={() => set({ appearance: { background: { photo: f.url } } })}
+              />
+            ))}
+          </div>
+          <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>
+            Drop images into <code className="mono-meta">config/backgrounds/</code>, or paste a URL.
+          </p>
+          <div className="field" style={{ marginTop: 'var(--sp-4)', maxWidth: 420 }}>
+            <label htmlFor="bgurl">Background URL</label>
+            <input id="bgurl" className="input mono-meta" placeholder="https://… or /user/backgrounds/photo.jpg"
+              defaultValue={a.background.photo || ''}
+              onKeyDown={(e) => { if (e.key === 'Enter') set({ appearance: { background: { photo: (e.target as HTMLInputElement).value.trim() || null } } }); }}
+              onBlur={(e) => { if (e.target.value.trim() !== (a.background.photo || '')) set({ appearance: { background: { photo: e.target.value.trim() || null } } }); }}
+            />
+          </div>
+          <Row label="Blur" desc="Applied to the photo so text keeps its contrast.">
+            <input type="range" min={0} max={48} value={a.background.blur} onChange={(e) => set({ appearance: { background: { blur: Number(e.target.value) } } })} aria-label="Background blur" />
+            <span className="mono-meta" style={{ width: 40 }}>{a.background.blur}px</span>
+          </Row>
+          <Row label="Scrim" desc="Veil between photo and content. Below 45% the preview will tell you what it costs.">
+            <input type="range" min={0} max={100} value={a.background.scrim} onChange={(e) => set({ appearance: { background: { scrim: Number(e.target.value) } } })} aria-label="Background scrim" />
+            <span className="mono-meta" style={{ width: 40 }}>{a.background.scrim}%</span>
+          </Row>
+        </Block>
+      )}
+      <p className="stale-note">The preview above uses the same background layer as the Hub — what you see is what `/` renders.</p>
+    </>
+  );
+}
 
-      <Block title="Clock & greeting">
-        <Row label="Greeting name" desc="“Good evening, Nora” — leave empty for no name." tight>
+/* ============ Hub layout ============ */
+function HubTab() {
+  const { settings, update } = useSettings();
+  const { layout, setLayout, resetLayout } = useLayout();
+  if (!settings || !layout) return <p className="stale-note">Loading…</p>;
+  return (
+    <>
+      <Block title="Greeting">
+        <Row label="Name" desc="“Good evening, Nora.” Leave it empty for a greeting with no name — nothing is assumed about you.">
           <input className="input" style={{ maxWidth: 220 }} defaultValue={settings.hub.greetingName || ''}
             placeholder="(none)" aria-label="Greeting name"
             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
             onBlur={(e) => update({ hub: { greetingName: e.target.value.trim() || null } })} />
         </Row>
         <Row label="24-hour clock" tight><Switch checked={settings.hub.clock24h} onChange={(v) => update({ hub: { clock24h: v } })} label="24-hour clock" /></Row>
-        <Row label="Seconds" desc="Off by default — the clock shouldn't twitch." tight><Switch checked={settings.hub.showSeconds} onChange={(v) => update({ hub: { showSeconds: v } })} label="Show seconds" /></Row>
+        <Row label="Seconds" desc="Off by default — the clock shouldn’t twitch." tight>
+          <Switch checked={settings.hub.showSeconds} onChange={(v) => update({ hub: { showSeconds: v } })} label="Show seconds" />
+        </Row>
       </Block>
-      <p className="stale-note">Rendering as <b>{resolvedTheme}</b> right now.</p>
+
+      <Block title="Rhythm" aside={<span className="stale-note">the air between sections</span>}>
+        <Row label="Spacing" desc="Templates set this too; change it here to fine-tune.">
+          <Segmented value={layout.hub.spacing} onChange={(v) => setLayout({ hub: { spacing: v } })} ariaLabel="Hub spacing"
+            options={[{ value: 'cozy', label: 'Cozy' }, { value: 'comfortable', label: 'Comfortable' }, { value: 'airy', label: 'Airy' }]} />
+        </Row>
+        <Row label="Composition" desc={`${visibleInZone(layout, 'main').length} widget(s) in the main column · ${visibleInZone(layout, 'rail').length} in the sidebar · ${hiddenWidgets(layout).length} hidden`}>
+          <Link className="btn btn-sm" to="/settings/widgets">Arrange widgets</Link>
+          <Link className="btn btn-sm" to="/settings/templates">Templates</Link>
+        </Row>
+        <Row label="First-run banner" desc="Shown until Docker answers or you dismiss it." tight>
+          <Switch checked={!layout.hub.setupDismissed} onChange={(v) => setLayout({ hub: { setupDismissed: !v } })} label="Show first-run banner" />
+        </Row>
+      </Block>
+
+      <Block title="Reset">
+        <Row label="Hub composition" desc="Back to the default arrangement. Services, overlays and settings are untouched." tight>
+          <button className="btn btn-sm" onClick={() => void resetLayout()}>Reset layout</button>
+        </Row>
+      </Block>
     </>
   );
 }
 
-/** swatch colors (static hexes for the picker; the real tokens live on html[data-accent]) */
-const ACCENT_HEX: Record<string, string> = {
-  sage: '#7ea074', slate: '#68809b', teal: '#4e928d', amber: '#c08f43', rose: '#b76b74', clay: '#a3715a', moss: '#7c8f57',
-};
+/* ============ Widgets ============ */
+function WidgetsTab() {
+  const { layout, setLayout, resetLayout } = useLayout();
+  const { data } = usePolled<WidgetDoc>('/api/widgets', 0);
+  const [configFor, setConfigFor] = useState<WidgetInstance | null>(null);
+  const catalogue = data?.catalogue ?? [];
+  const widgets = layout?.hub.widgets ?? [];
+  const missing = catalogue.filter((c) => !widgets.some((w) => w.type === c.type));
+  // the catalogue's own organisation; a client newer than the server still renders ungrouped
+  const categories = data?.categories ?? [{ id: 'grid', label: 'Widgets', description: '' }];
+  const categoryLabel = (id: string) => categories.find((c) => c.id === id)?.label || id;
 
-/* ============ Hub ============ */
-const TEMPLATES: Record<string, { desc: string; layout: LayoutDoc['hub'] }> = {
-  Minimal: { desc: 'Overview + services, nothing else', layout: { main: ['overview', 'services'], rail: [], hidden: ['weather', 'markets', 'news', 'bookmarks', 'activity'], sizes: {} } },
-  Classic: { desc: 'Balanced home — the default', layout: { main: ['overview', 'services'], rail: ['weather', 'markets', 'news', 'activity'], hidden: ['bookmarks'], sizes: { overview: 'md', services: 'md', weather: 'md', markets: 'md', news: 'md', activity: 'md', bookmarks: 'md' } } },
-  Media: { desc: 'Services first, quieter rail', layout: { main: ['services', 'overview'], rail: ['weather', 'activity'], hidden: ['markets', 'news', 'bookmarks'], sizes: { services: 'lg' } } },
-  Monitoring: { desc: 'System lead, live rail', layout: { main: ['overview', 'services'], rail: ['activity', 'markets', 'weather'], hidden: ['news', 'bookmarks'], sizes: { activity: 'lg', overview: 'md' } } },
-  Information: { desc: 'News and weather up front', layout: { main: ['services'], rail: ['news', 'weather', 'markets', 'bookmarks', 'activity'], hidden: ['overview'], sizes: { news: 'lg' } } },
-  Full: { desc: 'Everything visible', layout: { main: ['overview', 'services'], rail: ['weather', 'markets', 'news', 'bookmarks', 'activity'], hidden: [], sizes: { news: 'lg', activity: 'lg', markets: 'lg', bookmarks: 'md', weather: 'md', overview: 'md', services: 'md' } } },
-};
-
-function HubTab() {
-  const { layout, setLayout } = useLayout();
-  const hidden = layout?.hub?.hidden ?? [];
-  const allWidgets = ['weather', 'markets', 'news', 'bookmarks', 'activity'];
+  const entries = useMemo(() => new Map(catalogue.map((c) => [c.type, c])), [catalogue]);
   if (!layout) return <p className="stale-note">Loading layout…</p>;
-  const toggle = (w: string) => setLayout({ hub: { hidden: hidden.includes(w) ? hidden.filter((h) => h !== w) : [...hidden, w] } });
+
+  const zoneBlock = (zone: WidgetZone) => {
+    const list = widgets.filter((w) => w.zone === zone);
+    const ids = list.map((w) => w.id);
+    const render = (id: string, handle?: ReactNode) => {
+      const w = widgets.find((x) => x.id === id);
+      if (!w) return null;
+      const entry = entries.get(w.type);
+      return (
+        <div className="widget-row" id={`w-${w.id}`} key={w.id}>
+          {handle}
+          <span className="widget-row-main">
+            <span className="widget-row-title">{w.title || entry?.title || w.type}</span>
+            <span className="widget-row-sub">
+              {entry?.description || w.type}
+              {entry?.category && <span className="mono-meta"> · {categoryLabel(entry.category)}</span>}
+              {configSummary(w) && <span className="mono-meta"> · {configSummary(w)}</span>}
+            </span>
+          </span>
+          {w.visible === false && <span className="chip">hidden</span>}
+          <span className="widget-row-actions">
+            {entry && entry.sizes.length > 1 && (
+              <Segmented value={w.size} onChange={(v) => setLayout({ hub: { widgets: setWidget(layout, w.id, { size: v }).hub.widgets } })} ariaLabel={`${w.title || entry.title} size`}
+                options={entry.sizes.map((s) => ({ value: s, label: s.toUpperCase() }))} />
+            )}
+            <Segmented value={w.zone} onChange={(v) => setLayout({ hub: { widgets: moveWidget(layout, w.id, v).hub.widgets } })} ariaLabel={`${w.title || entry?.title} column`}
+              options={[{ value: 'main' as const, label: 'Main' }, { value: 'rail' as const, label: 'Sidebar' }]} />
+            <Switch checked={w.visible !== false} onChange={(v) => setLayout({ hub: { widgets: setWidget(layout, w.id, { visible: v }).hub.widgets } })} label={`Show ${w.title || w.type}`} />
+            {entry?.config.length ? (
+              <button className="btn btn-sm" onClick={() => setConfigFor(w)}>Configure</button>
+            ) : null}
+            <button className="icon-btn" aria-label={`Remove ${w.title || w.type}`} title="Remove from the Hub"
+              onClick={() => setLayout({ hub: { widgets: removeWidget(layout, w.id).hub.widgets } })}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" /></svg>
+            </button>
+          </span>
+        </div>
+      );
+    };
+    return (
+      <Block key={zone} title={zone === 'main' ? 'Main column' : 'Sidebar'}
+        aside={<span className="stale-note">{list.filter((w) => w.visible !== false).length} visible</span>}>
+        {ids.length === 0 ? (
+          <p className="stale-note" style={{ padding: '10px 0' }}>Nothing here yet.</p>
+        ) : (
+          <Sortable
+            ids={ids}
+            className="widget-rows"
+            onReorder={(next) => setLayout({ hub: { widgets: reorderWidgets(layout, zone, next) } })}
+            renderItem={(id, ctx) => render(id, ctx.handle)}
+          />
+        )}
+      </Block>
+    );
+  };
+
   return (
     <>
-      <p className="lede">The Hub is a real page you arrange. Drag anywhere on the Hub to reorder — these controls are the precise version.</p>
-      <Block title="Layout templates" aside={<span className="stale-note">presets, then fine-tune as you like</span>}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10, marginTop: 'var(--sp-2)' }}>
-          {Object.entries(TEMPLATES).map(([name, t]) => (
-            <button key={name} className="svc-tile" style={{ padding: 'var(--sp-4)' }} onClick={() => setLayout({ hub: { ...t.layout, sizes: { ...t.layout.sizes, ...(layout?.hub?.sizes || {}) } } })}>
-              <div className="tile-name">{name}</div>
-              <div className="tile-app">{t.desc}</div>
-            </button>
-          ))}
-        </div>
+      <p className="lede">
+        Widgets are the Hub’s blocks. Reorder them by dragging, move them between columns, resize where a
+        smaller or larger form makes sense — everything here is layout, never infrastructure.
+      </p>
+      {zoneBlock('main')}
+      {zoneBlock('rail')}
+
+      <Block title="Add a widget" aside={<span className="stale-note">{missing.length} type{missing.length === 1 ? '' : 's'} not on the Hub</span>}>
+        {categories.map((cat) => {
+          const inCat = missing.filter((c) => (c.category || 'grid') === cat.id);
+          if (!inCat.length) return null;
+          return (
+            <div className="widget-cat" key={cat.id}>
+              <div className="widget-cat-head">
+                <span className="micro-label">{cat.label}</span>
+                <span className="stale-note">{cat.description}</span>
+              </div>
+              <div className="widget-add">
+                {inCat.map((c) => (
+                  <button key={c.type} className="widget-add-item" onClick={() => setLayout({ hub: { widgets: addWidget(layout, c).hub.widgets } })}>
+                    <span className="wa-title">+ {c.title}</span>
+                    <span className="wa-desc">{c.description}</span>
+                    <span className="wa-zone">default: {c.zone === 'main' ? 'main column' : 'sidebar'}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {!missing.length && <p className="stale-note">Every widget type this build has is already on the Hub. You can add duplicates of a type — say, two clocks for two timezones — from the menu below.</p>}
+        <details className="tech" style={{ marginTop: 'var(--sp-3)' }}>
+          <summary className="stale-note">Add a duplicate of a type already in use</summary>
+          <div className="widget-add" style={{ marginTop: 10 }}>
+            {catalogue.map((c) => (
+              <button key={c.type} className="widget-add-item" onClick={() => setLayout({ hub: { widgets: addWidget(layout, c).hub.widgets } })}>
+                <span className="wa-title">+ {c.title}</span>
+                <span className="wa-desc">{c.description}</span>
+              </button>
+            ))}
+          </div>
+        </details>
       </Block>
-      <Block title="Widgets" aside={<span className="stale-note">visible in the right rail of the Hub</span>}>
-        {allWidgets.map((w) => (
-          <Row key={w} label={w[0].toUpperCase() + w.slice(1)} desc={`Size: ${layout.hub.sizes?.[w] || 'md'}`} tight>
-            <Segmented value={(layout.hub.sizes?.[w] || 'md') as 'sm' | 'md' | 'lg'} onChange={(v) => setLayout({ hub: { sizes: { [w]: v } } })} ariaLabel={`${w} size`}
-              options={[{ value: 'sm', label: 'S' }, { value: 'md', label: 'M' }, { value: 'lg', label: 'L' }]} />
-            <Switch checked={!hidden.includes(w)} onChange={() => toggle(w)} label={`Show ${w}`} />
-          </Row>
-        ))}
+
+      <Block title="Defaults">
+        <Row label="Reset the composition" desc="Back to the balanced default arrangement. Services and settings are untouched." tight>
+          <button className="btn btn-sm" onClick={() => void resetLayout()}>Reset layout</button>
+        </Row>
       </Block>
-      <Block title="Data sources">
-        <SourceRow label="News" path="/api/news" feeds />
-        <SourceRow label="Weather" path="/api/weather" />
-        <SourceRow label="Markets" path="/api/market" />
-      </Block>
+
+      {configFor && (
+        <WidgetConfigModal
+          widget={configFor}
+          entry={entries.get(configFor.type) || null}
+          onClose={() => setConfigFor(null)}
+          onSave={(config) => {
+            setLayout({ hub: { widgets: setWidget(layout, configFor.id, { config }).hub.widgets } });
+            setConfigFor(null);
+          }}
+        />
+      )}
     </>
   );
 }
 
-function SourceRow({ label, path, feeds = false }: { label: string; path: string; feeds?: boolean }) {
-  const { data } = usePolled<{ status: string; reason?: string; items?: unknown[] }>(path, 60_000);
-  const s = data?.status;
-  const color = s === 'ok' || s === 'partial' ? 'var(--ok)' : s === 'unconfigured' ? 'var(--ink-3)' : 'var(--warn)';
+/** Reorder visible widgets of one zone; hidden ones keep their slots (same rule as the Hub). */
+function reorderWidgets(layout: LayoutDoc, zone: WidgetZone, orderedVisibleIds: string[]): WidgetInstance[] {
+  const queue = [...orderedVisibleIds];
+  const out: WidgetInstance[] = [];
+  for (const w of layout.hub.widgets) {
+    if (w.zone !== zone || w.visible === false) { out.push(w); continue; }
+    const next = queue.shift();
+    out.push(next ? layout.hub.widgets.find((x) => x.id === next) || w : w);
+  }
+  for (const id of queue) {
+    const w = layout.hub.widgets.find((x) => x.id === id);
+    if (w) out.push(w);
+  }
+  return out;
+}
+
+function WidgetConfigModal({ widget, entry, onSave, onClose }: {
+  widget: WidgetInstance;
+  entry: WidgetCatalogueEntry | null;
+  onSave: (config: Record<string, unknown>) => void;
+  onClose: () => void;
+}) {
+  const [config, setConfig] = useState<Record<string, unknown>>({ ...widget.config });
+  const { data: services } = usePolled<ServicesDoc>('/api/services', 0);
+  const groupNames = (services?.groups || []).map((g) => g.name);
+  const fields = entry?.config || [];
+  const set = (k: string, v: unknown) => setConfig((c) => ({ ...c, [k]: v }));
   return (
-    <Row label={label} desc={feeds ? (s === 'unconfigured' ? 'No feeds — add some under Integrations.' : `status: ${s}`) : `status: ${s || '…'}`} tight>
-      <span style={{ width: 8, height: 8, borderRadius: 9, background: color, boxShadow: `0 0 0 3px color-mix(in srgb, ${color} 18%, transparent)` }} />
-      <span className="mono-meta">{s || '…'}</span>
-    </Row>
+    <Modal
+      title={`${widget.title || entry?.title || widget.type} — configuration`}
+      onClose={onClose}
+      footer={<>
+        <button className="btn btn-quiet" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => onSave(config)}>Save widget</button>
+      </>}
+    >
+      {!fields.length && <p className="stale-note">This widget has no configuration — its content follows the engine.</p>}
+      {fields.map((f) => {
+        const value = config[f.key];
+        if (f.type === 'group-list') {
+          const chosen = Array.isArray(value) ? (value as string[]) : [];
+          if (!groupNames.length) return <p className="stale-note" key={f.key}>No groups discovered on this engine yet.</p>;
+          return (
+            <div className="field" key={f.key}>
+              <label>{f.label}</label>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {groupNames.map((g) => (
+                  <button key={g} className="chip" aria-pressed={chosen.includes(g)}
+                    style={chosen.includes(g) ? { borderColor: 'var(--accent)', color: 'var(--ink)' } : undefined}
+                    onClick={() => set(f.key, chosen.includes(g) ? chosen.filter((x) => x !== g) : [...chosen, g])}>
+                    {g}
+                  </button>
+                ))}
+              </div>
+              <span className="hint">{f.hint || 'Leave empty for every group.'}</span>
+            </div>
+          );
+        }
+        if (f.type === 'list') {
+          const chosen = Array.isArray(value) ? (value as string[]) : [];
+          return (
+            <div className="field" key={f.key}>
+              <label>{f.label}</label>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {(f.options || []).map((o) => (
+                  <button key={o} className="chip" aria-pressed={chosen.includes(o)}
+                    style={chosen.includes(o) ? { borderColor: 'var(--accent)', color: 'var(--ink)' } : undefined}
+                    onClick={() => set(f.key, chosen.includes(o) ? chosen.filter((x) => x !== o) : [...chosen, o])}>
+                    {o}
+                  </button>
+                ))}
+              </div>
+              <span className="hint">{f.hint || 'Leave empty for all sources.'}</span>
+            </div>
+          );
+        }
+        if (f.type === 'boolean') {
+          return (
+            <Row key={f.key} label={f.label} desc={f.hint} tight>
+              <Switch checked={value === true} onChange={(v) => set(f.key, v)} label={f.label} />
+            </Row>
+          );
+        }
+        return (
+          <div className="field" key={f.key}>
+            <label>{f.label}</label>
+            <input className="input" value={typeof value === 'string' ? value : ''} onChange={(e) => set(f.key, e.target.value)} />
+            {f.hint && <span className="hint">{f.hint}</span>}
+          </div>
+        );
+      })}
+    </Modal>
+  );
+}
+
+/* ============ Templates ============ */
+function TemplatesTab({ onPreview }: { onPreview: (t: TemplateEntry | null) => void }) {
+  const { layout, reload } = useLayout();
+  const { data, loading } = usePolled<TemplatesDoc>('/api/templates', 0);
+  const { busy, err, save } = useSave();
+  const [applied, setApplied] = useState<string | null>(null);
+  const templates = data?.templates || [];
+  const currentSpacing = layout?.hub.spacing;
+
+  return (
+    <>
+      <p className="lede">
+        Templates are <b>arrangements</b>. They decide which widgets show, where they sit and how much air the page
+        gets. They never install, create or rename anything — applying one to a system with no media containers
+        simply leaves that ordering unused.
+      </p>
+      {err && <p className="stale-note" style={{ color: 'var(--fail)' }}>{err}</p>}
+      {loading && !templates.length && <p className="stale-note">Reading templates…</p>}
+      <div className="tpl-grid">
+        {templates.map((t) => {
+          const matches = t.spacing === currentSpacing;
+          return (
+            <article className="tpl" key={t.id}>
+              <header>
+                <h3>{t.name}</h3>
+                <p className="tpl-tagline">{t.tagline}</p>
+              </header>
+              <p className="tpl-desc">{t.description}</p>
+              <div className="tpl-widgets">
+                {t.widgets.map((w) => (
+                  <span className="tpl-widget" key={w.id}>
+                    <span className="tpl-widget-zone">{w.zone === 'main' ? '▤' : '▎'}</span>
+                    {w.title}
+                  </span>
+                ))}
+              </div>
+              {(t.groupPriority?.length ?? 0) > 0 && (
+                <p className="stale-note">
+                  Prefers {t.groupPriority.join(' › ')}
+                  {(t.unmatchedGroups?.length ?? 0) > 0 && <> · not on this system: {t.unmatchedGroups.join(', ')} (ignored)</>}
+                </p>
+              )}
+              <footer>
+                <button className="btn btn-sm" onMouseEnter={() => onPreview(t)} onFocus={() => onPreview(t)} onMouseLeave={() => onPreview(null)} onClick={() => onPreview(t)}>
+                  Preview
+                </button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={busy}
+                  onClick={() => save(async () => {
+                    await post('/api/layout/template', { id: t.id });
+                    invalidateShared('/api/layout');
+                    await reload();
+                    onPreview(null);
+                    setApplied(t.id);
+                  })}
+                >
+                  {applied === t.id ? 'Applied' : 'Apply'}
+                </button>
+                {matches && <span className="stale-note">matches your spacing</span>}
+              </footer>
+            </article>
+          );
+        })}
+      </div>
+      <p className="stale-note" style={{ marginTop: 'var(--sp-5)' }}>
+        Applying keeps your service ordering, hidden groups and first-run dismissal — a template only rearranges the page.
+      </p>
+    </>
   );
 }
 
@@ -244,85 +572,52 @@ function SourceRow({ label, path, feeds = false }: { label: string; path: string
  * icon, order, hide, or re-URL a container that Docker actually reports. It cannot create one —
  * entries that match no container are listed under "unmatched" so they are fixable, not silent.
  */
-interface DraftService {
-  name: string; container: string | null; displayName: string | null; app: string | null;
-  description: string | null; url: string | null; icon: string | null; group: string | null;
-  order: number | null; hidden: boolean; showOnHub: boolean; keywords: string[]; meta: { label: string; value: string }[];
-}
-interface DraftGroup { name: string; description?: string | null; icon?: string | null; order?: number | null; services: DraftService[] }
-
-const draftFromService = (s: Service): DraftService => ({
-  name: s.container.composeService || s.name,
-  container: s.name,
-  displayName: s.configured ? s.displayName : null,
-  app: s.app ?? null,
-  description: s.description ?? null,
-  url: s.urlSource === 'manual' ? s.url : null,
-  icon: s.iconSource === 'config' ? s.icon : null,
-  group: s.groupSource === 'config' ? s.group : null,
-  order: null,
-  hidden: false,
-  showOnHub: true,
-  keywords: s.keywords ?? [],
-  meta: s.meta ?? [],
-});
-
 function ServicesTab() {
   const { data } = usePolled<ServicesDoc>('/api/services', 0);
   const { busy, err, okAt, save } = useSave();
+  const [params, setParams] = useSearchParams();
   const [draft, setDraft] = useState<DraftGroup[] | null>(null);
   const [editing, setEditing] = useState<{ gi: number; si: number | null } | null>(null);
   const [iconFor, setIconFor] = useState<{ gi: number; si: number } | null>(null);
   const inventory = useMemo(() => data?.services ?? [], [data]);
   const bound = useMemo(() => new Set(inventory.filter((s) => s.configured).map((s) => s.name)), [inventory]);
-  const groups = useMemo<DraftGroup[] | null>(() => {
-    if (!data) return null;
-    if (!draft) {
-      return data.groups.map((g) => ({
-        name: g.name,
-        description: g.description ?? null,
-        services: g.services.filter((s) => s.configured).map((s) => ({
-          name: s.name, container: s.name, displayName: s.displayName, app: s.app, description: s.description,
-          url: s.urlSource === 'manual' ? s.url : null, icon: s.icon, group: s.group, order: s.order ?? null,
-          hidden: !!s.hidden, showOnHub: s.showOnHub !== false, keywords: s.keywords ?? [], meta: s.meta ?? [],
-        })),
-      })).filter((g) => g.services.length || g.description);
-    }
-    return draft;
-  }, [data, draft]);
+  const groups = useMemo<DraftGroup[] | null>(() => draft ?? (data ? overlayFromInventory(data) : null), [draft, data]);
+
+  // ?container=<name> — "Customize" from the Hub lands straight in the editor for that service
+  const focus = params.get('container');
+  useEffect(() => {
+    if (!focus || !data || draft) return;
+    const svc = inventory.find((s) => s.name === focus);
+    if (!svc) return;
+    const base = overlayFromInventory(data);
+    const has = base.some((g) => g.services.some((s) => s.container === svc.name));
+    const withEntry = has ? base : ensureOverlay(base, svc);
+    setDraft(withEntry);
+    const gi = withEntry.findIndex((g) => g.services.some((s) => s.container === svc.name));
+    const si = withEntry[gi]?.services.findIndex((s) => s.container === svc.name) ?? -1;
+    if (gi >= 0 && si >= 0) setEditing({ gi, si });
+    params.delete('container');
+    setParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus, data]);
+
   if (!groups) return <p className="stale-note">Loading services.yaml…</p>;
 
   const dirty = !!draft;
-  const commit = () => save(async () => {
-    await put('/api/services', { groups: groups.map((g) => ({ ...g, services: g.services.map((s) => ({ ...s, group: undefined })) })) });
-    setDraft(null);
-  });
+  const commit = () => save(async () => { await saveOverlay(groups); setDraft(null); });
   const patchService = (gi: number, si: number, p: Partial<DraftService>) =>
     setDraft((d) => {
-      const base = (d ?? groups) as DraftGroup[];
-      const next = structuredClone(base);
+      const next = structuredClone((d ?? groups) as DraftGroup[]);
       next[gi].services[si] = { ...next[gi].services[si], ...p };
       return next;
     });
-  const addOverlay = (containerName: string) => setDraft((d) => {
-    const next = structuredClone((d ?? groups) as DraftGroup[]);
-    const svc = inventory.find((x) => x.name === containerName);
-    if (!svc) return next;
-    const gname = svc.group || 'Other';
-    let gi = next.findIndex((g) => g.name === gname);
-    if (gi < 0) { next.push({ name: gname, description: null, services: [] }); gi = next.length - 1; }
-    if (next[gi].services.some((x) => x.container === containerName)) return next;
-    next[gi].services.push(draftFromService(svc));
-    return next;
-  });
-  const unbound = inventory.filter((s) => !bound.has(s.name));
+  const unbound = inventory.filter((s) => !bound.has(s.name) && !s.hidden);
   const unmatched = (data?.unmatched ?? []).filter((u) => u.kind === 'service');
 
   return (
     <>
       <p className="lede">
-        This is a presentation layer over live discovery. Docker decides what exists;{' '}
-        <span className="mono-meta">config/services.yaml</span> only decides how a container is
+        Docker decides what exists; <span className="mono-meta">config/services.yaml</span> only decides how a container is
         named, filed, iconed and ordered.
         {dirty && <b style={{ color: 'var(--warn)' }}> · unsaved changes</b>}
       </p>
@@ -343,8 +638,8 @@ function ServicesTab() {
           title={g.name}
           aside={
             <span style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-              <button className="btn btn-quiet btn-sm" onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next[gi].services.push({ name: 'new', container: null, displayName: null, app: null, description: null, url: null, icon: null, group: null, order: null, hidden: false, showOnHub: true, keywords: [], meta: [] }); return next; })}>+ entry</button>
-              <button className="btn btn-quiet btn-sm" onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next.splice(gi, 1); return next; })}>remove group</button>
+              <button className="btn btn-quiet btn-sm" onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next[gi].services.push({ name: 'new', container: null, displayName: null, app: null, description: null, url: null, icon: null, group: g.name, order: null, hidden: false, showOnHub: true, keywords: [], meta: [] }); return next; })}>+ entry</button>
+              <button className="btn btn-quiet btn-sm" onClick={() => setDraft(removeGroup(groups, g.name))}>remove group</button>
             </span>
           }
         >
@@ -352,6 +647,7 @@ function ServicesTab() {
             {g.services.map((s, si) => {
               const live = inventory.find((x) => x.name === s.container);
               const label = live ? (live.container.composeService || live.name) : s.container;
+              const customized = !!(s.displayName || s.icon || s.description || s.url || s.hidden || s.showOnHub === false || (s.group && s.group !== g.name));
               return (
                 <li key={`${s.container || s.name}-${si}`} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: '9px 0', borderTop: '1px solid var(--hair)' }}>
                   <button className="icon-btn" style={{ width: 34, height: 34 }} title="Choose icon" onClick={() => setIconFor({ gi, si })}>
@@ -369,8 +665,11 @@ function ServicesTab() {
                       {live?.url && <span className="mono-meta"> · {live.url.replace(/^https?:\/\//, '')} ({live.urlSource})</span>}
                       {!live?.url && s.url && <span className="mono-meta"> · {s.url.replace(/^https?:\/\//, '')} (manual)</span>}
                       {s.hidden ? <span> · hidden</span> : null}
+                      {!s.showOnHub ? <span> · not on Hub</span> : null}
                     </div>
                   </div>
+                  {/* discovered vs customized is a word, not a badge */}
+                  <span className="stale-note">{customized ? 'customized' : live ? 'discovered' : ''}</span>
                   {!live && s.container && <span className="chip" title={unmatched.find((u) => u.name === s.name)?.reason || 'no such container on this engine'}>not installed</span>}
                   <button className="btn btn-sm" onClick={() => setEditing({ gi, si })}>Edit</button>
                   <button className="btn btn-sm" title={`Remove ${s.name}`} onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next[gi].services.splice(si, 1); return next; })}>
@@ -388,7 +687,7 @@ function ServicesTab() {
         <Block title="Discovered, no overlay" aside={<span className="stale-note">{unbound.length} container{unbound.length === 1 ? '' : 's'} rendering with derived names and icons — fine to leave alone</span>}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {unbound.map((s) => (
-              <button key={s.id} className="chip" title={`${s.container.image || ''} · ${s.url || s.urlNote || 'no url'}`} onClick={() => addOverlay(s.name)}>
+              <button key={s.id} className="chip" title={`${s.container.image || ''} · ${s.url || s.urlNote || 'no url'}`} onClick={() => setDraft(ensureOverlay(groups, s))}>
                 <Icon ref={s.icon} name={s.displayName} size={14} plain /> {s.displayName} · customize
               </button>
             ))}
@@ -412,7 +711,11 @@ function ServicesTab() {
                       style={{ width: 210 }}
                       value=""
                       aria-label={`Rebind ${u.name} to a container`}
-                      onChange={(e) => { const v = e.target.value; if (v) addOverlay(v); }}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        const svc = inventory.find((x) => x.name === v);
+                        if (svc) setDraft(ensureOverlay(groups, svc));
+                      }}
                     >
                       <option value="">bind to a live container…</option>
                       {inventory.map((s) => <option key={s.id} value={s.name}>{s.displayName} ({s.name})</option>)}
@@ -426,8 +729,8 @@ function ServicesTab() {
       )}
 
       <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', marginTop: 'var(--sp-6)' }}>
-        <button className="btn" onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next.push({ name: 'New group', description: null, services: [] }); return next; })}>+ group</button>
-        <button className="btn btn-primary" onClick={commit} disabled={!dirty || busy}>{busy ? 'Saving…' : 'Save to services.yaml'}</button>
+        <button className="btn" onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next.push({ name: `Group ${next.length + 1}`, description: null, services: [] }); return next; })}>+ group</button>
+        <button className="btn btn-primary" disabled={!dirty || busy} onClick={commit}>{busy ? 'Saving…' : 'Save to services.yaml'}</button>
         {dirty && <button className="btn btn-quiet" onClick={() => setDraft(null)}>Discard</button>}
         {okAt && !dirty && <span className="stale-note" style={{ color: 'var(--ok)' }}>saved {relTime(okAt)}</span>}
       </div>
@@ -521,6 +824,146 @@ function ServiceEditor({ group, svc, inventory, onSave, onClose }: { group: stri
   );
 }
 
+/* ============ Groups ============ */
+function GroupsTab() {
+  const { data } = usePolled<ServicesDoc>('/api/services', 0);
+  const { layout, setLayout } = useLayout();
+  const { busy, err, save } = useSave();
+  const [draft, setDraft] = useState<DraftGroup[] | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const inventory = useMemo(() => data?.services ?? [], [data]);
+  const hiddenGroups = layout?.services?.hiddenGroups || [];
+
+  const groups = useMemo<DraftGroup[] | null>(() => {
+    if (draft) return draft;
+    if (!data) return null;
+    const base = overlayFromInventory(data);
+    for (const g of data.groups) if (!base.some((x) => x.name === g.name)) base.push({ name: g.name, description: g.description ?? null, services: [] });
+    return base;
+  }, [draft, data]);
+
+  const discoveredGroups = useMemo(() => {
+    const seen = new Map<string, Service[]>();
+    for (const s of inventory) {
+      if (!s.group || s.hidden) continue;
+      seen.set(s.group, [...(seen.get(s.group) || []), s]);
+    }
+    return seen;
+  }, [inventory]);
+
+  if (!groups) return <p className="stale-note">Loading groups…</p>;
+  const dirty = !!draft;
+
+  const moveService = (container: string, to: string | null) => {
+    const svc = inventory.find((s) => s.name === container);
+    if (!svc) return;
+    setDraft(to === null ? clearGroup(groups, container) : assignGroup(groups, svc, to));
+  };
+
+  return (
+    <>
+      <p className="lede">
+        Groups are presentation. A group heading exists because containers are filed under it — either by
+        discovery (their compose project) or by an overlay you write here. Nothing in this pane can create a service.
+        {dirty && <b style={{ color: 'var(--warn)' }}> · unsaved changes</b>}
+      </p>
+      {err && <p className="stale-note" style={{ color: 'var(--fail)' }}>{err}</p>}
+
+      <Sortable
+        ids={groups.map((g) => g.name)}
+        className="group-rows"
+        onReorder={(next) => {
+          const reordered = [...next].map((n) => groups.find((g) => g.name === n)!).filter(Boolean);
+          setDraft(reordered);
+          setLayout({ services: { groupOrder: next } });
+        }}
+        renderItem={(name, ctx) => {
+          const g = groups.find((x) => x.name === name);
+          if (!g) return null;
+          const discovered = discoveredGroups.get(name) || [];
+          const isHidden = hiddenGroups.includes(name);
+          return (
+            <div className="group-row" key={name}>
+              <div className="group-row-head">
+                {ctx.handle}
+                <input
+                  className="input group-name"
+                  value={g.name}
+                  aria-label={`Group name for ${name}`}
+                  onChange={(e) => setDraft(renameGroup(groups, name, e.target.value))}
+                />
+                <input
+                  className="input group-desc"
+                  value={g.description || ''}
+                  placeholder="one line about this group (optional)"
+                  aria-label={`Description for ${name}`}
+                  onChange={(e) => setDraft(setGroupDescription(groups, name, e.target.value))}
+                />
+                <span className="stale-note">{g.services.length} overlay · {discovered.length} discovered</span>
+                <Switch checked={!isHidden} onChange={() => setLayout({ services: { hiddenGroups: isHidden ? hiddenGroups.filter((x) => x !== name) : [...hiddenGroups, name] } })} label={`Show ${name} on the Hub`} />
+                <button className="btn btn-sm" onClick={() => setEditing(editing === name ? null : name)}>{editing === name ? 'Done' : 'Services'}</button>
+                <button
+                  className="icon-btn"
+                  aria-label={`Delete group ${name}`}
+                  title="Delete this group — its services fall back to discovery"
+                  onClick={() => { setDraft(removeGroup(groups, name)); setLayout({ services: { hiddenGroups: hiddenGroups.filter((x) => x !== name) } }); }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" /></svg>
+                </button>
+              </div>
+
+              {editing === name && (
+                <div className="group-row-body">
+                  {g.services.length === 0 && discovered.length === 0 && <p className="stale-note">Nothing is filed here yet. Assign a discovered service below, or leave the group empty — it renders nothing until a container matches.</p>}
+                  {g.services.map((s) => (
+                    <div className="group-svc" key={s.container || s.name}>
+                      <Icon ref={s.icon} name={s.displayName || s.name} size={20} plain />
+                      <span className="grow">{s.displayName || inventory.find((x) => x.name === s.container)?.displayName || s.container || s.name}</span>
+                      <span className="stale-note">overlay</span>
+                      <button className="btn btn-quiet btn-sm" onClick={() => setDraft(removeEntry(groups, s.container || ''))}>Remove overlay</button>
+                    </div>
+                  ))}
+                  {discovered.filter((d) => !g.services.some((s) => s.container === d.name)).map((d) => (
+                    <div className="group-svc" key={d.name}>
+                      <Icon ref={d.icon} name={d.displayName} size={20} plain />
+                      <span className="grow">{d.displayName}</span>
+                      <span className="stale-note">discovered · {d.container.composeProject || 'standalone'}</span>
+                      <button className="btn btn-quiet btn-sm" onClick={() => setDraft(assignGroup(groups, d, name))}>File here</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        }}
+      />
+
+      <Block title="Unfiled" aside={<span className="stale-note">containers with a derived group — moving one writes an overlay</span>}>
+        <div className="group-rows">
+          {inventory.filter((s) => !s.hidden && !groups.some((g) => g.services.some((x) => x.container === s.name))).slice(0, 40).map((s) => (
+            <div className="group-svc" key={s.name}>
+              <Icon ref={s.icon} name={s.displayName} size={20} plain />
+              <span className="grow">{s.displayName}<span className="stale-note"> · currently “{s.group}” ({s.groupSource || 'derived'})</span></span>
+              <select className="input" style={{ width: 190 }} value="" aria-label={`File ${s.displayName} under a group`}
+                onChange={(e) => { if (e.target.value) moveService(s.name, e.target.value); }}>
+                <option value="">file under…</option>
+                {groups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
+              </select>
+            </div>
+          ))}
+          {!inventory.length && <p className="stale-note">No containers discovered — nothing to file.</p>}
+        </div>
+      </Block>
+
+      <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center' }}>
+        <button className="btn" onClick={() => { const name = `Group ${groups.length + 1}`; setDraft([...groups, { name, description: null, services: [] }]); setEditing(name); }}>+ New group</button>
+        <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => save(async () => { await saveOverlay(groups); setDraft(null); })}>{busy ? 'Saving…' : 'Save groups'}</button>
+        {dirty && <button className="btn btn-quiet" onClick={() => setDraft(null)}>Discard</button>}
+      </div>
+    </>
+  );
+}
+
 /* ============ Bookmarks ============ */
 interface BmGroup { name: string; items: { name: string; href: string; description?: string | null }[] }
 function BookmarksTab() {
@@ -531,7 +974,7 @@ function BookmarksTab() {
   if (!data && !draft) return <p className="stale-note">Loading bookmarks…</p>;
   return (
     <>
-      <p className="lede">Flat links, no icons machinery, no status. They appear in search and can be shown on the Hub later.</p>
+      <p className="lede">Flat links, no status, no icon machinery. They appear in search and can be shown in the Hub sidebar.</p>
       {err && <p className="stale-note" style={{ color: 'var(--fail)' }}>{err}</p>}
       {groups.map((g, gi) => (
         <Block key={g.name + gi} title={g.name} aside={
@@ -558,137 +1001,14 @@ function BookmarksTab() {
       <div style={{ display: 'flex', gap: 'var(--sp-3)', marginTop: 'var(--sp-6)' }}>
         <button className="btn" onClick={() => setDraft(cloneAt(groups, (d) => d.push({ name: 'New group', items: [] })))}>+ group</button>
         <button className="btn btn-primary" disabled={!draft || busy} onClick={async () => { await save(async () => { await put('/api/bookmarks', { groups }); setDraft(null); }); }}>Save bookmarks.yaml</button>
-        {draft && <button className="btn btn-quiet" onClick={() => setDraft(null)}>Discard</button>}
       </div>
     </>
   );
 }
-function cloneAt<T>(arr: T[], mutate: (copy: T[]) => void): T[] { const c = structuredClone(arr); mutate(c); return c; }
-
-/* ============ Discovery diagnostics ============ */
-const URL_SOURCE_LABEL: Record<string, string> = {
-  manual: 'manual overrides',
-  traefik: 'Traefik metadata',
-  'published-port': 'published ports',
-  none: 'no web endpoint',
-};
-
-function DiscoveryBlock({ health }: { health: HealthDoc | null | undefined }) {
-  const { data, refresh, fetchedAt } = usePolled<DiscoveryDoc>('/api/discovery', 30_000);
-  const { settings, update } = useSettings();
-  const { busy, save } = useSave();
-  const eng = data?.engine;
-  const url = data?.urlDiscovery;
-  const counts = [
-    { k: 'Containers', v: eng?.containers },
-    { k: 'Running', v: eng?.running },
-    { k: 'Stopped', v: eng?.stopped },
-    { k: 'Applications', v: data?.inventory.applications },
-    { k: 'Infrastructure', v: data?.inventory.infrastructure },
-    { k: 'Stacks', v: data?.inventory.stacks },
-  ];
-  const sources = url ? Object.entries(url.sources).sort((a, b) => b[1]! - a[1]!) : [];
-  return (
-    <Block title="Service discovery" aside={<span className="stale-note">{fetchedAt ? `checked ${relTime(fetchedAt)}` : 'reading the engine…'}</span>}>
-      <Row label="Docker engine" desc="What the Services, Hub and Stacks pages are built from." tight>
-        <span className="mono-meta" style={{ color: eng?.ok ? 'var(--ok)' : 'var(--ink-3)' }}>
-          {eng?.ok
-            ? `connected · engine ${eng.version || '?'}${eng.api ? ` · API ${eng.api}` : ''}`
-            : health?.providers.docker.reason || eng?.state || '…'}
-        </span>
-      </Row>
-
-      {eng?.ok && (
-        <div className="stat-strip" style={{ margin: 'var(--sp-3) 0 var(--sp-5)' }}>
-          {counts.map((c) => (
-            <div className="stat" key={c.k}>
-              <div className="stat-k">{c.k}</div>
-              <div className="stat-v">{c.v ?? '—'}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <Row label="URL discovery" desc="Where each service’s clickable address comes from — the first source that answers wins.">
-        <span className="mono-meta" style={{ textAlign: 'right' }}>
-          {sources.length
-            ? sources.map(([k, n]) => `${n} ${URL_SOURCE_LABEL[k] || k}`).join(' · ')
-            : 'nothing resolved yet'}
-        </span>
-      </Row>
-
-      <Row label="Host address" desc="Only used for published-port URLs. Leave empty to detect it from this machine — never guessed, and nothing is ever assumed to live on a particular domain.">
-        <input
-          className="input mono-meta"
-          style={{ width: 230 }}
-          defaultValue={settings?.infrastructure?.hostAddress || ''}
-          placeholder={url?.hostAddress ? `auto: ${url.hostAddress}` : 'e.g. 10.0.0.5'}
-          aria-label="Host address for published ports"
-          onBlur={(e) => update({ infrastructure: { hostAddress: e.target.value.trim() || null } }, true)}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-        />
-        <span className="stale-note">{url?.hostAddress ? `using ${url.hostAddress} (${url.hostAddressSource})` : 'not detected'}</span>
-      </Row>
-
-      <Row label="Proxy entrypoint ports" desc="Optional: only needed when your Traefik entrypoint is not reachable on 80/443, e.g. web=8080. Traefik’s own metadata supplies everything else." tight>
-        <input
-          className="input mono-meta"
-          style={{ width: 230 }}
-          defaultValue={Object.entries(settings?.infrastructure?.entrypointPorts || {}).map(([k, v]) => `${k}=${v}`).join(', ')}
-          placeholder="web=8080, websecure=8443"
-          aria-label="Entrypoint port map"
-          onBlur={(e) => {
-            const map: Record<string, string> = {};
-            for (const part of e.target.value.split(/[,\n]/)) {
-              const [k, v] = part.split('=').map((x) => x.trim());
-              if (k && v) map[k] = v;
-            }
-            update({ infrastructure: { entrypointPorts: map } }, true);
-          }}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-        />
-      </Row>
-
-      <Row label="Presentation overlays" desc="How much of what you see comes from config rather than from the engine itself." tight>
-        <span className="mono-meta">
-          {data
-            ? [
-              `${data.overlays.serviceOverlays}${data.overlays.serviceEntries != null && data.overlays.serviceEntries !== data.overlays.serviceOverlays ? ` of ${data.overlays.serviceEntries}` : ''} service entries bound`,
-              `${data.overlays.stackOverlays}${data.overlays.stackEntries != null && data.overlays.stackEntries !== data.overlays.stackOverlays ? ` of ${data.overlays.stackEntries}` : ''} stack entries bound`,
-              data.overlays.skipped ? `${data.overlays.skipped} unreadable` : null,
-            ].filter(Boolean).join(' · ')
-            : '…'}
-        </span>
-      </Row>
-
-      <Row label="Last discovery" tight>
-        <span className="mono-meta">{data?.discoveredAt ? new Date(data.discoveredAt).toLocaleTimeString() : '—'}</span>
-        <button className="btn btn-quiet btn-sm" disabled={busy} onClick={() => save(async () => { await post('/api/discovery/refresh'); refresh(); })}>
-          {busy ? 'Looking…' : 'Re-discover now'}
-        </button>
-      </Row>
-
-      {!!(data?.overlays.unmatchedList?.length) && (
-        <div style={{ marginTop: 'var(--sp-4)', paddingTop: 'var(--sp-4)', borderTop: '1px solid var(--line)' }}>
-          <p className="stale-note" style={{ color: 'var(--warn)' }}>
-            {data.overlays.unmatchedList.length} overlay {data.overlays.unmatchedList.length === 1 ? 'entry describes' : 'entries describe'} nothing on this engine. They are reported, never rendered — a config entry cannot make a service exist.
-          </p>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 'var(--sp-2) 0 0', display: 'grid', gap: 4 }}>
-            {data.overlays.unmatchedList.map((u) => (
-              <li key={`${u.kind}:${u.name}`} className="mono-meta" style={{ fontSize: 12.5 }}>
-                <span style={{ color: 'var(--ink-3)' }}>{u.kind}</span> {u.name}
-                {u.container ? ` → ${u.container}` : ''}
-                <span className="muted"> · {u.reason}</span>
-              </li>
-            ))}
-          </ul>
-          <Link className="btn btn-quiet btn-sm" to="/settings/services" style={{ alignSelf: 'start', marginTop: 'var(--sp-3)' }}>
-            Fix the overlays
-          </Link>
-        </div>
-      )}
-    </Block>
-  );
+function cloneAt(groups: BmGroup[], fn: (d: BmGroup[]) => void): BmGroup[] {
+  const next = structuredClone(groups);
+  fn(next);
+  return next;
 }
 
 /* ============ Integrations ============ */
@@ -703,16 +1023,17 @@ const SYMBOL_SUGGESTIONS = ['AAPL', 'NVDA', 'MSFT', 'TSLA', 'RELIANCE.NS', 'TCS.
 function IntegrationsTab() {
   const { settings, update } = useSettings();
   const intg = settings?.integrations;
-  if (!settings || !intg) return <p className="stale-note">Loading…</p>;
   const [feedUrl, setFeedUrl] = useState('');
   const [sym, setSym] = useState('');
+  if (!settings || !intg) return <p className="stale-note">Loading…</p>;
   const feeds = intg.news.feeds || [];
   const symbols = intg.markets.symbols || [];
+  const touch = () => { invalidateShared('/api/news'); invalidateShared('/api/weather'); invalidateShared('/api/market'); };
   return (
     <>
-      <p className="lede">Everything here is user configuration — OpusHub ships no defaults and never invents values. Each widget shows its real provider state.</p>
+      <p className="lede">Every value here is yours. OpusHub ships no defaults and never invents a reading — each widget shows its real provider state, and nothing is displayed that could not be fetched.</p>
 
-      <Block title="News" aside={<Link className="section-link" to="/">test it on the Hub →</Link>}>
+      <Block title="News" aside={<Link className="section-link" to="/">see it on the Hub →</Link>}>
         <div className="editor-list">
           {feeds.map((f, i) => (
             <div className="editor-item" key={i}>
@@ -720,20 +1041,20 @@ function IntegrationsTab() {
                 <b style={{ fontWeight: 560 }}>{f.name || URLSafe(f.url)}</b>
                 <div className="stale-note mono-meta" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.url}</div>
               </span>
-              <button className="icon-btn" aria-label="Remove feed" onClick={() => update({ integrations: { news: { feeds: feeds.filter((_, j) => j !== i) } } })}>
+              <button className="icon-btn" aria-label="Remove feed" onClick={() => { update({ integrations: { news: { feeds: feeds.filter((_, j) => j !== i) } } }, true); touch(); }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" /></svg>
               </button>
             </div>
           ))}
-          {!feeds.length && <div className="editor-item stale-note">No feeds yet.</div>}
+          {!feeds.length && <div className="editor-item stale-note">No feeds yet — the News widget will say so rather than show an empty box.</div>}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 'var(--sp-3)' }}>
           <input className="input" style={{ flex: 1 }} placeholder="https://example.com/feed.xml" value={feedUrl} onChange={(e) => setFeedUrl(e.target.value)} aria-label="Feed URL" />
-          <button className="btn" disabled={!feedUrl.trim()} onClick={() => { update({ integrations: { news: { feeds: [...feeds, { url: feedUrl.trim(), name: null }] } } }, true); setFeedUrl(''); }}>Add</button>
+          <button className="btn" disabled={!feedUrl.trim()} onClick={() => { update({ integrations: { news: { feeds: [...feeds, { url: feedUrl.trim(), name: null }] } } }, true); touch(); setFeedUrl(''); }}>Add</button>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
           {FEED_SUGGESTIONS.filter((s) => !feeds.some((f) => f.url === s.url)).map((s) => (
-            <button key={s.url} className="chip" onClick={() => update({ integrations: { news: { feeds: [...feeds, s] } } }, true)}>+ {s.name}</button>
+            <button key={s.url} className="chip" onClick={() => { update({ integrations: { news: { feeds: [...feeds, s] } } }, true); touch(); }}>+ {s.name}</button>
           ))}
         </div>
       </Block>
@@ -741,12 +1062,15 @@ function IntegrationsTab() {
       <Block title="Weather">
         <Row label="Location" desc="City name or explicit coordinates — used with Open-Meteo (keyless)." tight>
           <input className="input" style={{ width: 240 }} defaultValue={intg.weather.location || ''} placeholder="Amsterdam" aria-label="Weather location"
-            onBlur={(e) => update({ integrations: { weather: { location: e.target.value.trim() || null } } }, true)}
+            onBlur={(e) => { update({ integrations: { weather: { location: e.target.value.trim() || null } } }, true); touch(); }}
             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
         </Row>
         <Row label="Units" tight>
-          <Segmented value={intg.weather.units} onChange={(v) => update({ integrations: { weather: { units: v } } }, true)} ariaLabel="Units"
+          <Segmented value={intg.weather.units} onChange={(v) => { update({ integrations: { weather: { units: v } } }, true); touch(); }} ariaLabel="Units"
             options={[{ value: 'c', label: '°C' }, { value: 'f', label: '°F' }]} />
+        </Row>
+        <Row label="Where it appears" desc="The Hub header shows the current temperature when weather is available; the sidebar widget shows the full reading." tight>
+          <Link className="btn btn-sm" to="/settings/widgets">Widget settings</Link>
         </Row>
       </Block>
 
@@ -755,7 +1079,7 @@ function IntegrationsTab() {
           {symbols.map((s, i) => (
             <span className="chip" key={s}>
               {s}
-              <button className="x" aria-label={`Remove ${s}`} onClick={() => update({ integrations: { markets: { symbols: symbols.filter((_, j) => j !== i) } } }, true)}>
+              <button className="x" aria-label={`Remove ${s}`} onClick={() => { update({ integrations: { markets: { symbols: symbols.filter((_, j) => j !== i) } } }, true); touch(); }}>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" /></svg>
               </button>
             </span>
@@ -766,13 +1090,13 @@ function IntegrationsTab() {
           <input className="input" style={{ width: 200 }} placeholder="AAPL, RELIANCE.NS…" value={sym} onChange={(e) => setSym(e.target.value)} aria-label="Add symbol" />
           <button className="btn" disabled={!sym.trim()} onClick={() => {
             const add = sym.toUpperCase().split(/[,\s]+/).filter(Boolean).filter((x) => !symbols.includes(x));
-            if (add.length) update({ integrations: { markets: { symbols: [...symbols, ...add] } } }, true);
+            if (add.length) { update({ integrations: { markets: { symbols: [...symbols, ...add] } } }, true); touch(); }
             setSym('');
           }}>Add</button>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
           {SYMBOL_SUGGESTIONS.filter((s) => !symbols.includes(s)).map((s) => (
-            <button key={s} className="chip" onClick={() => update({ integrations: { markets: { symbols: [...symbols, s] } } }, true)}>+ {s}</button>
+            <button key={s} className="chip" onClick={() => { update({ integrations: { markets: { symbols: [...symbols, s] } } }, true); touch(); }}>+ {s}</button>
           ))}
         </div>
       </Block>
@@ -781,35 +1105,21 @@ function IntegrationsTab() {
 }
 function URLSafe(u: string) { try { return new URL(u).host; } catch { return u.slice(0, 30); } }
 
-/* ============ System ============ */
-function SystemTab() {
+/* ============ Advanced ============ */
+function AdvancedTab() {
   const { settings, update } = useSettings();
-  const { data: health } = usePolled<HealthDoc>('/api/health', 0);
   const { data: custom } = usePolled<{ cssEnabled: boolean; jsEnabled: boolean; css: string | null; jsPresent: boolean }>('/api/custom', 0);
   const { save, busy, err } = useSave();
   const [cssText, setCssText] = useState<string | null>(null);
   return (
     <>
-      <p className="lede">Where OpusHub is plugged in. All paths are resolved at startup and logged on the server.</p>
-      <Block title="Configuration">
-        <Row label="Config directory" tight><span className="mono-meta">{health?.configDir || '…'}</span></Row>
-        <Row label="Data directory" tight><span className="mono-meta">{health?.dataDir || '…'}</span></Row>
-        <Row
-          label=".env discovery"
-          desc="Order: $OPUSHUB_ENV_FILE → config/.env → ./.env → $HOMEPAGE_DIR/.env → /app/config/.env. First hit wins; real env vars always beat files. Values never reach the browser."
-        >
-          <span className="mono-meta">
-            {health?.env.files.length
-              ? health.env.files.map((f) => `${f.file.split('/').slice(-2).join('/')} (${f.keys.length} key${f.keys.length === 1 ? '' : 's'}${f.error ? ' — ' + f.error : ''})`).join(' · ')
-              : 'none found — keys fall through to process.env only'}
-          </span>
-        </Row>
-        <Row label="Runtime" tight><span className="mono-meta">OpusHub {health?.version || '0.1'} · node {health?.node || '…'} · {health?.platform || ''}</span></Row>
-      </Block>
+      <p className="lede">
+        Custom assets and polling. Everything here is opt-in and stays on the frontend: a stylesheet can add to
+        OpusHub's rendering, a script runs in the page only (never on the server), and the refresh values decide how
+        often each provider is asked — lower is not better.
+      </p>
 
-      <DiscoveryBlock health={health} />
-
-      <Block title="Behavior">
+      <Block title="Hub behaviour">
         <Row label="Log service launches" desc="Adds an Activity event when you open a service from OpusHub." tight>
           <Switch checked={settings?.behavior.logLaunches ?? true} onChange={(v) => update({ behavior: { logLaunches: v } }, true)} label="Log launches" />
         </Row>
@@ -817,17 +1127,17 @@ function SystemTab() {
           <input type="number" min={2} max={300} className="input" style={{ width: 90 }} defaultValue={settings?.behavior.refresh.system}
             onBlur={(e) => update({ behavior: { refresh: { system: Math.max(2, Number(e.target.value) || 5) } } }, true)} aria-label="System refresh seconds" />
         </Row>
-        <Row label="Services refresh" desc="Containers are polled gently — Docker API calls are not free." tight>
+        <Row label="Services refresh" desc="Containers are polled gently — the engine's API is not free." tight>
           <input type="number" min={5} max={600} className="input" style={{ width: 90 }} defaultValue={settings?.behavior.refresh.services}
             onBlur={(e) => update({ behavior: { refresh: { services: Math.max(5, Number(e.target.value) || 30) } } }, true)} aria-label="Services refresh seconds" />
         </Row>
       </Block>
 
       <Block title="Custom CSS & JS" aside={<span className="stale-note">files live next to services.yaml</span>}>
-        <Row label="theme.css" desc="Homepage-style custom CSS. Linked into every page when enabled." tight>
+        <Row label="theme.css" desc="Custom CSS, linked into every page when enabled. A stylesheet cannot break OpusHub's own rendering — it only adds." tight>
           <Switch checked={custom?.cssEnabled ?? false} onChange={(v) => update({ advanced: { customCss: v } }, true)} label="Enable custom CSS" />
         </Row>
-        <Row label="app.js" desc="Custom JS, same-origin. Enable deliberately — it runs on every page." tight>
+        <Row label="app.js" desc="Custom JS, same-origin, opt-in. A thrown error is contained to that script; it never runs server-side." tight>
           <Switch checked={custom?.jsEnabled ?? false} onChange={(v) => update({ advanced: { customJs: v } }, true)} label="Enable custom JS" />
         </Row>
         {(custom?.cssEnabled) && (
@@ -845,4 +1155,78 @@ function SystemTab() {
   );
 }
 
+/* ============ System ============ */
+function SystemTab() {
+  const { data: health } = usePolled<HealthDoc>('/api/health', 0);
+  return (
+    <>
+      <p className="lede">Where OpusHub is plugged in. Paths are resolved at startup and logged on the server; infrastructure access stays read-only.</p>
+      <Block title="Configuration">
+        <Row label="Config directory" tight><span className="mono-meta">{health?.configDir || '…'}</span></Row>
+        <Row label="Data directory" tight><span className="mono-meta">{health?.dataDir || '…'}</span></Row>
+        <Row
+          label=".env discovery"
+          desc="Order: $OPUSHUB_ENV_FILE → config/.env → ./.env → $HOMEPAGE_DIR/.env → /app/config/.env. First hit wins; real env vars always beat files. Values never reach the browser."
+        >
+          <span className="mono-meta">
+            {health?.env.files.length
+              ? health.env.files.map((f) => `${f.file.split('/').slice(-2).join('/')} (${f.keys.length} key${f.keys.length === 1 ? '' : 's'}${f.error ? ' — ' + f.error : ''})`).join(' · ')
+              : 'none found — keys fall through to process.env only'}
+          </span>
+        </Row>
+        <Row label="Runtime" tight><span className="mono-meta">OpusHub {health?.version || '0.1'} · node {health?.node || '…'} · {health?.platform || ''}</span></Row>
+      </Block>
 
+      <DiscoveryBlock health={health} />
+    </>
+  );
+}
+
+/** Discovery status — the honest answer to “why is nothing showing up?”. */
+function DiscoveryBlock(_props: { health: HealthDoc | null }) {
+  const { data, refresh } = usePolled<DiscoveryDoc>('/api/discovery', 30_000);
+  const { busy, save } = useSave();
+  if (!data) return <Block title="Service discovery"><p className="stale-note">Reading engine status…</p></Block>;
+  const e = data.engine;
+  return (
+    <Block
+      title="Service discovery"
+      aside={
+        <button className="btn btn-quiet btn-sm" disabled={busy} onClick={() => save(async () => { await post('/api/discovery/refresh'); invalidateShared('/api/services'); invalidateShared('/api/discovery'); refresh(); })}>
+          {busy ? 'Refreshing…' : 'Refresh now'}
+        </button>
+      }
+    >
+      <p className="lede" style={{ marginBottom: 'var(--sp-4)' }}>
+        Docker decides what exists; URLs come from Traefik labels, published ports or your own override. Nothing is
+        assumed about domains or ports, and no socket path ever reaches this page.
+      </p>
+      <div className="sys-kv" style={{ marginTop: 0 }}>
+        <dt>Engine</dt><dd>{e.ok ? `connected${e.version ? ` · v${e.version}` : ''}${e.api ? ` · API ${e.api}` : ''}` : e.state}</dd>
+        <dt>Containers</dt><dd>{e.containers} · {e.running} running · {e.stopped} stopped</dd>
+        <dt>Inventory</dt><dd>{data.inventory.applications} applications · {data.inventory.infrastructure} infrastructure · {data.inventory.stacks} stacks · {data.inventory.standalone} standalone</dd>
+        <dt>URLs</dt><dd>{data.urlDiscovery.withUrl} with a URL · {data.urlDiscovery.withoutUrl} without {data.urlDiscovery.hostAddress ? <span className="mono-meta"> · host {data.urlDiscovery.hostAddress} ({data.urlDiscovery.hostAddressSource})</span> : null}</dd>
+        <dt>Overlays</dt><dd>{data.overlays.serviceOverlays} of {data.overlays.serviceEntries ?? data.overlays.serviceOverlays} service entries bind · {data.overlays.stackOverlays} of {data.overlays.stackEntries ?? data.overlays.stackOverlays} stack entries bind</dd>
+      </div>
+      {data.overlays.unmatched > 0 && (
+        <div style={{ marginTop: 'var(--sp-4)' }}>
+          <div className="micro-label">Unmatched overlays</div>
+          <ul style={{ display: 'grid', gap: 4, marginTop: 6 }}>
+            {(data.overlays.unmatchedList || []).slice(0, 12).map((u, i) => (
+              <li key={i} className="stale-note">{u.kind === 'stack' ? 'stack' : 'service'} <b>{u.name}</b> — {u.reason}</li>
+            ))}
+          </ul>
+          <Link className="section-link" to="/settings/services">Fix the overlays →</Link>
+        </div>
+      )}
+      {!e.ok && (
+        <ProviderNote
+          status="unavailable"
+          reason="OpusHub cannot see containers right now, so live status, stats and logs stay off. Set OPUSHUB_DOCKER_SOCKET (or DOCKER_HOST) and restart."
+          fixHref="/settings/system"
+          fixLabel="How discovery resolves →"
+        />
+      )}
+    </Block>
+  );
+}

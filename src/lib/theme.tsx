@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { LayoutDoc, SettingsDoc } from './types';
-import { api, put } from './api';
+import { api, post, put } from './api';
 
 interface SettingsCtx {
   settings: SettingsDoc | null;
@@ -126,10 +126,17 @@ const FALLBACK: SettingsDoc = {
   advanced: { customCss: false, customJs: false },
 };
 
-// ---------- layout (drag/drop + visibility) ----------
+// ---------- layout (widgets, zones, ordering, visibility) ----------
+//
+// Optimistic: a drag or a size change paints immediately and persists 350 ms later, so the Hub and
+// its live preview never wait on the network to reflect what the user just did.
 interface LayoutCtx {
   layout: LayoutDoc | null;
   setLayout: (patch: DeepPartial<LayoutDoc>) => void;
+  /** re-read layout.json (after applying a template, or resetting) */
+  reload: () => Promise<void>;
+  /** back to the factory composition — never touches services, overlays or appearance */
+  resetLayout: () => Promise<void>;
 }
 const LCtx = createContext<LayoutCtx>(null as unknown as LayoutCtx);
 export const useLayout = () => useContext(LCtx);
@@ -139,9 +146,11 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
   const pending = useRef<DeepPartial<LayoutDoc> | null>(null);
   const timer = useRef<number | null>(null);
 
-  useEffect(() => {
-    api<LayoutDoc>('/api/layout').then(setL).catch(() => setL(null));
+  const reload = useCallback(async () => {
+    try { setL(await api<LayoutDoc>('/api/layout')); } catch { /* keep the current shape */ }
   }, []);
+
+  useEffect(() => { void reload(); }, [reload]);
 
   const setLayout = useCallback((patch: DeepPartial<LayoutDoc>) => {
     setL((cur) => (cur ? deepMerge(cur, patch) : cur));
@@ -154,7 +163,12 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
     }, 350);
   }, []);
 
-  return <LCtx.Provider value={{ layout, setLayout }}>{children}</LCtx.Provider>;
+  const resetLayout = useCallback(async () => {
+    const next = await post<LayoutDoc>('/api/layout/reset');
+    setL(next);
+  }, []);
+
+  return <LCtx.Provider value={{ layout, setLayout, reload, resetLayout }}>{children}</LCtx.Provider>;
 }
 
 export { FALLBACK as FALLBACK_SETTINGS };

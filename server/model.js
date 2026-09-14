@@ -10,6 +10,9 @@ import * as docker from './providers/docker.js';
 import { discover } from './discovery.js';
 import { suggestRef } from './providers/icons.js';
 import { hostAddress } from './lib/hostAddress.js';
+import { defaultLayout, normalizeLayout, describeLayoutPatch } from './layout.js';
+import { applyTemplate, hasTemplate, templateList } from './templates.js';
+import { WIDGET_CATEGORIES, widgetCatalogue } from './widgets.js';
 
 export const DEFAULT_SETTINGS = {
   app: { name: 'OpusHub', tagline: 'The homelab, at a glance.' },
@@ -35,17 +38,7 @@ export const DEFAULT_SETTINGS = {
   advanced: { customCss: false, customJs: false },
 };
 
-export const DEFAULT_LAYOUT = {
-  hub: {
-    // two draggable zones: the main column and the side rail
-    main: ['overview', 'services'],
-    rail: ['weather', 'markets', 'news', 'bookmarks', 'activity'],
-    hidden: [],
-    sizes: { overview: 'md', services: 'md', weather: 'md', markets: 'md', news: 'md', activity: 'md' },
-    setupDismissed: false,
-  },
-  services: { groupOrder: null, order: {} },
-};
+export const DEFAULT_LAYOUT = defaultLayout();
 
 const str = (v, max = 240) => (typeof v === 'string' ? v.trim().slice(0, max) : null);
 const clampInt = (v, lo, hi, dflt) => {
@@ -323,14 +316,71 @@ function sanitizeSettings(s) {
   return out;
 }
 
-export function getLayout() { return readJson('layout.json', DEFAULT_LAYOUT); }
+/** The persisted layout, always validated. A v1 file is migrated here and written back on the
+ *  next change, so no one has to edit JSON by hand (see server/layout.js). */
+export function getLayout() {
+  return normalizeLayout(readJson('layout.json', null));
+}
 
 export function putLayout(patch) {
-  const current = readJson('layout.json', DEFAULT_LAYOUT);
-  const next = deepMerge(current, patch);
+  const current = normalizeLayout(readJson('layout.json', null));
+  const next = normalizeLayout(deepMerge(current, patch || {}));
   writeJson('layout.json', next);
   return next;
 }
+
+/** Reset the Hub composition to factory defaults. Never touches discovery or the overlay files. */
+export function resetLayout() {
+  const next = normalizeLayout(null);
+  writeJson('layout.json', next);
+  return next;
+}
+
+/** Every group the engine currently produces — what a template's preferences are matched against. */
+export async function groupNames() {
+  try {
+    const inv = await getInventory({ refreshMs: 0 });
+    const names = [
+      ...inv.groups.map((g) => g.name),
+      ...(inv.groupsRaw || []).map((g) => g.name),
+      ...inv.services.map((s) => s.group).filter(Boolean),
+    ];
+    return [...new Set(names)];
+  } catch { return []; }
+}
+
+/** Settings → Templates: the presets, each with the real merged layout it would produce today. */
+export async function getTemplates() {
+  const layout = getLayout();
+  const names = await groupNames();
+  return {
+    templates: templateList({ layout, groupNames: names }),
+    layout,
+    spacing: layout.hub.spacing,
+    groupNames: names,
+  };
+}
+
+/** Apply a template. Layout-only: it cannot add, remove or rename a service. */
+export async function applyLayoutTemplate(id) {
+  if (!hasTemplate(id)) throw Object.assign(new Error(`unknown template: ${id}`), { status: 404 });
+  const current = getLayout();
+  const names = await groupNames();
+  const next = normalizeLayout(applyTemplate(id, current, { groupNames: names }));
+  writeJson('layout.json', next);
+  return next;
+}
+
+/** The widget catalogue + what the current layout actually contains (Settings → Widgets). */
+export function getWidgetDoc() {
+  const layout = getLayout();
+  return {
+    catalogue: widgetCatalogue(), categories: WIDGET_CATEGORIES,
+    widgets: layout.hub.widgets, spacing: layout.hub.spacing,
+  };
+}
+
+export { describeLayoutPatch };
 
 // ---------------------------------------------------------------------------
 // Discovery-backed views — everything the browser sees is built here, once per cycle
