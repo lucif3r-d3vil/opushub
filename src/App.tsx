@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './lib/auth';
 import { SearchOverlay, useGlobalSearchHotkey } from './components/SearchOverlay';
 import { Freshness } from './components/ui';
 import { LogoMark } from './components/Logo';
+import { BackgroundImage } from './components/BackgroundImage';
 
 const Hub = lazy(() => import('./pages/Hub'));
 const Services = lazy(() => import('./pages/Services'));
@@ -38,7 +39,7 @@ function Background() {
       style={{ ['--bg-blur' as never]: `${bg?.blur ?? 24}`, ['--bg-scrim' as never]: `${bg?.scrim ?? 62}` }}
       aria-hidden="true"
     >
-      {mode === 'photo' && bg?.photo && <div className="bg-img" style={{ backgroundImage: `url("${bg.photo}")` }} />}
+      {mode === 'photo' && bg?.photo && <BackgroundImage url={bg.photo} />}
     </div>
   );
 }

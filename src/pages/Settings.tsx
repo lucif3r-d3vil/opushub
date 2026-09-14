@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, invalidateShared, post, put, usePolled, useSave } from '../lib/api';
 import { relTime } from '../lib/format';
@@ -168,12 +168,62 @@ function AppearanceTab() {
 }
 
 /* ============ Background ============ */
+interface BgCheckResult { ok: boolean; url?: string | null; error?: string; kind?: string }
+
+/**
+ * The Background URL field, with a server-side verdict before anything is stored.
+ *
+ * What the user may paste:
+ *   · a direct image URL (https://…/photo.jpg) — the server probes it and refuses anything
+ *     that is not an image (a pasted web page is the old way this field silently "broke")
+ *   · an Unsplash photo page (https://unsplash.com/photos/…) — resolved server-side to the
+ *     photo's direct image URL, which is what gets stored
+ *   · a local file as /user/backgrounds/<name> (config/backgrounds/ on disk)
+ *
+ * The input is uncontrolled and keyed on the saved value: a failed check leaves the user's
+ * text in place with the reason beside it, a successful one remounts the field with the
+ * canonical (possibly resolved) URL.
+ */
 function BackgroundTab() {
   const { settings, update } = useSettings();
   const { data: bgs } = usePolled<{ files: { name: string; url: string }[] }>('/api/backgrounds', 0);
   const a = settings?.appearance;
   const set = (patch: DeepPartial<SettingsDoc>) => update(patch);
+  const photo = a?.background.photo ?? null;
+  const [checking, setChecking] = useState(false);
+  const [verdict, setVerdict] = useState<{ ok: boolean; text: string } | null>(null);
+  // a ref (not state): Enter blurs the field, and the blur commit must see the attempt that
+  // the Enter commit just recorded — state would not have flushed yet
+  const lastAttemptRef = useRef<string | null>(null);
   if (!settings || !a) return <p className="stale-note">Loading settings…</p>;
+
+  const check = async (value: string) => {
+    const v = value.trim();
+    if (v === (photo || '') || v === lastAttemptRef.current) return; // nothing new to verify
+    lastAttemptRef.current = v;
+    setChecking(true);
+    setVerdict(null);
+    if (!v) return setChecking(false);
+    try {
+      const r = await api<BgCheckResult>('/api/background/check?url=' + encodeURIComponent(v));
+      if (r.ok) {
+        const url = r.url ?? null;
+        set({ appearance: { background: { photo: url } } });
+        setVerdict(url == null ? null : url === v
+          ? { ok: true, text: 'Direct image — the Hub will use it.' }
+          : { ok: true, text: `Resolved to a direct image on ${hostOf(url)}.` });
+      } else {
+        setVerdict({ ok: false, text: r.error || 'This URL could not be used as a background.' });
+      }
+    } catch {
+      setVerdict({ ok: false, text: 'Could not verify this URL right now — check the connection and try again.' });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const files = bgs?.files || [];
+  const urlPhoto = photo && !files.some((f) => f.url === photo) ? photo : null;
   return (
     <>
       <Block title="Background">
@@ -185,27 +235,42 @@ function BackgroundTab() {
       {a.background.mode === 'photo' && (
         <Block title="Image">
           <div className="bg-tile-grid">
-            <button className={`bg-tile ${!a.background.photo ? 'sel' : ''}`} onClick={() => set({ appearance: { background: { photo: null } } })}>
+            <button className={`bg-tile ${!photo ? 'sel' : ''}`} onClick={() => { setVerdict(null); set({ appearance: { background: { photo: null } } }); }}>
               <span className="none">None</span>
             </button>
-            {(bgs?.files || []).map((f) => (
+            {urlPhoto && (
+              <div className={`bg-tile sel bg-tile--url`} style={{ backgroundImage: `url("${urlPhoto.replace(/"/g, '\\"')}")` }} title={urlPhoto}>
+                <span className="bg-tile-tag">URL</span>
+              </div>
+            )}
+            {files.map((f) => (
               <button
-                key={f.url} className={`bg-tile ${a.background.photo === f.url ? 'sel' : ''}`}
+                key={f.url} className={`bg-tile ${photo === f.url ? 'sel' : ''}`}
                 style={{ backgroundImage: `url("${f.url}")` }} title={f.name}
-                onClick={() => set({ appearance: { background: { photo: f.url } } })}
+                onClick={() => { setVerdict(null); set({ appearance: { background: { photo: f.url } } }); }}
               />
             ))}
           </div>
           <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>
-            Drop images into <code className="mono-meta">config/backgrounds/</code>, or paste a URL.
+            Drop images into <code className="mono-meta">config/backgrounds/</code>, or paste a URL below.
           </p>
-          <div className="field" style={{ marginTop: 'var(--sp-4)', maxWidth: 420 }}>
+          <div className="field" style={{ marginTop: 'var(--sp-4)', maxWidth: 480 }}>
             <label htmlFor="bgurl">Background URL</label>
-            <input id="bgurl" className="input mono-meta" placeholder="https://… or /user/backgrounds/photo.jpg"
-              defaultValue={a.background.photo || ''}
-              onKeyDown={(e) => { if (e.key === 'Enter') set({ appearance: { background: { photo: (e.target as HTMLInputElement).value.trim() || null } } }); }}
-              onBlur={(e) => { if (e.target.value.trim() !== (a.background.photo || '')) set({ appearance: { background: { photo: e.target.value.trim() || null } } }); }}
+            <input id="bgurl" className="input mono-meta" key={photo || 'none'} placeholder="https://…/photo.jpg · an Unsplash photo page · /user/backgrounds/photo.jpg"
+              defaultValue={photo || ''}
+              aria-busy={checking}
+              onKeyDown={(e) => { if (e.key === 'Enter') { void check((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).blur(); } }}
+              onBlur={(e) => { void check(e.target.value); }}
             />
+            <span className="hint">
+              A direct link to an image file (https), an Unsplash photo page — resolved to the image for you — or a file
+              from <code className="mono-meta">config/backgrounds/</code>. Web pages are refused, and http:// is not allowed.
+            </span>
+            {checking
+              ? <span className="stale-note bg-url-state" role="status">Checking the URL…</span>
+              : verdict
+                ? <span className={`stale-note bg-url-state ${verdict.ok ? 'bg-url-state--ok' : 'bg-url-state--err'}`} role="status">{verdict.ok ? '✓ ' : '✗ '}{verdict.text}</span>
+                : null}
           </div>
           <Row label="Blur" desc="Applied to the photo so text keeps its contrast.">
             <input type="range" min={0} max={48} value={a.background.blur} onChange={(e) => set({ appearance: { background: { blur: Number(e.target.value) } } })} aria-label="Background blur" />
@@ -217,7 +282,7 @@ function BackgroundTab() {
           </Row>
         </Block>
       )}
-      <p className="stale-note">The preview above uses the same background layer as the Hub — what you see is what `/` renders.</p>
+      <p className="stale-note">The preview above uses the same background layer as the Hub — what you see is what `/` renders. If an image stops loading later, the Hub quietly falls back to its base background.</p>
     </>
   );
 }
@@ -1075,17 +1140,45 @@ const FEED_SUGGESTIONS = [
   { name: 'Ars Technica', url: 'https://feeds.arstechnica.com/arstechnica/index' },
   { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml' },
 ];
-const SYMBOL_SUGGESTIONS = ['AAPL', 'NVDA', 'MSFT', 'TSLA', 'RELIANCE.NS', 'TCS.NS', '^NSEI', '^NIFTYSMLCAP'];
+const SYMBOL_SUGGESTIONS = ['AAPL', 'NVDA', 'MSFT', 'TSLA', 'RELIANCE.NS', 'TCS.NS', '^GSPC', '^NSEI', 'BTC-USD', 'EURUSD=X'];
+
+/**
+ * The same rule the server applies (server/providers/market.js): symbols are letters and
+ * digits with the Yahoo alphabet ( . ^ - = ) — never a URL or free text. A Stooq-era .US
+ * suffix is migrated away. The UI mirrors it so a bad symbol is refused before the save
+ * round-trip, with the reason next to the field.
+ */
+const SYMBOL_RE = /^[A-Z0-9^](?:[A-Z0-9.^\-=]{0,23})$/;
+function normalizeSymbolInput(raw: string): { symbol: string | null; reason: string | null } {
+  const s = raw.trim().toUpperCase();
+  const symbol = s.endsWith('.US') ? s.slice(0, -3) : s;
+  if (!symbol) return { symbol: null, reason: 'empty' };
+  if (!SYMBOL_RE.test(symbol)) return { symbol: null, reason: 'symbols are letters/digits with . ^ - = only (e.g. AAPL, ^GSPC, BTC-USD)' };
+  return { symbol, reason: null };
+}
 
 function IntegrationsTab() {
   const { settings, update } = useSettings();
   const intg = settings?.integrations;
   const [feedUrl, setFeedUrl] = useState('');
   const [sym, setSym] = useState('');
+  const [symProblem, setSymProblem] = useState<string | null>(null);
   if (!settings || !intg) return <p className="stale-note">Loading…</p>;
   const feeds = intg.news.feeds || [];
   const symbols = intg.markets.symbols || [];
   const touch = () => { invalidateShared('/api/news'); invalidateShared('/api/weather'); invalidateShared('/api/market'); };
+  // Commit the symbol field: normalize every entry through the provider's rules, refuse the
+  // whole batch with a reason if one entry is not a symbol (no silent dropping, no URLs)
+  const commitSymbols = () => {
+    const parts = sym.toUpperCase().split(/[,\s]+/).filter(Boolean);
+    if (!parts.length) { setSym(''); setSymProblem(null); return; }
+    const norm = parts.map(normalizeSymbolInput);
+    const badIdx = norm.findIndex((n) => n.symbol == null);
+    if (badIdx !== -1) { setSymProblem(`“${parts[badIdx]}” — ${norm[badIdx].reason}`); return; }
+    const add = norm.map((n) => n.symbol as string).filter((x) => !symbols.includes(x));
+    if (add.length) { update({ integrations: { markets: { symbols: [...symbols, ...add] } } }, true); touch(); }
+    setSym(''); setSymProblem(null);
+  };
   return (
     <>
       <p className="lede">Every value here is yours. OpusHub ships no defaults and never invents a reading — each widget shows its real provider state, and nothing is displayed that could not be fetched.</p>
@@ -1131,7 +1224,7 @@ function IntegrationsTab() {
         </Row>
       </Block>
 
-      <Block title="Markets" aside={<span className="stale-note">Stooq symbol syntax — bare tickers assume US, use <code>.NS</code> for NSE</span>}>
+      <Block title="Markets" aside={<span className="stale-note">Yahoo Finance (keyless) — bare tickers are US, <code>.NS</code> NSE, <code>^</code> indices, <code>-USD</code> crypto, <code>=X</code> FX, <code>=F</code> futures</span>}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 'var(--sp-3)' }}>
           {symbols.map((s, i) => (
             <span className="chip" key={s}>
@@ -1144,13 +1237,14 @@ function IntegrationsTab() {
           {!symbols.length && <span className="stale-note">No symbols configured.</span>}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <input className="input" style={{ width: 200 }} placeholder="AAPL, RELIANCE.NS…" value={sym} onChange={(e) => setSym(e.target.value)} aria-label="Add symbol" />
-          <button className="btn" disabled={!sym.trim()} onClick={() => {
-            const add = sym.toUpperCase().split(/[,\s]+/).filter(Boolean).filter((x) => !symbols.includes(x));
-            if (add.length) { update({ integrations: { markets: { symbols: [...symbols, ...add] } } }, true); touch(); }
-            setSym('');
-          }}>Add</button>
+          <input className="input" style={{ width: 200 }} placeholder="AAPL, RELIANCE.NS, ^GSPC…" value={sym}
+            onChange={(e) => { setSym(e.target.value); setSymProblem(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') commitSymbols(); }}
+            onBlur={commitSymbols}
+            aria-label="Add symbol" />
+          <button className="btn" disabled={!sym.trim()} onClick={commitSymbols}>Add</button>
         </div>
+        {symProblem && <span className="stale-note" style={{ color: 'var(--fail)', display: 'inline-block', marginTop: 6 }}>✗ {symProblem}</span>}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
           {SYMBOL_SUGGESTIONS.filter((s) => !symbols.includes(s)).map((s) => (
             <button key={s} className="chip" onClick={() => { update({ integrations: { markets: { symbols: [...symbols, s] } } }, true); touch(); }}>+ {s}</button>
@@ -1161,6 +1255,7 @@ function IntegrationsTab() {
   );
 }
 function URLSafe(u: string) { try { return new URL(u).host; } catch { return u.slice(0, 30); } }
+function hostOf(u: string) { try { return new URL(u).hostname; } catch { return u; } }
 
 /* ============ Advanced ============ */
 function AdvancedTab() {

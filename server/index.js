@@ -83,6 +83,10 @@ const server = http.createServer(async (req, res) => {
     // if that script changes, recompute: node -e "…" (see docs/03-design-system.md)
     "script-src 'self' 'sha256-wV7KrfbxQ7GQ61LOA7WeOy66fhFZ28qCHefeeuHPRDY='",
     "style-src 'self' 'unsafe-inline'",
+    // 'self' = /user/backgrounds/*, icons and bundled assets. The scheme sources cover the
+    // operator's own remote material: a validated https background image and URL icon refs
+    // (http: stays because LAN icon servers are legitimately plain-http). There are no
+    // 'unsafe-*' keywords here; every URL that reaches the page is server-checked first.
     "img-src 'self' data: blob: https: http:",
     "font-src 'self'",
     "connect-src 'self'",

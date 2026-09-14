@@ -9,6 +9,7 @@ import { useHubData } from '../../lib/hubData';
 import { neededData } from '../../lib/hubLayout';
 import { useSettings } from '../../lib/theme';
 import { Modal } from '../ui';
+import { BackgroundImage } from '../BackgroundImage';
 import { HubSurface } from './HubSurface';
 
 function EmbeddedBackground() {
@@ -22,7 +23,7 @@ function EmbeddedBackground() {
       style={{ ['--bg-blur' as never]: `${bg?.blur ?? 24}`, ['--bg-scrim' as never]: `${bg?.scrim ?? 62}` }}
       aria-hidden="true"
     >
-      {mode === 'photo' && bg?.photo && <div className="bg-img" style={{ backgroundImage: `url("${bg.photo}")` }} />}
+      {mode === 'photo' && bg?.photo && <BackgroundImage url={bg.photo} />}
     </div>
   );
 }
