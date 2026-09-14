@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePolled } from '../lib/api';
 import { dayLabel, relTime, timeOfDay } from '../lib/format';
 import type { ActivityEvent, ActivityGroup } from '../lib/types';
@@ -7,6 +7,25 @@ import { humanEvent, humanGroup } from '../lib/events';
 
 const SOURCES = ['all', 'system', 'config', 'user', 'docker'] as const;
 type Source = (typeof SOURCES)[number];
+
+/** The log records a fixed, small vocabulary of types — offer the ones that exist, not a free-for-all. */
+const TYPES = [
+  { value: '', label: 'Any event' },
+  { value: 'container', label: 'Containers' },
+  { value: 'provider', label: 'Providers' },
+  { value: 'stack', label: 'Stacks' },
+  { value: 'service', label: 'Services' },
+  { value: 'auth', label: 'Authentication' },
+  { value: 'settings', label: 'Settings' },
+  { value: 'layout', label: 'Layout' },
+];
+
+const WINDOWS = [
+  { label: 'Any time', ms: 0 },
+  { label: 'Last hour', ms: 3600_000 },
+  { label: 'Last 24h', ms: 24 * 3600_000 },
+  { label: 'Last 7 days', ms: 7 * 24 * 3600_000 },
+];
 type Row = ActivityEvent | ActivityGroup;
 
 const SOURCE_ICON: Record<string, string> = {
@@ -27,13 +46,43 @@ const SOURCE_ICON: Record<string, string> = {
 
 const isGroup = (r: Row): r is ActivityGroup => 'grouped' in r && (r as ActivityGroup).grouped === true;
 
+interface ActivityDoc {
+  items: Row[];
+  total: number;
+  matched?: number;
+  watchingSince: number | null;
+}
+
 export default function ActivityPage() {
   const [source, setSource] = useState<Source>('all');
+  const [service, setService] = useState('');
+  const [stack, setStack] = useState('');
+  const [type, setType] = useState('');
+  const [windowMs, setWindowMs] = useState(0);
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const { data, error } = usePolled<{ items: Row[]; total: number; watchingSince: number | null }>(
-    `/api/activity?limit=150&source=${source}&grouped=1`, 30_000,
-  );
+
+  // The window is pinned when it is chosen (not recomputed on every render) so the query path — and
+  // therefore the shared cache entry — stays stable while the page is open. Picking "Last hour"
+  // means the hour up to the moment you picked it; the poll keeps the rows fresh from there.
+  const [since, setSince] = useState<number | null>(null);
+  useEffect(() => { setSince(windowMs ? Date.now() - windowMs : null); }, [windowMs]);
+  const query = useMemo(() => {
+    const q = new URLSearchParams({ limit: '150', source, grouped: '1' });
+    if (service.trim()) q.set('service', service.trim());
+    if (stack.trim()) q.set('stack', stack.trim());
+    if (type) q.set('type', type);
+    if (since) q.set('since', String(since));
+    return `/api/activity?${q.toString()}`;
+  }, [source, service, stack, type, since]);
+  const { data, error } = usePolled<ActivityDoc>(query, 30_000);
   const items = data?.items ?? [];
+  const active = [
+    service.trim() && { key: 'service', label: `service: ${service.trim()}`, clear: () => setService('') },
+    stack.trim() && { key: 'stack', label: `stack: ${stack.trim()}`, clear: () => setStack('') },
+    type && { key: 'type', label: `type: ${TYPES.find((t) => t.value === type)?.label || type}`, clear: () => setType('') },
+    windowMs && { key: 'time', label: WINDOWS.find((w) => w.ms === windowMs)?.label || 'window', clear: () => setWindowMs(0) },
+  ].filter(Boolean) as { key: string; label: string; clear: () => void }[];
+  const filtered = active.length > 0 || source !== 'all';
 
   const days = useMemo(() => {
     const out: [string, Row[]][] = [];
@@ -57,9 +106,14 @@ export default function ActivityPage() {
       <PageHero
         title="Activity"
         desc="Everything OpusHub has witnessed: configuration changes, host and engine events, launches. Real events only — bursts that happen together are grouped, and the group expands to its parts."
-        meta={data ? <span>{data.total} recorded event{data.total === 1 ? '' : 's'}{data.watchingSince ? ` · watching since ${new Date(data.watchingSince).toLocaleString()}` : ''}</span> : undefined}
+        meta={data ? (
+          <span>
+            {data.total} recorded event{data.total === 1 ? '' : 's'}
+            {data.watchingSince ? ` · watching since ${new Date(data.watchingSince).toLocaleString()}` : ' · the log is empty, so nothing has been witnessed yet'}
+          </span>
+        ) : undefined}
       />
-      <div className="tl-filters" role="tablist" aria-label="Filter events" style={{ marginBottom: 'var(--sp-8)' }}>
+      <div className="tl-filters" role="tablist" aria-label="Filter by source">
         {SOURCES.map((s) => (
           <button key={s} role="tab" aria-selected={source === s} className={source === s ? 'chip active' : 'chip'} onClick={() => setSource(s)}>
             {s === 'all' ? 'All' : s[0].toUpperCase() + s.slice(1)}
@@ -67,11 +121,56 @@ export default function ActivityPage() {
         ))}
       </div>
 
+      {/* the finer filters: over the whole retention window, not just the rows already on screen */}
+      <div className="tl-scope">
+        <label className="tl-field">
+          <span className="micro-label">Service</span>
+          <input className="input" placeholder="container or service name" value={service} onChange={(e) => setService(e.target.value)} />
+        </label>
+        <label className="tl-field">
+          <span className="micro-label">Stack</span>
+          <input className="input" placeholder="compose project" value={stack} onChange={(e) => setStack(e.target.value)} />
+        </label>
+        <label className="tl-field">
+          <span className="micro-label">Type</span>
+          <select className="input" value={type} onChange={(e) => setType(e.target.value)}>
+            {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        </label>
+        <label className="tl-field">
+          <span className="micro-label">Time</span>
+          <select className="input" value={String(windowMs)} onChange={(e) => setWindowMs(Number(e.target.value))}>
+            {WINDOWS.map((w) => <option key={w.label} value={String(w.ms)}>{w.label}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {filtered && (
+        <div className="tl-active" aria-live="polite">
+          <span className="stale-note">
+            {data?.matched != null ? `${data.matched} matching event${data.matched === 1 ? '' : 's'} of ${data.total} recorded` : 'filtering…'}
+          </span>
+          {active.map((a) => (
+            <button key={a.key} className="chip active" onClick={a.clear} title={`Remove filter: ${a.label}`}>
+              {a.label} <span aria-hidden="true">×</span>
+            </button>
+          ))}
+          {source !== 'all' && (
+            <button className="chip active" onClick={() => setSource('all')} title="Remove filter: source">
+              source: {source} <span aria-hidden="true">×</span>
+            </button>
+          )}
+          {active.length > 0 && <button className="chip" onClick={() => { setService(''); setStack(''); setType(''); setWindowMs(0); }}>Clear</button>}
+        </div>
+      )}
+
       {error && !data && <ProviderNote status="error" reason={error} />}
       {!items.length && (
         <div className="unavailable" style={{ padding: 'var(--sp-12)' }}>
           <span className="why" style={{ fontSize: 14 }}>
-            {source === 'all' ? 'No events yet. The log starts the moment OpusHub boots — try changing a setting or dragging a widget.' : `No ${source} events yet.`}
+            {source === 'all' && active.length === 0
+              ? 'No events yet. The log starts the moment OpusHub boots — try changing a setting or dragging a widget.'
+              : `Nothing matches ${[...(source === 'all' ? [] : [`source ${source}`]), ...active.map((a) => a.label)].join(' · ')}. Filters only ever narrow the log — nothing was deleted.`}
           </span>
         </div>
       )}

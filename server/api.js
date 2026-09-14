@@ -620,7 +620,17 @@ export async function handleApi(req, res, url) {
     const source = url.searchParams.get('source') || null;
     const before = Number(url.searchParams.get('before')) || null;
     const grouped = url.searchParams.get('grouped') === '1' || url.searchParams.get('grouped') === 'true';
-    return send(res, 200, { ...readEvents({ limit, source, before, grouped }), watchingSince: firstEventAt() });
+    // filters (service / stack / type / since) are applied server-side over the whole log
+    const service = url.searchParams.get('service');
+    const stack = url.searchParams.get('stack');
+    const type = url.searchParams.get('type');
+    const sinceRaw = Number(url.searchParams.get('since'));
+    const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : null;
+    return send(res, 200, {
+      ...readEvents({ limit, source, before, grouped, service, stack, type, since }),
+      watchingSince: firstEventAt(),
+      filters: { source: source || 'all', service: service || null, stack: stack || null, type: type || null, since },
+    });
   }
 
   // ---------- provider health ----------

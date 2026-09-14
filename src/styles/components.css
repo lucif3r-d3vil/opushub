@@ -303,6 +303,15 @@ input[type='range'] { accent-color: var(--accent); width: 180px; }
 .tl-item .tl-when .rel { opacity: 0.75; }
 .tl-filters { display: flex; gap: 6px; flex-wrap: wrap; }
 .tl-filters .chip.active { border-color: var(--hair-strong); color: var(--ink); background: var(--surface-2); }
+/* the finer activity filters: four small fields that collapse to two columns on a phone */
+.tl-scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3) var(--sp-4); margin-top: var(--sp-4); max-width: 860px; }
+.tl-field { display: grid; gap: 5px; min-width: 0; }
+.tl-field .input { width: 100%; }
+.tl-active { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: var(--sp-4); max-width: 860px; }
+.tl-active .stale-note { margin-right: var(--sp-2); }
+@media (max-width: 720px) {
+  .tl-scope { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* sortable (drag & drop) */
 [data-sortable-id] { position: relative; }

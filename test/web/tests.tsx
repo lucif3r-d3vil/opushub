@@ -16,6 +16,7 @@ import IconsPage from '../../src/pages/Icons';
 import ServiceDetail from '../../src/pages/ServiceDetail';
 import StackDetail from '../../src/pages/StackDetail';
 import SystemPage from '../../src/pages/System';
+import ActivityPage from '../../src/pages/Activity';
 import type { LayoutDoc, WidgetInstance } from '../../src/lib/types';
 import type { HubData } from '../../src/lib/hubData';
 import App from '../../src/App';
@@ -652,6 +653,51 @@ export async function runWebTests(): Promise<WebResult> {
     // two measured charts (cpu + load), each in its own box
     expect(qa('.chart svg').length >= 2, 'the charts did not render');
     for (const c of qa('.chart')) expect(!!c.getAttribute('style')?.includes('height'), 'a chart box was not sized');
+  });
+
+  /* 15c — Phase 5: the Activity Center's filters narrow the log through the API, visibly */
+  await test('activity: filters narrow the query, and active filters are removable chips', async (h) => {
+    let lastQuery = '';
+    h.setRoutes({
+      ...stubRoutes(),
+      '/api/activity': (_body, path) => {
+        lastQuery = path;
+        return {
+          items: [
+            { id: 'a1', t: Date.now() - 60_000, iso: new Date().toISOString(), source: 'docker', type: 'container.started', subject: 'wave', message: 'running' },
+          ],
+          total: 4100, matched: 3, watchingSince: Date.now() - 86_400_000,
+        };
+      },
+    });
+    await h.mount(<MemoryRouter initialEntries={['/activity']}><ActivityPage /></MemoryRouter>);
+    await h.waitFor(() => !!q('.tl-scope'), 'the filter row');
+    expect(lastQuery.includes('source=all'), `the source filter is not in the query (${lastQuery})`);
+
+    type(q<HTMLInputElement>('.tl-field input')!, 'wave');
+    await h.flush(60);
+    expect(lastQuery.includes('service=wave'), `the service filter never reached the API (${lastQuery})`);
+
+    // the active filter is visible as a chip, and removing it widens the query again
+    await h.waitFor(() => text().includes('service: wave'), 'the active filter chip');
+    expect(text().includes('3 matching events of 4100 recorded'), 'the scope line does not state what matched');
+    const chip = qa('button.chip.active').find((b) => text(b).includes('service: wave'));
+    expect(!!chip, 'the service chip is not removable');
+    click(chip!);
+    await h.flush(60);
+    // the filter is gone from the UI, and the scope line is back to the unfiltered wording (the
+    // unfiltered query is already in the shared cache, so no second request is the correct answer)
+    expect(!qa('button.chip.active').some((b) => text(b).includes('service: wave')), 'removing the chip did not clear the filter');
+    expect(!text().includes('3 matching events'), 'the scope line still shows the filtered count');
+
+    // the type and time selects change the query too
+    const selects = qa('.tl-field select');
+    expect(selects.length === 2, 'the type and time selects are missing');
+    const typeSelect = selects[0] as HTMLSelectElement;
+    typeSelect.value = 'container';
+    act(() => { typeSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await h.flush(60);
+    expect(lastQuery.includes('type=container'), `the type filter never reached the API (${lastQuery})`);
   });
 
   /* 16 — Phase 3: the log drawer filters locally, honors timestamps, invents nothing */

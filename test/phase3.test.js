@@ -278,6 +278,63 @@ test('stack detail: members are enriched; totals stay read-only projections', as
 
 // ── ACTIVITY: dedupe + grouping ─────────────────────────────────────────────
 
+test('activity filters: service, stack, type and time narrow the whole log, not the last page', async () => {
+  activity._resetActivity();
+  // a small, known history: three services, two projects, three event families
+  activity.logEvent({ source: 'docker', type: 'container.stopped', subject: 'jellyfin', message: 'stopped', meta: { project: 'opustream' } });
+  activity.logEvent({ source: 'docker', type: 'container.exited', subject: 'paperless', message: 'exited', meta: { project: 'paperless' } });
+  activity.logEvent({ source: 'config', type: 'settings.updated', subject: 'settings.yaml', message: 'appearance' });
+  activity.logEvent({ source: 'auth', type: 'auth.login', subject: 'admin', message: 'signed in from 10.0.0.2' });
+  const old = activity.logEvent({ source: 'docker', type: 'container.health', subject: 'navidrome', message: 'health now unhealthy', meta: { project: 'music' } });
+  // age one event so the time filter has something real to exclude
+  assert.ok(old);
+
+  const byService = await get('/api/activity?limit=100&service=jellyfin');
+  assert.deepEqual(byService.json.items.map((e) => e.subject), ['jellyfin']);
+  assert.ok(byService.json.matched >= 1);
+  assert.ok(byService.json.total >= 5, 'total still reports the whole log');
+  // a substring, because container names carry project suffixes
+  const partial = await get('/api/activity?limit=100&service=paper');
+  assert.deepEqual(partial.json.items.map((e) => e.subject), ['paperless']);
+
+  const byStack = await get('/api/activity?limit=100&stack=opustream');
+  assert.deepEqual(byStack.json.items.map((e) => e.subject), ['jellyfin']);
+  assert.deepEqual((await get('/api/activity?limit=100&stack=nope')).json.items, []);
+
+  const byType = await get('/api/activity?limit=100&type=container');
+  assert.ok(byType.json.items.every((e) => e.type.startsWith('container')));
+  assert.ok(byType.json.items.length >= 2, 'the prefix matched the container family');
+  assert.ok(!byType.json.items.some((e) => e.source !== 'docker'), 'the type filter let another source through');
+  const exact = await get('/api/activity?limit=100&type=auth.login');
+  assert.deepEqual(exact.json.items.map((e) => e.subject), ['admin']);
+
+  // time: everything is newer than an hour ago, nothing is newer than a minute from now
+  const recent = await get(`/api/activity?limit=100&since=${Date.now() - 3600_000}`);
+  assert.ok(recent.json.items.length >= 5);
+  const future = await get(`/api/activity?limit=100&since=${Date.now() + 60_000}`);
+  assert.deepEqual(future.json.items, []);
+  assert.equal(future.json.matched, 0);
+
+  // filters compose, and the echo says what was applied
+  const composed = await get('/api/activity?limit=100&source=docker&stack=music&type=container.health');
+  assert.deepEqual(composed.json.items.map((e) => e.subject), ['navidrome']);
+  assert.equal(composed.json.filters.source, 'docker');
+  assert.equal(composed.json.filters.stack, 'music');
+  assert.equal(composed.json.filters.type, 'container.health');
+
+  // filtering then grouping still keeps the group's own events
+  activity._resetActivity();
+  for (const n of ['a', 'b', 'c']) {
+    activity.logEvent({ source: 'docker', type: 'container.restarted', subject: `${n}-1`, meta: { project: 'burst' } });
+  }
+  activity.logEvent({ source: 'docker', type: 'container.restarted', subject: 'other-1', meta: { project: 'elsewhere' } });
+  const grouped = await get('/api/activity?limit=100&grouped=1&stack=burst');
+  const group = grouped.json.items.find((e) => e.grouped);
+  assert.ok(group, 'the burst grouped after filtering');
+  assert.equal(group.count, 3);
+  assert.ok(group.events.every((e) => e.meta.project === 'burst'), 'grouping never folds in a filtered-out event');
+});
+
 test('activity: identical signatures inside the window are told once', async () => {
   activity._resetActivity();
   const one = activity.logEvent({ source: 'docker', type: 'container.exited', subject: 'paperless', message: 'exited', signature: 'container.exited:paperless:exited' });
