@@ -16,6 +16,7 @@ import * as docker from './providers/docker.js';
 import { getNews } from './providers/news.js';
 import { getWeather, cToF } from './providers/weather.js';
 import { getMarket } from './providers/market.js';
+import { checkBackgroundUrl } from './providers/background.js';
 import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons.js';
 import { logEvent, readEvents, firstEventAt } from './activity.js';
 import { searchAll } from './search.js';
@@ -238,7 +239,20 @@ export async function handleApi(req, res, url) {
     return send(res, 200, { ...s, _text: raw || '' });
   }
   if (route === 'PUT /api/settings') {
-    const patch = await jsonBody();
+    let patch = await jsonBody();
+    // The background photo is verified server-side before it is written, so a URL that is not
+    // an image can never reach the Hub as a broken <background-image>: the browser would only
+    // find out on every single load. A failed check is a 400 with the reason, not a silent
+    // fallback that looks like "the setting just doesn't work".
+    if (patch?.appearance?.background && Object.hasOwn(patch.appearance.background, 'photo')) {
+      const r = await checkBackgroundUrl(patch.appearance.background.photo);
+      if (!r.ok) return send(res, 400, { error: r.error, code: 'background_url' });
+      // a photo page that resolved to a direct image is stored as the direct image — the
+      // setting file keeps what the browser will actually render
+      if (r.url != null && r.url !== patch.appearance.background.photo) {
+        patch = { ...patch, appearance: { ...patch.appearance, background: { ...patch.appearance.background, photo: r.url } } };
+      }
+    }
     const next = model.putSettings(patch);
     model.invalidateDiscovery(); // infrastructure.* changes how URLs are resolved
     logEvent({ source: 'config', type: 'settings.updated', subject: 'settings.yaml', message: summarizeSettingsPatch(patch) });
@@ -569,7 +583,13 @@ export async function handleApi(req, res, url) {
     return send(res, 200, { ok: true });
   }
 
-  // ---------- background images inventory ----------
+  // ---------- background images ----------
+  // Verify a background URL the same way it will be stored: the response is a verdict only
+  // ({ ok, url | error }) — the image bytes never cross the API.
+  if (route === 'GET /api/background/check') {
+    const input = url.searchParams.get('url') ?? '';
+    return send(res, 200, await checkBackgroundUrl(input));
+  }
   if (route === 'GET /api/backgrounds') {
     const dir = path.join(CONFIG_DIR, 'backgrounds');
     let files = [];

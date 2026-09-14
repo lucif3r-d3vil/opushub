@@ -13,6 +13,7 @@ import { hostAddress } from './lib/hostAddress.js';
 import { defaultLayout, normalizeLayout, describeLayoutPatch } from './layout.js';
 import { applyTemplate, hasTemplate, templateList } from './templates.js';
 import { WIDGET_CATEGORIES, widgetCatalogue } from './widgets.js';
+import { validateSymbol as validateMarketSymbol } from './providers/market.js';
 
 export const DEFAULT_SETTINGS = {
   app: { name: 'OpusHub', tagline: 'The homelab, at a glance.' },
@@ -288,7 +289,29 @@ function sanitizeSettings(s) {
       .filter((f) => f?.url);
   }
   const sym = out?.integrations?.markets?.symbols;
-  if (Array.isArray(sym)) out.integrations.markets.symbols = sym.map((x) => str(x, 30)).filter(Boolean).slice(0, 24);
+  if (Array.isArray(sym)) {
+    const clean = [];
+    for (const x of sym.slice(0, 24)) {
+      const v = str(x, 24);
+      if (!v) continue;
+      const r = validateMarketSymbol(v);
+      if (!r.ok) { rejected.push(`market symbol “${v}”: ${r.reason}`); continue; }
+      if (!clean.includes(r.symbol)) clean.push(r.symbol);
+    }
+    out.integrations.markets.symbols = clean;
+  }
+  // The background photo is the one setting whose value becomes a URL the browser fetches,
+  // so it is clamped here too (the deep check happens on the API route): only https image
+  // URLs, Unsplash photo pages, or same-origin files under /user/backgrounds/ may be stored.
+  const photo = out?.appearance?.background?.photo;
+  if (photo != null) {
+    const s = str(photo, 2048);
+    if (!s) out.appearance.background.photo = null;
+    else if (!/^https:\/\//i.test(s) && !s.startsWith('/user/backgrounds/')) {
+      rejected.push('appearance.background.photo must be an https:// image URL, an Unsplash photo page, or a /user/backgrounds/ file');
+      out.appearance.background.photo = null;
+    } else out.appearance.background.photo = s;
+  }
   // infrastructure knobs are validated, never silently accepted: a typo'd host would otherwise
   // show up as wrong URLs everywhere with no clue why.
   const infra = out.infrastructure;

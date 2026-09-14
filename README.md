@@ -101,7 +101,8 @@ This exists because a previous build shipped a `.env` that the app simply never 
 - **No fake data, ever.** System metrics are read from `/proc` and `/sys`. The service inventory,
   stack membership, URLs and status all come from the Engine API over the socket
   (`OPUSHUB_DOCKER_SOCKET` / `DOCKER_HOST`) — read-only, GET requests only, never cached to disk. News fetches
-  your RSS feeds through the server. Weather uses Open-Meteo, markets use Stooq (both keyless).
+  your RSS feeds through the server. Weather uses Open-Meteo, markets use Yahoo Finance's
+  public chart endpoint (both keyless).
 - If a source is missing, disconnected, or unreachable, every affected widget says **Unavailable**
   and shows the real reason ("no Docker socket found…", `SSL_ERROR_SYSCALL`…) with a link to fix it.
 - Secrets never cross the API boundary: `.env` values stay in the server, container env vars are

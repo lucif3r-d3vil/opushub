@@ -42,7 +42,8 @@ opushub/
 │       ├── dockerLabels.js      label grammar: compose, curated Traefik routers, opushub.* overlay keys
 │       ├── news.js            server-side RSS/Atom fetch + cache (CORS-free)
 │       ├── weather.js         Open-Meteo (no key needed), configurable location
-│       ├── market.js          Stooq quotes + daily history for sparklines (no key needed)
+│       ├── market.js          Yahoo Finance chart quotes + daily history for sparklines (keyless)
+│       ├── background.js      background URL validation/resolution (https-only, public hosts only)
 │       └── icons.js           local @iconify-json collections first, Iconify API proxy fallback
 └── src/                     # React 19 + TypeScript (Vite)
     ├── shell/                 navigation rail, page transitions, background layer
