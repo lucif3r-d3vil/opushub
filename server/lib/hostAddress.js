@@ -20,8 +20,8 @@ function outboundAddress(timeoutMs = 150) {
       sock = dgram.createSocket('udp4');
       sock.once('error', () => finish(null));
       sock.setTimeout(timeoutMs, () => finish(null));
-      // connect() on a UDP socket performs no I/O; it just consultes the routing table so
-      // `sock-address` reports the source address a real packet would use.
+      // connect() on a UDP socket performs no I/O; it just consults the routing table so
+      // `sock.address()` reports the source address a real packet would use.
       sock.connect(53, '8.8.8.8', () => {
         try { finish(sock.address().address || null); } catch { finish(null); }
       });
@@ -48,15 +48,20 @@ function physicalAddress() {
 
 let cache = null;
 
-/** { address: string|null, source: 'env'|'outbound'|'interface'|'none', interfaces } */
-export async function hostAddress({ force = false } = {}) {
+/** { address: string|null, source: 'env'|'outbound'|'interface'|'none', interfaces }
+ *  `force` re-resolves instead of returning the cached answer; `probes: false` skips both
+ *  network checks (outbound routing + interface scan) so the result is deterministically
+ *  `{ address: null, source: 'none' }` when no env override is set — used by tests so the
+ *  “no usable host address” branch is exercised deliberately, not by which network the
+ *  test machine happens to be on. */
+export async function hostAddress({ force = false, probes = true } = {}) {
   if (cache && !force) return cache;
   const fromEnv = String(process.env.OPUSHUB_HOST_ADDRESS || '').trim();
   const interfaces = os.networkInterfaces();
   let out = null;
-  if (!fromEnv) out = await outboundAddress();
+  if (!fromEnv && probes) out = await outboundAddress();
   const probe = out && !USELESS(out) ? out : null;
-  const fallback = probe ? null : physicalAddress();
+  const fallback = !probe && probes ? physicalAddress() : null;
   cache = {
     address: fromEnv || probe || fallback || null,
     source: fromEnv ? 'env' : out ? 'outbound' : fallback ? 'interface' : 'none',
