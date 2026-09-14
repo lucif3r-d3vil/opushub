@@ -290,6 +290,8 @@ export function toService(record, overlay, ctx) {
     url: url.url,
     urlSource: url.url ? url.urlSource : 'none',
     urlNote: url.urlNote || null,
+    // machine-readable reason (see urlResolver.URL_REASONS) — counted, never a name
+    urlReason: url.urlReason || (url.url ? url.urlSource : 'no-route'),
     icon,
     iconSource,
     iconSuggestion: icon ? null : (ctx.suggestIcon?.(record) || null),

@@ -649,6 +649,91 @@ export async function runWebTests(): Promise<WebResult> {
     expect(!!q('#setup-pass2'), 'the confirm field is missing on the account step');
   });
 
+  /* 18b — Phase 5: the wizard walks all six steps, explains URLs, and does not enter the app by itself */
+  await test('setup wizard: six steps, URL reasons explained, and a Finish screen before the Hub', async (h) => {
+    const discovery = {
+      docker: { ok: true, state: 'connected', version: '26.1.0-mock', apiVersion: '1.43', operatingSystem: 'linux' },
+      containers: 25, running: 18, stopped: 7, stacks: 7, services: 19, infrastructure: 6, standalone: 4,
+      urls: {
+        detected: 15, missing: 10,
+        sources: { traefik: 13, 'published-port': 2 },
+        reasons: [
+          { code: 'traefik', count: 13, explain: 'built from the container’s own Traefik labels', resolved: true },
+          { code: 'published-port', count: 2, explain: 'built from a published port and this host’s address', resolved: true },
+          { code: 'no-route', count: 7, explain: 'no proxy route and no published port', resolved: false },
+          { code: 'loopback-only', count: 2, explain: 'published only on loopback — unreachable from another machine', resolved: false },
+          { code: 'override-invalid', count: 1, explain: 'the configured override is not a usable http(s) URL', resolved: false },
+        ],
+      },
+      traefik: { routes: 14, tlsRoutes: 12, routedContainers: 13, entrypoints: ['web', 'websecure'], entrypointPorts: {} },
+      hostAddress: '198.51.100.7', hostAddressSource: 'outbound-interface',
+    };
+    let created: { username?: string; password?: string; infrastructure?: { hostAddress?: string } } | null = null;
+    h.setRoutes({
+      // the fixture flips to "initialized" the moment the account exists, exactly like the server
+      '/api/setup/status': () => (created
+        ? { required: false, complete: true, hasAccount: true, version: '0.1.0' }
+        : { required: true, complete: false, hasAccount: false, version: '0.1.0', discovery }),
+      '/api/auth/me': () => (created
+        ? { authenticated: true, user: { username: 'admin' }, setupComplete: true }
+        : { authenticated: false, user: null, setupComplete: false }),
+      '/api/setup': (body) => { created = body as typeof created; return { ok: true, user: { username: 'admin' }, authenticated: true }; },
+      ...stubRoutes(),
+      '/api/bookmarks': { groups: [] },
+    });
+    await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    await h.waitFor(() => text().includes('Welcome'), 'the wizard');
+    const advance = async (label: string) => {
+      const b = qa('button').find((x) => text(x).trim() === label);
+      expect(!!b, `the “${label}” button is missing`);
+      click(b!);
+      await h.flush(30);
+    };
+
+    await advance('Begin');
+    expect(!!q('#setup-user'), 'no account step');
+    type(q<HTMLInputElement>('#setup-user')!, 'admin');
+    type(q<HTMLInputElement>('#setup-pass')!, 'wizard-fixture-password');
+    type(q<HTMLInputElement>('#setup-pass2')!, 'wizard-fixture-password');
+
+    await advance('Continue');
+    // Environment: the engine, the API version it actually speaks, and the two knobs
+    expect(text().includes('Environment'), 'the Environment step heading is missing');
+    expect(text().includes('26.1.0-mock'), 'the engine version is not shown');
+    expect(text().includes('v1.43'), 'the Docker API version is not shown');
+    const host = q<HTMLInputElement>('#setup-host')!;
+    expect(host.value === '198.51.100.7', `the detected host address was not prefilled (got ${host.value})`);
+    expect(text().includes('websecure'), 'the detected entrypoints are not offered');
+
+    await advance('Continue');
+    // Discovery: counts plus *why* each container does or does not have a URL
+    expect(text().includes('25'), 'the container count is missing');
+    expect(text().includes('compose projects'), 'the stack count is not explained');
+    expect(text().includes('no proxy route and no published port'), `the missing-URL reason is not explained: ${text().slice(0, 600)}`);
+    expect(text().includes('published only on loopback'), 'the loopback reason is not explained');
+    expect(text().includes('built from the container’s own Traefik labels'), 'the resolved reason is not explained');
+    expect(!text().includes('jellyfin') && !text().includes('wave'), 'a container name leaked into the pre-auth wizard');
+
+    await advance('Continue');
+    // Review: the recap, then the one mutation
+    expect(text().includes('Review'), 'no review step');
+    expect(text().includes('admin'), 'the recap does not name the account being created');
+    expect(!q('.rail'), 'the shell appeared before the account existed');
+    await advance('Create account');
+    const post = h.writes('POST', '/api/setup')[0];
+    expect(!!post, 'the account was never created');
+    expect((post.body as { username?: string }).username === 'admin', 'the wrong username was sent');
+    expect(!!created, 'the fixture never saw the create call');
+
+    // Finish: a real screen, still no application behind it
+    expect(text().includes('Enter OpusHub'), 'the Finish screen is missing');
+    expect(!q('.rail'), 'creating the account jumped straight into the Hub');
+
+    // …and the hand-off is explicit
+    await advance('Enter OpusHub');
+    await h.waitFor(() => !!q('.rail'), 'the application shell after entering');
+  });
+
   /* 19 — Phase 4: an initialized install asks for a password; a wrong one is reported, a right one enters */
   await test('auth gate: sign-in, wrong password, and no token kept in the browser', async (h) => {
     h.setRoutes({

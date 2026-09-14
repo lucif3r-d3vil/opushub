@@ -17,6 +17,7 @@ import { getNews } from './providers/news.js';
 import { getWeather, cToF } from './providers/weather.js';
 import { getMarket } from './providers/market.js';
 import { checkBackgroundUrl } from './providers/background.js';
+import { URL_REASONS } from './urlResolver.js';
 import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons.js';
 import { logEvent, readEvents, firstEventAt } from './activity.js';
 import { searchAll } from './search.js';
@@ -694,15 +695,43 @@ function clientIp(req) {
  */
 async function setupSummary() {
   const s = await model.getDiscoveryStatus({ refreshMs: 0 });
+  const inv = await model.getInventory();
+  // Why each container has, or has not, a browser URL — aggregated by the resolver's own reason
+  // codes (`urlResolver.URL_REASONS`). Counts only: the wizard can explain the shape of this host
+  // before an account exists without naming a single container, image or URL.
+  const byReason = new Map();
+  for (const svc of inv.services) {
+    const code = svc.urlReason || (svc.url ? svc.urlSource : 'no-route');
+    const row = byReason.get(code) || { code, count: 0, explain: URL_REASONS[code] || null, resolved: false };
+    row.count += 1;
+    row.resolved = row.resolved || !!svc.url;
+    byReason.set(code, row);
+  }
+  const reasons = [...byReason.values()].sort((a, b) => Number(b.resolved) - Number(a.resolved) || b.count - a.count);
   return {
-    docker: { ok: s.engine.ok, state: s.engine.state, version: s.engine.version },
+    docker: {
+      ok: s.engine.ok,
+      state: s.engine.state,
+      version: s.engine.version,
+      // the API version OpusHub actually speaks to the daemon (min(daemon, 1.43)) — not the product version
+      apiVersion: s.engine.api,
+      operatingSystem: s.engine.operatingSystem,
+    },
     stacks: s.inventory.stacks,
     containers: s.engine.containers,
     running: s.engine.running,
+    stopped: s.engine.stopped,
     services: s.inventory.applications,
     infrastructure: s.inventory.infrastructure,
     standalone: s.inventory.standalone,
-    urls: { detected: s.urlDiscovery.withUrl, missing: s.urlDiscovery.withoutUrl },
+    urls: {
+      detected: s.urlDiscovery.withUrl,
+      missing: s.urlDiscovery.withoutUrl,
+      // every resolver tier that answered, so the wizard can show *how* URLs were found
+      sources: s.urlDiscovery.sources,
+      // and every reason a container has none, in categories (destination, count, explanation)
+      reasons,
+    },
     // Entrypoint *names* ("web", "websecure") are Traefik vocabulary, not host data: the wizard
     // needs them to offer the port mapping when the entrypoint is not on 80/443.
     traefik: {

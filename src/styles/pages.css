@@ -287,6 +287,9 @@
   .stack-rollup { gap: 4px 12px; }
   .detail-block .kv { grid-template-columns: minmax(84px, 120px) minmax(0, 1fr); }
   .port-row { flex-wrap: wrap; }
+  /* the wizard's key/value grid keeps its label column narrow instead of eating the value */
+  .setup-kv { grid-template-columns: 110px minmax(0, 1fr); }
+  .setup-reasons li { grid-template-columns: 26px minmax(0, 1fr); }
 }
 
 /* uptime/state strip — every segment is a witnessed state, gaps are never invented */
@@ -376,5 +379,17 @@
   background: color-mix(in srgb, var(--warn) 8%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent);
   font-size: var(--fs-meta); color: var(--ink-2);
 }
+/* Why a service has (or has not) a URL. Reasons are counted in categories — the wizard explains
+   the shape of the host without naming a container, because there is no account yet. */
+.setup-explain { margin-top: var(--sp-8); padding-top: var(--sp-5); border-top: 1px solid var(--hair); }
+.setup-explain-title {
+  font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--ink-3); font-weight: 650; margin-bottom: var(--sp-3);
+}
+.setup-explain-title + .setup-reasons { margin-bottom: var(--sp-6); }
+.setup-reasons { list-style: none; display: grid; gap: 6px; }
+.setup-reasons li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: var(--sp-3); align-items: baseline; font-size: var(--fs-meta); color: var(--ink-2); }
+.setup-reasons .count { font-weight: 620; color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; }
+.setup-reasons .why { min-width: 0; }
 .setup-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding-top: var(--sp-5); border-top: 1px solid var(--hair); }
 .setup-step-note { color: var(--ink-3); font-size: var(--fs-micro); }

@@ -24,14 +24,21 @@ export interface SetupStatus {
 
 /** Count-only discovery summary the wizard may show before an account exists. */
 export interface SetupDiscovery {
-  docker: { ok: boolean; state: string; version: string | null };
+  docker: { ok: boolean; state: string; version: string | null; apiVersion?: string | null; operatingSystem?: string | null };
   stacks: number;
   containers: number;
   running: number;
+  stopped?: number;
   services: number;
   infrastructure: number;
   standalone: number;
-  urls: { detected: number; missing: number };
+  /** `reasons` is the why: one row per resolver verdict, counted — never a container name. */
+  urls: {
+    detected: number;
+    missing: number;
+    sources?: Record<string, number>;
+    reasons?: { code: string; count: number; explain: string | null; resolved: boolean }[];
+  };
   traefik: {
     routes: number;
     tlsRoutes: number;
@@ -53,6 +60,8 @@ interface AuthCtx {
   login: (username: string, password: string) => Promise<void>;
   /** create the administrator account (only meaningful while `status === 'setup'`) */
   completeSetup: (body: { username: string; password: string; infrastructure?: Record<string, unknown> }) => Promise<void>;
+  /** leave the wizard's final screen and mount the application */
+  enter: () => void;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   clearError: () => void;
@@ -106,16 +115,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [refresh]);
 
+  /**
+   * Create the administrator. This deliberately does *not* refresh into the app: the wizard owns
+   * one more screen (Finish) after the account exists, so the person who just set the machine up
+   * is told what happened before a dashboard appears. `enter()` is the hand-off.
+   *
+   * A reload at that point skips the screen entirely — `/api/setup/status` says setup is complete
+   * and the session cookie is already set — so nothing here is load-bearing state.
+   */
   const completeSetup = useCallback<AuthCtx['completeSetup']>(async (body) => {
     setError(null);
     try {
-      await post('/api/setup', body);
-      setStatus('loading');
-      await refresh();
+      const r = await post<{ user: AuthUser }>('/api/setup', body);
+      if (r?.user) setUser(r.user);
     } catch (err) {
       throw new Error(message(err, 'Setup could not be completed.'));
     }
-  }, [refresh]);
+  }, []);
 
   const logout = useCallback(async () => {
     try { await post('/api/auth/logout'); } catch { /* the cookie is gone either way */ }
@@ -123,11 +139,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('login');
   }, []);
 
+  const enter = useCallback(() => {
+    setStatus('loading');
+    void refresh();
+  }, [refresh]);
+
   const value = useMemo<AuthCtx>(() => ({
     status, user, setup, error,
-    login, completeSetup, logout, refresh,
+    login, completeSetup, enter, logout, refresh,
     clearError: () => setError(null),
-  }), [status, user, setup, error, login, completeSetup, logout, refresh]);
+  }), [status, user, setup, error, login, completeSetup, enter, logout, refresh]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
