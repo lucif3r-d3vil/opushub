@@ -292,6 +292,21 @@
   .setup-reasons li { grid-template-columns: 26px minmax(0, 1fr); }
 }
 
+/* session resource history: the measured chart plus its own legend — the graph owns a fixed
+   box (see AreaChart), so it can never paint under the text that follows it */
+.res-history { margin-top: var(--sp-6); padding-top: var(--sp-5); border-top: 1px solid var(--hair); }
+.res-history-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-3); }
+.res-legend { display: inline-flex; gap: var(--sp-4); font-size: var(--fs-meta); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.res-key { display: inline-flex; align-items: center; gap: 6px; }
+.res-key i { width: 16px; height: 2px; border-radius: 2px; display: inline-block; }
+.res-history .stale-note { margin-top: var(--sp-3); display: block; }
+
+/* label rows: label name, separator, value, and the provenance note in a lighter tone */
+.label-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.label-row + .label-row { margin-top: 5px; }
+.label-pair { display: inline-flex; align-items: baseline; gap: 6px; margin-right: var(--sp-5); }
+.label-pair + .label-pair { margin-top: 4px; }
+
 /* uptime/state strip — every segment is a witnessed state, gaps are never invented */
 .uptime-strip { display: flex; gap: 2px; height: 10px; margin: 2px 0 var(--sp-4); border-radius: 4px; overflow: hidden; }
 .useg { height: 100%; min-width: 3px; border-radius: 2px; }

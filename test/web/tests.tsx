@@ -549,18 +549,36 @@ export async function runWebTests(): Promise<WebResult> {
   });
 
   /* 15 — Phase 3: resources arrive on demand, as sparklines, with real sample counts */
-  await test('service resources: sparklines only while the page is being looked at', async (h) => {
+  await test('service resources: a measured session chart, only while the page is being looked at', async (h) => {
     await h.mount(<TestApp entry="/services/Music/wave"><Hub /></TestApp>);
     await h.waitFor(() => text().includes('Wave'), 'the service page');
     await h.waitFor(() => text().includes('samples'), 'the resource history');
-    expect(qa('.spark').length >= 2, 'cpu and memory sparklines did not render');
+    // one measured chart (fixed box, so it can never paint under the text below it), plus the
+    // network sparkline that lives in the stat strip
+    const chart = q('.res-history .chart');
+    expect(!!chart, 'the session history chart did not render');
+    expect(!!chart!.querySelector('svg'), 'the chart has no drawing');
+    expect(!!chart!.getAttribute('style')?.includes('height'), 'the chart box was not sized');
+    expect(qa('.res-history .spark').length >= 1 || qa('.stat .spark').length >= 1, 'no sparkline at all');
     expect(text().includes('5 samples'), 'the sample count is not the real one');
+    expect(text().includes('only while a page is watching'), 'the chart does not say what it actually covers');
     // polling stops when the page is left: count requests, unmount, count again
     const before = h.calls.filter((c) => c.path.startsWith('/api/services/Music/wave/stats/history')).length;
     await h.unmount();
     await h.flush(80);
     const after = h.calls.filter((c) => c.path.startsWith('/api/services/Music/wave/stats/history')).length;
     expect(after === before, `resource history kept polling after unmount (${before} → ${after})`);
+
+    // labels: the allow-listed families are shown, the raw map is not
+    const h3 = await createHarness({ routes: stubRoutes(), fallback: () => ({}) });
+    try {
+      await h3.mount(<TestApp entry="/services/Music/wave"><Hub /></TestApp>);
+      await h3.waitFor(() => text().includes('Labels'), 'the labels block');
+      expect(text().includes('allow-listed'), 'the labels block did not say what it contains');
+      expect(!text().includes('SECRET_TOKEN'), 'a raw label was shipped to the page');
+    } finally {
+      await h3.unmount();
+    }
 
     // no readings → an honest note, never zeros-as-data
     const routes = {
