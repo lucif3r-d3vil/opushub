@@ -6,13 +6,28 @@
 import { readBookmarks, getInventory } from './model.js';
 
 const PAGES = [
-  { title: 'Hub', href: '/', hint: 'Your digital home', kind: 'page' },
-  { title: 'Services', href: '/services', hint: 'Everything you run', kind: 'page' },
-  { title: 'Stacks', href: '/stacks', hint: 'Groups of containers', kind: 'page' },
-  { title: 'System', href: '/system', hint: 'Host vitals', kind: 'page' },
-  { title: 'Activity', href: '/activity', hint: 'What happened, when', kind: 'page' },
-  { title: 'Settings', href: '/settings/appearance', hint: 'Appearance, hub, services, integrations', kind: 'page' },
-  { title: 'Icon browser', href: '/icons', hint: 'Find icons for your services', kind: 'page' },
+  { title: 'Hub', href: '/', hint: 'Your digital home', kind: 'page', keywords: ['home', 'start', 'dashboard'] },
+  { title: 'Services', href: '/services', hint: 'Everything you run', kind: 'page', keywords: ['apps', 'containers'] },
+  { title: 'Stacks', href: '/stacks', hint: 'Groups of containers', kind: 'page', keywords: ['compose', 'projects'] },
+  { title: 'System', href: '/system', hint: 'Host vitals', kind: 'page', keywords: ['cpu', 'memory', 'disk', 'network', 'uptime'] },
+  { title: 'Activity', href: '/activity', hint: 'What happened, when', kind: 'page', keywords: ['events', 'history', 'log'] },
+  { title: 'Icon browser', href: '/icons', hint: 'Find an icon and apply it', kind: 'page', keywords: ['logo', 'glyph', 'symbol'] },
+  { title: 'Settings', href: '/settings/appearance', hint: 'Everything you can change', kind: 'page', keywords: ['config', 'preferences'] },
+];
+
+/** Settings destinations — real routes, so Enter lands on the pane that owns the thing searched. */
+const SETTINGS = [
+  { title: 'Appearance', href: '/settings/appearance', hint: 'Theme, accent, density, type scale', keywords: ['dark', 'light', 'theme', 'accent', 'colour', 'color', 'compact', 'font'] },
+  { title: 'Background', href: '/settings/background', hint: 'Quiet, horizon, or your own photo', keywords: ['wallpaper', 'photo', 'blur', 'scrim', 'image'] },
+  { title: 'Hub layout', href: '/settings/hub', hint: 'Sections, spacing, greeting, clock', keywords: ['home screen', 'composition', 'sections', 'greeting', 'name', 'clock', '24 hour'] },
+  { title: 'Widgets', href: '/settings/widgets', hint: 'Add, hide, resize and configure Hub widgets', keywords: ['widget', 'rail', 'weather', 'news', 'markets', 'bookmarks', 'activity', 'clock', 'system'] },
+  { title: 'Templates', href: '/settings/templates', hint: 'Layout presets: minimal, balanced, media…', keywords: ['preset', 'layout', 'theme pack'] },
+  { title: 'Services', href: '/settings/services', hint: 'Names, icons, groups, URLs, visibility', keywords: ['overlay', 'services.yaml', 'rename', 'icon'] },
+  { title: 'Groups', href: '/settings/groups', hint: 'Create, rename, reorder and hide groups', keywords: ['grouping', 'categories', 'folders'] },
+  { title: 'Bookmarks', href: '/settings/bookmarks', hint: 'Flat links, no status', keywords: ['links', 'shortcuts'] },
+  { title: 'Integrations', href: '/settings/integrations', hint: 'News feeds, weather location, watchlist', keywords: ['rss', 'feed', 'weather', 'stocks', 'markets', 'symbols'] },
+  { title: 'System & discovery', href: '/settings/system', hint: 'Engine status, URL sources, unmatched overlays', keywords: ['docker', 'engine', 'socket', 'discovery', 'unmatched', 'env', 'paths'] },
+  { title: 'Advanced', href: '/settings/advanced', hint: 'Custom CSS & JS, refresh intervals, launch logging', keywords: ['custom css', 'custom js', 'theme.css', 'app.js', 'advanced', 'refresh', 'poll', 'launch log'] },
 ];
 
 function score(needle, ...fields) {
@@ -39,7 +54,8 @@ export async function searchAll(q, { newsItems = [] } = {}) {
   const out = [];
   const add = (item, s, weight = 1) => { if (s > 8) out.push({ ...item, _s: s * weight }); };
 
-  for (const p of PAGES) add({ title: p.title, subtitle: p.hint, href: p.href, kind: 'page' }, score(needle, p.title, p.hint));
+  for (const p of PAGES) add({ title: p.title, subtitle: p.hint, href: p.href, kind: 'page' }, score(needle, p.title, p.hint, ...(p.keywords || [])));
+  for (const st of SETTINGS) add({ title: st.title, subtitle: `Setting · ${st.hint}`, href: st.href, kind: 'setting' }, score(needle, st.title, st.hint, ...(st.keywords || [])), 0.95);
 
   // the one canonical inventory: containers, their resolved URLs, and their presentation overlay
   let inv = null;
