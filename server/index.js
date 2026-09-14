@@ -146,10 +146,18 @@ history.start(async () => {
     throw err;
   }
 });
-// seed the registry once at boot (silently — the first successful contact is not an event)
+// seed the registry once at boot (silently — the first successful contact is not an event).
+// A socket file that exists is NOT proof the daemon answers: when the path looks healthy we
+// probe before claiming "available", so provider health can never say healthy off stale data.
 {
   const a = docker.availability();
-  reportProvider('docker', a.ok ? 'available' : 'unavailable', { reason: a.ok ? null : a.public, silent: true });
+  if (!a.ok) {
+    reportProvider('docker', 'unavailable', { reason: a.public, silent: true });
+  } else {
+    void docker.probe().then((p) => {
+      reportProvider('docker', p.ok ? 'available' : 'unavailable', { reason: p.ok ? null : p.public, silent: true });
+    });
+  }
 }
 
 const HEALTH_IN_STATUS = /\((healthy|unhealthy|starting)\)\s*$/i;

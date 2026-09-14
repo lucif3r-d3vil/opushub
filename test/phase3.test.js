@@ -406,4 +406,13 @@ test('security: no env, no arbitrary docker path, no socket, no mutation surface
   assert.equal(evilRef.json.status, 'error');
   const evilSvc = await get('/api/services/Other/..%2F..%2Fetc/logs');
   assert.ok([404].includes(evilSvc.status) || evilSvc.json.status === 'error' || (evilSvc.json.lines || []).length === 0);
+
+  // the passthrough logs route is bounded to containers discovery actually saw: a well-formed
+  // but unknown name must not read anything, while a discovered one still works
+  const unknown = await get('/api/docker/containers/some-container-that-does-not-exist/logs');
+  assert.equal(unknown.json.status, 'error');
+  assert.match(unknown.json.reason || '', /discovered/i);
+  assert.deepEqual(unknown.json.lines, []);
+  const known = await get('/api/docker/containers/jellyfin/logs?tail=5');
+  assert.equal(known.json.status, 'ok', 'discovered containers keep their logs');
 });

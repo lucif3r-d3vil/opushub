@@ -22,7 +22,12 @@ Everything below is true by construction, and the test suite asserts it:
   image digests/tags are metadata, never configuration.
 - **No arbitrary Engine proxying.** Every route is one OpusHub builds itself from a validated
   container reference (a discovered service's name or id — nothing else reaches the socket).
-  A request for `/api/docker/containers/anything/../../version` is a 404, not a proxy.
+  A request for `/api/docker/containers/anything/../../version` is a 404, not a proxy. The
+  passthrough log route is bounded the same way: it only serves logs for containers discovery
+  actually saw — a well-formed but unknown name is refused.
+- **API version negotiation.** Requests speak the daemon's own API version: OpusHub asks the
+  engine (`/version`, no prefix) and adopts `min(daemon, 1.43)`, never below 1.24. Engines older
+  than Docker 24 — which reject a too-new version prefix outright — remain fully readable.
 - **No filesystem browsing, no mount contents.** Mounts are presented as the two paths Docker
   reports, read-only. Nothing reads what lives behind them.
 
@@ -120,7 +125,30 @@ is a real state transition; gaps are drawn as *unknown*, never as uptime.
 `available` / `degraded` / `unavailable` / `idle` with the last successful read and, behind a
 disclosure, the reason. The Hub's attention widget surfaces unavailable/degraded providers next to
 unhealthy containers; Settings → System shows the same doc as a table. States change only on real
-probe transitions (logged to the activity feed), never on a guess.
+probe transitions (logged to the activity feed), never on a guess. A socket file that merely
+*exists* is not proof of a live engine: at boot OpusHub probes before marking Docker `available`,
+so provider health cannot read healthy off stale data.
+
+## Pointing OpusHub at a real engine
+
+Environment (all optional except one of the first three in practice):
+
+| Variable | Purpose |
+|---|---|
+| `OPUSHUB_DOCKER_SOCKET` | explicit socket path (wins over everything) |
+| `DOCKER_HOST` | `unix:///path` or `tcp://host:port` |
+| (defaults) | `/var/run/docker.sock`, then `/run/docker.sock` |
+| `OPUSHUB_HOST_ADDRESS` | host name/IP used in published-port URLs when the container cannot see the host's network |
+| `OPUSHUB_CONFIG_DIR`, `OPUSHUB_DATA_DIR` | state locations (`/app/config`, `/app/data` in the image) |
+| `OPUSHUB_PORT`, `OPUSHUB_HOST` | bind address |
+
+`.env` files are discovered (in order, first existing wins per key) at `OPUSHUB_ENV_FILE`,
+`<configDir>/.env`, `<appRoot>/config/.env`, `<appRoot>/.env`, `$HOMEPAGE_DIR/.env`,
+`/app/config/.env` — real process environment always beats file values, and every found file is
+logged at boot. When OpusHub runs **in** a container on the engine host, mount the socket
+read-only, add the socket's group (`group_add`), and set `OPUSHUB_HOST_ADDRESS` — the address
+auto-detection otherwise sees the container's bridge interface. Full compose snippet:
+`docs/04-discovery.md`.
 
 ## What Phase 3 deliberately did not add
 

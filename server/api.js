@@ -329,6 +329,14 @@ export async function handleApi(req, res, url) {
     if (!/^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,127}$/.test(ref)) {
       return send(res, 200, { status: 'error', reason: 'invalid container reference', lines: [] });
     }
+    // The reference must be one of OURS: a container discovery actually saw. Without this check
+    // the route would read logs for any container on the host by name — including ones OpusHub
+    // has no business pointing at. Same rule as every other container-scoped route.
+    const inv = await model.getInventory();
+    const known = inv.services.some((s) => s.name === ref || s.id === ref || s.container?.name === ref);
+    if (!known) {
+      return send(res, 200, { status: 'error', reason: 'Unknown container — logs are only served for containers OpusHub discovered.', lines: [] });
+    }
     try { return send(res, 200, { status: 'ok', lines: await docker.logs(ref, { tail, timestamps }) }); }
     catch (err) {
       if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] logs failed: ${err.message}`);
