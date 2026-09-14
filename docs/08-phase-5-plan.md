@@ -81,3 +81,34 @@ arbitrary proxy, no SSRF, no secret in a response or a log line, bounded retenti
 **Not claimed:** validation against the real OpusGrid host. The Arena environment has no access to
 the real Docker engine, so every Docker-shaped assertion runs against `test/mock-engine.js`. The
 real installation is not modified, deployed to, or contacted.
+
+---
+
+## 4. What shipped (this branch)
+
+Branch `arena/01a0a0f8-opushub`, based on main `4dccd791e3c17ac2ab1a3fbe79dd1bee1bcfcc74`.
+
+| # | Workstream | Commit | Notes |
+|---|------------|--------|-------|
+| 1 | Authentication hardening | `850034d`, `893ad93` | password change, session inventory + revocation, in-memory session store, Settings → Account & sessions |
+| 2 | Setup wizard | `2290039` | Welcome → Administrator → Environment → Discovery → Review → Finish; Environment explains *why* each container does or does not have a URL, by counted reason category |
+| 3 | Service detail | `e37d995` | allow-listed labels block (Compose / Traefik / overlay / facts), session-bounded resource chart, volumes named as volumes |
+| 4 | Stack detail | `44a3056` | bounded enrichment (4 at a time, running members only, shared sampler), `stackRollup`, `aggregateHistory`, compose-project ≠ presentation-group note |
+| 5 | System | `a7e78ef` | provider-health band, load-average history, measured chart boxes |
+| 6 | Activity Center | `e34ed83` | server-side `service` / `stack` / `type` / `since` filters over the whole log, `matched` count, removable chips |
+| 7 | Command palette | `36a72b8` | activity as a destination, new settings panes in the actions list; deep links carry the filter into Activity |
+| 8 | Settings architecture | `850034d`, `893ad93` | five nav sections over thirteen panes, `system` alias kept, no pane regression |
+| 9 | Homepage compatibility | `893ad93` | `test/homepage-compat.test.js`: a hostile overlay cannot move the inventory |
+| 10 | Visual / UX pass | `893ad93` | grouped settings nav, announced loading lines, palette focus ring, mobile filter grid, no redesign |
+
+Cross-cutting: no new Docker write path, no shell, no arbitrary proxy; every Docker call in the
+Phase 5 paths is a read the daemon already served; sampling stays bounded (`MAX_SAMPLES` 360,
+2 s minimum interval, 3 s dedup cache, buffers dropped after 15 idle minutes) and shared between
+the service and stack pages.
+
+Verified with the six gates: `npx tsc --noEmit` clean · `npm test` 312/312 · `npm run build` green ·
+`npm run verify` 62/62 · `npm run smoke` (routes + hub) green · `npm run test:web` 38/38.
+
+**Not verified, and not claimed:** this branch has never run against the real OpusGrid Docker
+Engine. Every Docker-facing assertion was made against `test/mock-engine.js`. Nothing here was
+deployed to, or executed on, the real host.
