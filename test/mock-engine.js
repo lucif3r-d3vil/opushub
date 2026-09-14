@@ -143,6 +143,9 @@ export const FIXTURES = [
     {}, [P(3000, 3000)]),
   C('3ad1e2f3a4b5', 'nightly-backup-runner-with-a-remarkably-long-name', 'alpine:3.20', 'created', 'Created',
     {}, []),
+  // a crash-looping standalone: `restarting` is its own state, distinct from stopped/unhealthy
+  C('5c6d7e8f9012', 'restart-loop', 'ghcr.io/example/sync-agent:2.1.0', 'restarting', 'Restarting (1) 4 seconds ago',
+    {}, []),
 ];
 // What the "host" currently has. OPUSHUB_MOCK_HIDE=jellyfin,seerr removes containers from every
 // endpoint at once — the only safe way to check end-to-end that a removed container really
@@ -197,8 +200,8 @@ function inspectPayload(fx) {
       OOMKilled: false,
       Health: health ? { Status: health, FailingStreak: health === 'healthy' ? 0 : 3 } : undefined,
     },
-    HostConfig: { PortBindings: portBindings, RestartPolicy: { Name: project ? 'unless-stopped' : 'no' } },
-    RestartCount: name === 'navidrome' ? 2 : 0,
+    HostConfig: { PortBindings: portBindings, RestartPolicy: { Name: project ? 'unless-stopped' : name === 'restart-loop' ? 'always' : 'no' } },
+    RestartCount: name === 'navidrome' ? 2 : name === 'restart-loop' ? 42 : 0,
     Mounts: mounts,
     NetworkSettings: { Networks: nets },
   };
@@ -227,6 +230,12 @@ function statsPayload(fx) {
 }
 
 const LONG_LINE = 'longline: ' + 'lorem-ipsum-dolor-sit-amet-'.repeat(18) + 'end';
+// a deliberately LARGE log (more than any tail cap) to prove pagination stays bounded
+const nextcloudLines = [];
+for (let i = 1; i <= 800; i++) {
+  const level = i % 17 === 0 ? 'ERR' : i % 5 === 0 ? 'WRN' : 'INF';
+  nextcloudLines.push(`[2026-09-12T08:00:${String(i % 60).padStart(2, '0')}Z] [${level}] nextcloud fixture line ${i}: request handled path=/remote.php status=${level === 'ERR' ? 500 : 200} (MOCK DATA)`);
+}
 const LOGS = {
   jellyfin: [
     '[08:00:01 INF] Fixture log line one — jellyfin started (MOCK DATA)',
@@ -236,6 +245,8 @@ const LOGS = {
     '[08:00:05 INF] ansi colors: \u001b[32mgreen\u001b[0m and \u001b[1;31mbold red\u001b[0m (mock)',
     '[08:00:06 INF] trailing line without newline at end',
   ],
+  nextcloud: nextcloudLines,
+  'restart-loop': [], // a container that has logged genuinely nothing
   default: [
     'fixture stdout line 1 (MOCK DATA)',
     'fixture stdout line 2 (MOCK DATA)',
@@ -324,6 +335,22 @@ export function createHandler() {
     }
     if (req.method === 'GET' && p === '/images/json') {
       return send(200, FLEET.slice(0, 8).map((f, i) => ({ Id: `sha256:${String(i).repeat(64)}`, RepoTags: [f.Image], Size: 100_000_000 + i })));
+    }
+    m = p.match(/^\/images\/([^/]+)\/json$/);
+    if (req.method === 'GET' && m) {
+      const wanted = decodeURIComponent(m[1]);
+      const fx = FLEET.find((f) => f.Image === wanted) || findRef(wanted);
+      if (!fx) return send(404, { message: 'No such image' });
+      const digest = `${fx.Image.split(':')[0]}@sha256:${'ab'.repeat(32)}`;
+      return send(200, {
+        Id: `sha256:${'7'.repeat(64)}`,
+        RepoTags: [fx.Image],
+        RepoDigests: fx.Image.includes('/') ? [digest] : [],
+        Architecture: 'amd64', Os: 'linux',
+        Created: '2026-08-20T10:00:00.000000000Z',
+        Size: 268_435_456,
+        Config: { Env: ['SHOULD_NEVER_LEAVE_SERVER=1'], Labels: fx.Labels }, // must NOT be projected
+      });
     }
     if (req.method === 'GET' && p === '/system/df') {
       return send(200, { LayersSize: 1, Images: [], Containers: [], Volumes: [] });

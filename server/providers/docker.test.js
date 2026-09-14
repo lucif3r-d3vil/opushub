@@ -143,11 +143,9 @@ test('containerStats: sane cpu/mem/net for running containers', async () => {
   assert.ok(s.blockIo > 0);
 });
 
-test('containerStats: stopped containers yield nulls, never zeros-as-data', async () => {
-  const s = await docker.containerStats('paperless');
-  assert.equal(s.cpu, null);
-  assert.equal(s.memory.used, null);
-  assert.equal(s.pids, null);
+test('containerStats: stopped containers are unavailable, never zeros-as-data', async () => {
+  // the daemon answers with empty cgroup objects for a stopped container — that is not data
+  await assert.rejects(() => docker.containerStats('paperless'), /unavailable/);
 });
 
 test('logs: multiplexed framing is demuxed, tail honored', async () => {
@@ -217,7 +215,7 @@ test('groupByProject separates compose stacks from standalone', async () => {
   const { projects, standalone } = docker.groupByProject(list);
   assert.deepEqual([...projects.keys()].sort(), ['cloud', 'home', 'observability', 'opustream', 'photos', 'secure', 'update']);
   assert.equal(projects.get('opustream').length, 8);
-  assert.deepEqual(standalone.map((c) => c.name).sort(), ['nightly-backup-runner-with-a-remarkably-long-name', 'opushub', 'traefik']);
+  assert.deepEqual(standalone.map((c) => c.name).sort(), ['nightly-backup-runner-with-a-remarkably-long-name', 'opushub', 'restart-loop', 'traefik']);
 });
 
 test('listContainers keeps raw labels server-side unless explicitly asked for them', async () => {
@@ -242,4 +240,50 @@ test('engineInfo projects version + counters only (no /info internals)', async (
   for (const forbidden of ['registry-mock', 'proxy-mock', 'var/lib/docker', 'ServerVersion', 'MemTotal', 'NCPU', 'DockerRootDir', 'SecurityOptions', 'CgroupDriver', 'userns']) {
     assert.ok(!blob.includes(forbidden), `${forbidden} must not be projected`);
   }
+});
+
+// --- API version negotiation: real homelabs run older daemons ----------------
+// Docker < 24 rejects a too-new version prefix on EVERY request ("client version X is too
+// new"). OpusHub must negotiate down instead of declaring the engine broken.
+
+test('version negotiation: an older daemon (API 1.41) is still fully readable', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const httpMod = await import('node:http');
+  const sock = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'old-docker-')), 'docker.sock');
+
+  const seen = [];
+  const srv = httpMod.createServer((req, res) => {
+    seen.push(req.url);
+    const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+    if (req.url === '/version') return send(200, { Version: '20.10.24', ApiVersion: '1.41' });
+    if (req.url.startsWith('/v1.43/')) return send(400, { message: 'client version 1.43 is too new. Maximum supported API version is 1.41' });
+    if (req.url === '/v1.41/containers/json?all=true') return send(200, [{ Id: 'aa'.repeat(32), Names: ['/oldy'], Image: 'alpine:3.20', State: 'running', Status: 'Up 2 days', Labels: {}, Ports: [], Created: 1700000000 }]);
+    return send(404, { message: 'no route' });
+  });
+  await new Promise((r) => srv.listen(sock, r));
+
+  docker._internals.setApiVersion(docker._internals.MAX_API_VERSION); // start as the pinned default
+  process.env.OPUSHUB_DOCKER_SOCKET = sock;
+  try {
+    const list = await docker.listContainers({ all: true });
+    assert.equal(list.length, 1, 'the old daemon must be readable after negotiation');
+    assert.equal(list[0].name, 'oldy');
+    assert.equal(docker._internals.apiVersion, '1.41', 'the client must adopt the daemon version');
+    assert.ok(seen.some((u) => u === '/v1.43/containers/json?all=true'), 'first attempt uses the pinned version');
+    assert.ok(seen.some((u) => u === '/v1.41/containers/json?all=true'), 'retry uses the negotiated version');
+  } finally {
+    docker._internals.setApiVersion(docker._internals.MAX_API_VERSION);
+    restoreSocket();
+    await new Promise((r) => srv.close(r));
+    fs.rmSync(path.dirname(sock), { recursive: true, force: true });
+  }
+});
+
+test('version negotiation: never adopts a version newer than the client supports', () => {
+  const { vcmp, MAX_API_VERSION, MIN_API_VERSION } = docker._internals;
+  assert.ok(vcmp('1.47', MAX_API_VERSION) > 0);
+  assert.equal(vcmp('1.43', '1.43'), 0);
+  assert.ok(vcmp('1.21', MIN_API_VERSION) < 0);
 });

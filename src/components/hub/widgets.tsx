@@ -99,18 +99,25 @@ function StacksWidget({ widget, data, interactive }: WidgetProps) {
   if (!doc.stacks.length) return <WidgetEmpty href="/stacks" linkLabel="Stack overview →">No compose projects on this engine yet.</WidgetEmpty>;
   return (
     <ul className="hub-stack-list">
-      {doc.stacks.slice(0, cap).map((s) => (
-        <li key={s.id}>
-          <Link to={`/stacks/${encodeURIComponent(s.id)}`} className="hub-stack-row">
-            <StatusDot state={s.status} title={s.statusReason || STATUS_WORDS[s.status]} />
-            <span className="grow">
-              <span className="title">{s.displayName || s.name}</span>
-              <span className="sub">{s.runningCount}/{s.containerCount} running{s.project ? ` · ${s.project}` : ''}</span>
-            </span>
-            <span className="hub-stack-go" aria-hidden="true">→</span>
-          </Link>
-        </li>
-      ))}
+      {doc.stacks.slice(0, cap).map((s) => {
+        // compact real state: counts only, no invented detail; attention/unhealthy only when non-zero
+        const bits = [`${s.containerCount} container${s.containerCount === 1 ? '' : 's'}`, `${s.runningCount} running`];
+        if (s.unhealthyCount) bits.push(`${s.unhealthyCount} unhealthy`);
+        if (s.attentionCount) bits.push(`${s.attentionCount} attention`);
+        if (s.stoppedCount && !s.runningCount) bits.push(`${s.stoppedCount} stopped`);
+        return (
+          <li key={s.id}>
+            <Link to={`/stacks/${encodeURIComponent(s.id)}`} className="hub-stack-row">
+              <StatusDot state={s.status} title={s.statusReason || STATUS_WORDS[s.status] || s.status} />
+              <span className="grow">
+                <span className="title">{s.displayName || s.name}</span>
+                <span className="sub">{bits.join(' · ')}</span>
+              </span>
+              <span className="hub-stack-go" aria-hidden="true">→</span>
+            </Link>
+          </li>
+        );
+      })}
       {doc.stacks.length > cap && interactive && (
         <li><Link className="section-link" to="/stacks">+{doc.stacks.length - cap} more →</Link></li>
       )}
@@ -120,6 +127,9 @@ function StacksWidget({ widget, data, interactive }: WidgetProps) {
 
 /* ---------------- attention: only what is not running ---------------- */
 
+/** What actually needs attention — real conditions only, one row per fact:
+ *  unhealthy · stopped · paused · restarting containers, plus providers that failed.
+ *  Minor technicalities stay off the Hub; this answers “what needs me?” and nothing else. */
 function AttentionWidget({ widget, data }: WidgetProps) {
   const doc: ServicesDoc | null = data.services.data;
   const cap = widget.size === 'sm' ? 4 : 8;
@@ -127,9 +137,14 @@ function AttentionWidget({ widget, data }: WidgetProps) {
     if (!doc) return [];
     return (doc.services ?? []).filter((s) => !s.hidden && ['down', 'unhealthy', 'attention', 'paused', 'restarting'].includes(String(s.status)));
   }, [doc]);
+  const providerIssues = useMemo(() => {
+    const provs = data.providers?.data?.providers || [];
+    return provs.filter((p) => p.state === 'unavailable' || p.state === 'degraded');
+  }, [data.providers]);
   if (!doc) return <div className="widget-quiet" role="status">Checking service state…</div>;
-  if (!doc.live) return <WidgetEmpty>Docker isn't connected — nothing to compare against.</WidgetEmpty>;
-  if (!list.length) return <WidgetEmpty>Everything discovered is running. This stays quiet until something isn't.</WidgetEmpty>;
+  if (!doc.live && !providerIssues.length) return <WidgetEmpty>Docker isn't connected — nothing to compare against.</WidgetEmpty>;
+  if (!list.length && !providerIssues.length) return <WidgetEmpty>Everything discovered is running. This stays quiet until something isn't.</WidgetEmpty>;
+  const total = list.length + providerIssues.length;
   return (
     <ul className="hub-attention">
       {list.slice(0, cap).map((s) => (
@@ -143,7 +158,18 @@ function AttentionWidget({ widget, data }: WidgetProps) {
           </Link>
         </li>
       ))}
-      {list.length > cap && <li><Link className="section-link" to="/services">+{list.length - cap} more →</Link></li>}
+      {providerIssues.slice(0, Math.max(0, cap - list.length) || 2).map((p) => (
+        <li key={`prov-${p.name}`}>
+          <Link to="/settings/system" className="hub-attention-row">
+            <StatusDot state={p.state === 'degraded' ? 'degraded' : 'down'} title={p.state} />
+            <span className="grow">
+              <span className="title">{p.name[0].toUpperCase() + p.name.slice(1)} provider</span>
+              <span className="sub">{p.state === 'degraded' ? 'degraded' : 'unavailable'}{p.reason ? ` · ${p.reason}` : ''}</span>
+            </span>
+          </Link>
+        </li>
+      ))}
+      {total > cap && <li><Link className="section-link" to="/services">+{total - cap} more →</Link></li>}
     </ul>
   );
 }

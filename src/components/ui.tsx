@@ -6,9 +6,11 @@ import { relTime } from '../lib/format';
 
 export const STATUS_WORDS: Record<string, string> = {
   up: 'Online', down: 'Offline', unhealthy: 'Unhealthy', unmanaged: 'Not linked',
-  unavailable: 'Unavailable', restarting: 'Restarting', paused: 'Paused',
+  unavailable: 'Unavailable', restarting: 'Restarting', paused: 'Paused', created: 'Created',
   operational: 'Operational', degraded: 'Degraded', attention: 'Needs attention', unlinked: 'Unlinked',
+  stopped: 'Stopped', unknown: 'Unknown',
   ok: 'Available', error: 'Error', partial: 'Partial', unconfigured: 'Not configured', idle: 'Idle',
+  available: 'Available',
 };
 
 export function StatusDot({ state, title }: { state: string; title?: string }) {
@@ -17,7 +19,8 @@ export function StatusDot({ state, title }: { state: string; title?: string }) {
   const cls = ['up', 'operational'].includes(state) ? 'up'
     : ['down', 'error', 'attention', 'fail'].includes(state) ? 'down'
       : ['unhealthy', 'degraded', 'restarting', 'partial'].includes(state) ? 'unhealthy'
-        : state === 'unavailable' ? 'absent' : 'unmanaged';
+        : state === 'unavailable' || state === 'unknown' ? 'absent'
+          : state === 'stopped' ? 'stopped' : 'unmanaged';
   return <span className={`status-dot ${cls}`} role="img" aria-label={title || STATUS_WORDS[state] || state} title={title} />;
 }
 

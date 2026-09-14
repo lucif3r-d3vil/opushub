@@ -14,11 +14,93 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 
-const API_VERSION = 'v1.43';
+const MAX_API_VERSION = '1.43';   // what this client was written against
+const MIN_API_VERSION = '1.24';   // every endpoint OpusHub uses exists since 1.24
+let apiVersion = MAX_API_VERSION; // negotiated down on older daemons, never up
+let negotiating = null;
 
-// ---------------------------------------------------------------------------
-// Endpoint resolution
-// ---------------------------------------------------------------------------
+/** Compare dotted version strings numerically. */
+function vcmp(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+/** Ask the daemon (versionless /version — accepted by every engine) which API it speaks, and
+ *  clamp ours into [MIN, MAX]. Older daemons (Docker < 24) reject a too-new version prefix on
+ *  EVERY request, so without this step OpusHub would read nothing on them at all.
+ *  Returns { contacted, api } — `contacted: false` means the engine did not answer at all,
+ *  which callers can treat as proof of unreachability without a second request. */
+async function negotiateVersion(ep) {
+  if (negotiating) return negotiating;
+  negotiating = (async () => {
+    try {
+      const { body } = await rawRequest(ep, '/version', 2000);
+      const v = JSON.parse(body.toString('utf8'));
+      const daemon = String(v.ApiVersion || '');
+      if (/^\d+\.\d+$/.test(daemon)) {
+        apiVersion = vcmp(daemon, MAX_API_VERSION) < 0
+          ? (vcmp(daemon, MIN_API_VERSION) >= 0 ? daemon : MIN_API_VERSION)
+          : MAX_API_VERSION;
+      }
+      return { contacted: true, api: apiVersion };
+    } catch {
+      return { contacted: false, api: apiVersion }; // keep the current version
+    } finally { negotiating = null; }
+  })();
+  return negotiating;
+}
+
+/** One request WITHOUT a version prefix (daemon default API) — used for negotiation only. */
+function rawRequest(ep, pathname, timeoutMs = 6000) {
+  return new Promise((resolve, reject) => {
+    const opts = ep.socket ? { socketPath: ep.socket } : { host: ep.host, port: ep.port };
+    const req = http.get({ ...opts, path: pathname, headers: { host: 'docker' } }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks);
+        if (res.statusCode >= 400) return reject(new Error(`docker API ${res.statusCode}: ${body.toString('utf8').slice(0, 200)}`));
+        resolve({ body, contentType: res.headers['content-type'] || '' });
+      });
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('docker request timed out')));
+    req.on('error', reject);
+  });
+}
+
+function request(pathname, { timeoutMs = 6000, retried = false } = {}) {
+  return new Promise((resolve, reject) => {
+    const { ok, ep, reason } = availability();
+    if (!ok) return reject(Object.assign(new Error(reason), { unavailable: true }));
+    const opts = ep.socket ? { socketPath: ep.socket } : { host: ep.host, port: ep.port };
+    const req = http.get({ ...opts, path: `/v${apiVersion}${pathname}`, headers: { host: 'docker' } }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks);
+        if (res.statusCode >= 400) {
+          const text = body.toString('utf8').slice(0, 200);
+          // an engine older than our pinned version refuses EVERY versioned path with a 400 —
+          // negotiate down once and retry, instead of declaring the engine broken
+          if (!retried && res.statusCode === 400 && /client version .* too new/i.test(text)) {
+            return negotiateVersion(ep)
+              .then(() => request(pathname, { timeoutMs, retried: true }))
+              .then(resolve, reject);
+          }
+          return reject(new Error(`docker API ${res.statusCode}: ${text}`));
+        }
+        resolve({ body, contentType: res.headers['content-type'] || '' });
+      });
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('docker request timed out')));
+    req.on('error', reject);
+  });
+}
 
 /** Resolve where the Engine lives. Never throws; callers check `.missing`. */
 export function resolveEndpoint() {
@@ -79,25 +161,6 @@ export function publicStatus(probed) {
   return { ok: false, state, reason: PUBLIC_REASONS[state] || PUBLIC_REASONS.unreachable };
 }
 
-function request(pathname, { timeoutMs = 6000 } = {}) {
-  return new Promise((resolve, reject) => {
-    const { ok, ep, reason } = availability();
-    if (!ok) return reject(Object.assign(new Error(reason), { unavailable: true }));
-    const opts = ep.socket ? { socketPath: ep.socket } : { host: ep.host, port: ep.port };
-    const req = http.get({ ...opts, path: `/${API_VERSION}${pathname}`, headers: { host: 'docker' } }, (res) => {
-      const chunks = [];
-      res.on('data', (c) => chunks.push(c));
-      res.on('end', () => {
-        const body = Buffer.concat(chunks);
-        if (res.statusCode >= 400) return reject(new Error(`docker API ${res.statusCode}: ${body.toString('utf8').slice(0, 200)}`));
-        resolve({ body, contentType: res.headers['content-type'] || '' });
-      });
-    });
-    req.setTimeout(timeoutMs, () => req.destroy(new Error('docker request timed out')));
-    req.on('error', reject);
-  });
-}
-
 async function requestJson(pathname, opts) {
   const { body } = await request(pathname, opts);
   return JSON.parse(body.toString('utf8'));
@@ -107,6 +170,12 @@ export async function probe() {
   const a = availability();
   if (!a.ok) return a;
   try {
+    // versionless first: this both proves the daemon answers AND negotiates the API version.
+    // If it cannot even reach the engine there is nothing else to try — fail fast, honestly.
+    const neg = await negotiateVersion(a.ep);
+    if (!neg.contacted) {
+      return { ok: false, state: 'unreachable', reason: 'socket present but engine unreachable', public: PUBLIC_REASONS.unreachable };
+    }
     const ver = await requestJson('/version', { timeoutMs: 2500 });
     return { ok: true, state: 'connected', version: ver.Version, apiVersion: ver.ApiVersion };
   } catch (err) {
@@ -174,32 +243,67 @@ export async function inspectContainer(ref) {
   for (const [priv, binds] of Object.entries(c.HostConfig?.PortBindings || {})) {
     for (const b of binds || []) ports.push({ private: priv, host: b.HostIp || '0.0.0.0', hostPort: b.HostPort });
   }
+  // EXPOSE (config-declared) ports are informational — NOT reachable from outside the host.
+  // The UI must present them differently from published bindings; never as web endpoints.
+  const exposedPorts = Object.keys(c.Config?.ExposedPorts || {}).map((k) => {
+    const [port, proto = 'tcp'] = String(k).split('/');
+    return { private: Number(port), type: proto };
+  }).filter((p) => Number.isFinite(p.private));
   const nets = Object.entries(c.NetworkSettings?.Networks || {}).map(([name, n]) => ({
     name,
     ip: n.IPAddress,
     gateway: n.Gateway,
-    aliases: n.Aliases || [],
+    aliases: (n.Aliases || []).filter((a) => typeof a === 'string'),
   }));
+  const healthcheck = c.State?.Health ? {
+    status: c.State.Health.Status ?? null,
+    failingStreak: Number.isFinite(c.State.Health.FailingStreak) ? c.State.Health.FailingStreak : null,
+    // Health.Log contents deliberately omitted: probe output is arbitrary app data.
+  } : null;
   return {
     id: String(c.Id).slice(0, 12),
     name: (c.Name || '').replace(/^\//, ''),
     image: c.Config?.Image ?? null,
+    imageId: typeof c.Image === 'string' && c.Image.startsWith('sha256:') ? c.Image.slice(7, 19) : null,
     // entrypoint/env deliberately omitted: env values are secrets, entrypoint is unused by the UI.
     command: redactCommand(Array.isArray(c.Config?.Cmd) ? c.Config.Cmd.join(' ') : (c.Config?.Cmd ?? null)),
     state: {
       status: c.State?.Status, running: !!c.State?.Running, startedAt: c.State?.StartedAt || null,
       finishedAt: c.State?.FinishedAt && !c.State.FinishedAt.startsWith('0001') ? c.State.FinishedAt : null,
       exitCode: c.State?.ExitCode ?? null, health,
+      healthcheck,
       restartCount: c.RestartCount ?? 0,
       oomKilled: !!c.State?.OOMKilled,
     },
     restartPolicy: c.HostConfig?.RestartPolicy?.Name ?? null,
+    logDriver: c.HostConfig?.LogConfig?.Type ?? null,
     labels,
     ports,
+    exposedPorts,
     mounts,
     networks: nets,
     created: c.Created,
   };
+}
+
+/** Image facts, projected safe: no config env, no labels (people put tokens in both).
+ *  Best-effort — callers treat null as “the engine didn’t tell us”. */
+export async function imageInfo(ref) {
+  try {
+    const j = await requestJson(`/images/${encodeURIComponent(ref)}/json`, { timeoutMs: 5000 });
+    const id = typeof j.Id === 'string' && j.Id.startsWith('sha256:') ? j.Id.slice(7, 19) : null;
+    return {
+      id,
+      tags: Array.isArray(j.RepoTags) ? j.RepoTags.slice(0, 8) : [],
+      digests: Array.isArray(j.RepoDigests) ? j.RepoDigests.slice(0, 4) : [],
+      arch: j.Architecture ?? null,
+      os: j.Os ?? null,
+      created: j.Created ?? null,
+      size: Number.isFinite(j.Size) ? j.Size : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function containerStats(ref) {
@@ -222,6 +326,9 @@ export async function containerStats(ref) {
   const blkio = Array.isArray(s.blkio_stats?.io_service_bytes_recursive)
     ? s.blkio_stats.io_service_bytes_recursive.reduce((a, x) => a + (x.value || 0), 0)
     : null;
+  // An all-null sample is not data: stopped containers answer with empty cgroup objects.
+  // Report that as unavailable so the UI says so instead of rendering 0%.
+  if (cpuPct == null && memUsed == null) throw new Error('stats unavailable: engine returned no readable metrics');
   return {
     cpu: cpuPct,
     memory: { used: memUsed, limit },
@@ -357,6 +464,13 @@ export function netAvailable() {
     s.on('timeout', () => { s.destroy(); res(false); });
   }) : Promise.resolve(true);
 }
+
+/** Test helper — the negotiated version is process-global state. */
+export const _internals = {
+  get apiVersion() { return apiVersion; },
+  setApiVersion(v) { apiVersion = v; },
+  MAX_API_VERSION, MIN_API_VERSION, vcmp,
+};
 
 // ---------------------------------------------------------------------------
 // Stack discovery — compose projects vs standalone containers

@@ -213,3 +213,78 @@
 .svc-list > li { border-radius: var(--r-md); }
 .svc-list > li:hover { background: color-mix(in srgb, var(--ink) 3.5%, transparent); }
 
+
+/* ── Phase 3 · service intelligence ─────────────────────────────────────── */
+
+/* health chips on the service header */
+.svc-health { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
+.svc-health--ok { color: var(--ok); }
+.svc-health--bad { color: var(--fail); }
+.svc-health--quiet { color: var(--ink-3); }
+
+.stat .spark { display: block; margin-top: 7px; }
+
+/* stack rollup strip (header of the stack page) */
+.stack-rollup { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: var(--sp-4); }
+.roll-cell { font-size: var(--fs-meta); color: var(--ink-2); white-space: nowrap; }
+.roll-cell b { font-weight: 640; color: var(--ink); }
+.roll-run b { color: var(--ok); }
+.roll-bad b { color: var(--fail); }
+.roll-warn b { color: var(--warn); }
+.roll-stop b { color: var(--ink-3); }
+
+/* log viewer toolbar */
+.logbar { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-5); border-bottom: 1px solid var(--hair); flex-wrap: wrap; }
+.logbar-search {
+  flex: 1 1 170px; min-width: 130px;
+  background: var(--sunken); border: 1px solid var(--hair); border-radius: var(--r-md);
+  padding: 5px 10px; font-size: var(--fs-meta);
+}
+.logbar-search:focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.logbar-select {
+  background: var(--sunken); border: 1px solid var(--hair); border-radius: var(--r-md);
+  padding: 4px 8px; font-size: var(--fs-meta);
+}
+.logbar-chk { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+.drawer-foot { padding: var(--sp-2) var(--sp-5); border-top: 1px solid var(--hair); }
+
+.logbox { tab-size: 4; }
+.logbox.logbox-wrap { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.logbox:not(.logbox-wrap) { white-space: pre; overflow-x: auto; }
+.logline.log-err { color: var(--fail); }
+.logline.log-warn { color: var(--warn); }
+.log-ts { color: var(--ink-3); opacity: 0.85; }
+
+/* provider health table (Settings → System) */
+.prov-table { display: grid; gap: 2px; }
+.prov-row { display: flex; align-items: center; gap: var(--sp-4); padding: 8px 2px; border-top: 1px solid var(--hair); flex-wrap: wrap; }
+.prov-row:first-child { border-top: 0; }
+.prov-name { font-weight: 590; min-width: 84px; }
+
+/* grouped activity rows */
+.tl-group-toggle {
+  display: flex; gap: var(--sp-3); align-items: baseline; flex-wrap: wrap;
+  background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit;
+  cursor: pointer; width: 100%; text-align: left;
+}
+.tl-group-toggle:hover .tl-type { color: var(--accent-ink); }
+.tl-group-body { margin-top: var(--sp-2); padding-left: var(--sp-3); border-left: 2px solid var(--hair); display: grid; gap: 4px; width: 100%; }
+.tl-sub { display: flex; gap: var(--sp-3); align-items: baseline; font-size: var(--fs-meta); flex-wrap: wrap; }
+
+/* responsive: keep detail pages usable when narrow */
+@media (max-width: 720px) {
+  .logbar { padding: var(--sp-2) var(--sp-3); gap: var(--sp-2); }
+  .prov-row { gap: var(--sp-2); }
+  .stack-rollup { gap: 4px 12px; }
+  .detail-block .kv { grid-template-columns: minmax(84px, 120px) minmax(0, 1fr); }
+  .port-row { flex-wrap: wrap; }
+}
+
+/* uptime/state strip — every segment is a witnessed state, gaps are never invented */
+.uptime-strip { display: flex; gap: 2px; height: 10px; margin: 2px 0 var(--sp-4); border-radius: 4px; overflow: hidden; }
+.useg { height: 100%; min-width: 3px; border-radius: 2px; }
+.useg--up { background: var(--ok); opacity: 0.85; }
+.useg--down { background: var(--fail); opacity: 0.8; }
+.useg--unhealthy { background: var(--warn); opacity: 0.9; }
+.useg--unmanaged { background: var(--ink-3); opacity: 0.5; }
+.useg--unknown { background: color-mix(in srgb, var(--ink-3) 25%, transparent); }

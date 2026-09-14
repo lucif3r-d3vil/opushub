@@ -8,7 +8,7 @@ import { useMemo } from 'react';
 import { useSharedQuery, type QueryState } from './api';
 import { useSettings } from './theme';
 import type {
-  ActivityEvent, NewsDoc, ServicesDoc, StacksDoc, SystemSnapshot, WeatherDoc, WidgetDoc, MarketDoc,
+  ActivityEvent, NewsDoc, ProvidersDoc, ServicesDoc, StacksDoc, SystemSnapshot, WeatherDoc, WidgetDoc, MarketDoc,
 } from './types';
 
 export interface BookmarkGroup { name: string; items: { name: string; href: string; description?: string | null }[] }
@@ -24,6 +24,7 @@ export interface HubData {
   news: QueryState<NewsDoc>;
   markets: QueryState<MarketDoc>;
   widgets: QueryState<WidgetDoc>;
+  providers: QueryState<ProvidersDoc>;
 }
 
 export interface HubNeedOptions {
@@ -48,14 +49,17 @@ export function useHubData({ types, activityLimit = 12 }: HubNeedOptions): HubDa
     weather: types.has('weather'),
     news: types.has('news'),
     markets: types.has('markets'),
+    // provider health only matters while the attention widget is actually on screen
+    providers: types.has('attention'),
   }), [types]);
 
   // Optional providers are only polled while something on screen actually shows them.
   const weather = useSharedQuery<WeatherDoc>(wants.weather ? '/api/weather' : null, 15 * 60_000);
   const news = useSharedQuery<NewsDoc>(wants.news ? '/api/news' : null, 10 * 60_000);
   const markets = useSharedQuery<MarketDoc>(wants.markets ? '/api/market' : null, 5 * 60_000);
+  const providers = useSharedQuery<ProvidersDoc>(wants.providers ? '/api/providers' : null, 60_000);
 
-  return { system, services, stacks, activity, bookmarks, weather, news, markets, widgets };
+  return { system, services, stacks, activity, bookmarks, weather, news, markets, widgets, providers };
 }
 
 /** Convenience: the catalogue entry for a type, from whichever doc has loaded. */

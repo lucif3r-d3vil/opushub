@@ -11,10 +11,34 @@ import { getNews } from './providers/news.js';
 import { getWeather, cToF } from './providers/weather.js';
 import { getMarket } from './providers/market.js';
 import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons.js';
-import { logEvent, readEvents } from './activity.js';
+import { logEvent, readEvents, firstEventAt } from './activity.js';
 import { searchAll } from './search.js';
 import { loadEnv } from './env.js';
 import { DATA_DIR } from './configStore.js';
+import { statsWithHistory, statsHistory } from './statsHistory.js';
+import { providerHealthDoc, reportProvider } from './providers/health.js';
+
+/** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
+const imageInfoCache = new Map();
+async function cachedImageInfo(imageRef) {
+  if (!imageRef) return null;
+  const hit = imageInfoCache.get(imageRef);
+  if (hit && Date.now() - hit.at < 5 * 60_000) return hit.value;
+  const value = await docker.imageInfo(imageRef).catch(() => null);
+  if (imageInfoCache.size > 64) imageInfoCache.delete(imageInfoCache.keys().next().value);
+  imageInfoCache.set(imageRef, { at: Date.now(), value });
+  return value;
+}
+
+/** A container reference must be one of ours: a discovered service's container name or id.
+ *  The server builds every Docker request itself — the browser never supplies a Docker path. */
+function resolveServiceContainer(inv, group, name) {
+  const service = model.findService(inv, group, name);
+  if (!service) return null;
+  const ref = service.id || service.container?.name || service.name;
+  if (!/^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,127}$/.test(ref)) return null;
+  return { service, ref };
+}
 
 export const history = new History({ intervalMs: 5000, samples: 720, file: path.join(DATA_DIR, 'metrics.json') });
 
@@ -131,18 +155,20 @@ export async function handleApi(req, res, url) {
     const group = decodeURIComponent(svcMatch[1]);
     const name = decodeURIComponent(svcMatch[2]);
     const inv = await model.getInventory();
-    const service = model.findService(inv, group, name);
-    if (!service) return send(res, 404, { error: `no live container for: ${group}/${name}` });
+    const found = resolveServiceContainer(inv, group, name);
+    if (!found) return send(res, 404, { error: `no live container for: ${group}/${name}` });
+    const { service, ref } = found;
     // full stack projection (same shape as GET /api/stacks) so the UI gets members + status
     const stacksDoc = await model.getStacksDoc();
     const stack = stacksDoc.stacks.find((s) => s.id === service.stack)
       || stacksDoc.stacks.find((s) => s.members.some((m) => m.containerName === service.name)) || null;
     let container = null, containerStats = null;
-    const ref = service.id || service.container?.name;
-    if (ref && docker.availability().ok) {
+    if (docker.availability().ok) {
       try {
         container = await docker.inspectContainer(ref);
-        containerStats = await docker.containerStats(ref).catch(() => null);
+        // stats flow through the shared sampler: one Docker call per interval no matter how
+        // many UI elements are showing this service, and every fetch grows its sparkline history
+        containerStats = await statsWithHistory(ref);
       } catch { /* keep partial */ }
     }
     // inspect is the only place health and restartCount exist — surface them on the record
@@ -159,9 +185,64 @@ export async function handleApi(req, res, url) {
     } : service;
     return send(res, 200, {
       service: enriched, stack, container, containerStats,
+      image: container ? await cachedImageInfo(container.image || service.container.image) : null,
       dockerAvailable: docker.availability().ok,
       url: service.url, urlSource: service.urlSource, urlNote: service.urlNote ?? null,
     });
+  }
+
+  // ---------- per-service read-only detail: stats, history, logs ----------
+  // Generic routes keyed by the same stable service id as the page (`:group/:name`); there is
+  // deliberately no /api/jellyfin — every application is addressed through the one model.
+  const svcSub = p.match(/^\/api\/services\/([^/]+)\/([^/]+)\/(stats|stats\/history|logs|history)$/);
+  if (method === 'GET' && svcSub) {
+    const group = decodeURIComponent(svcSub[1]);
+    const name = decodeURIComponent(svcSub[2]);
+    const what = svcSub[3];
+    const inv = await model.getInventory();
+    const found = resolveServiceContainer(inv, group, name);
+    if (!found) return send(res, 404, { error: `no live container for: ${group}/${name}` });
+    const { service, ref } = found;
+
+    if (what === 'stats') {
+      if (!docker.availability().ok) return send(res, 200, { status: 'unavailable', stats: null });
+      const stats = await statsWithHistory(ref);
+      return send(res, 200, { status: stats ? 'ok' : 'unavailable', stats, at: Date.now() });
+    }
+
+    if (what === 'stats/history') {
+      const win = Math.min(30 * 60_000, Math.max(60_000, Number(url.searchParams.get('window')) || 30 * 60_000));
+      return send(res, 200, { service: service.name, ...statsHistory(ref, { windowMs: win }) });
+    }
+
+    if (what === 'logs') {
+      const a = docker.availability();
+      if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.public, lines: [] });
+      const tail = Math.min(500, Math.max(1, Number(url.searchParams.get('tail')) || 150));
+      const timestamps = url.searchParams.get('timestamps') === '1' || url.searchParams.get('timestamps') === 'true';
+      try {
+        return send(res, 200, { status: 'ok', lines: await docker.logs(ref, { tail, timestamps }) });
+      } catch (err) {
+        if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] logs failed: ${err.message}`);
+        const missing = /404|no such container/i.test(String(err.message));
+        return send(res, 200, { status: 'error', reason: missing ? 'No such container (it may have been removed).' : 'Could not read container logs.', lines: [] });
+      }
+    }
+
+    if (what === 'history') {
+      // Real events OpusHub witnessed for this container. The log starts when OpusHub boots —
+      // the UI distinguishes “no historical data yet” from “nothing happened”.
+      const all = readEvents({ limit: 500 });
+      const subjects = new Set([service.name, ref, service.displayName]);
+      const events = all.items.filter((e) => e.source === 'docker' && e.subject && subjects.has(e.subject)).slice(0, 30);
+      const limit = Math.min(30, Math.max(1, Number(url.searchParams.get('limit')) || 12));
+      return send(res, 200, {
+        service: service.name,
+        events: events.slice(0, limit),
+        watchingSince: firstEventAt(), // null → the log is empty: no history EXISTS yet
+        logStarted: firstEventAt(),
+      });
+    }
   }
   if (method === 'POST' && svcMatch) {
     // user launched a service externally — a real event worth logging
@@ -206,6 +287,7 @@ export async function handleApi(req, res, url) {
   // ---------- system ----------
   if (route === 'GET /api/system') {
     const s = await collectSystem();
+    reportProvider('system', 'available', { silent: true });
     return send(res, 200, s);
   }
   if (route === 'GET /api/system/history') {
@@ -247,6 +329,14 @@ export async function handleApi(req, res, url) {
     if (!/^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,127}$/.test(ref)) {
       return send(res, 200, { status: 'error', reason: 'invalid container reference', lines: [] });
     }
+    // The reference must be one of OURS: a container discovery actually saw. Without this check
+    // the route would read logs for any container on the host by name — including ones OpusHub
+    // has no business pointing at. Same rule as every other container-scoped route.
+    const inv = await model.getInventory();
+    const known = inv.services.some((s) => s.name === ref || s.id === ref || s.container?.name === ref);
+    if (!known) {
+      return send(res, 200, { status: 'error', reason: 'Unknown container — logs are only served for containers OpusHub discovered.', lines: [] });
+    }
     try { return send(res, 200, { status: 'ok', lines: await docker.logs(ref, { tail, timestamps }) }); }
     catch (err) {
       if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] logs failed: ${err.message}`);
@@ -260,6 +350,9 @@ export async function handleApi(req, res, url) {
     const s = model.getSettings();
     const r = await getNews(s.integrations?.news?.feeds || [], { limit: Number(url.searchParams.get('limit')) || 40 });
     lastNews = r;
+    reportProvider('news', r.status === 'ok' ? 'available' : r.status === 'partial' ? 'degraded' : 'unavailable', {
+      reason: r.status === 'unconfigured' ? 'No news feeds configured.' : r.reason || null, silent: r.status === 'unconfigured',
+    });
     return send(res, 200, r);
   }
   if (route === 'GET /api/weather') {
@@ -272,11 +365,18 @@ export async function handleApi(req, res, url) {
       for (const f of r.forecast) { f.highC = cToF(f.highC); f.lowC = cToF(f.lowC); }
       r.units = 'f';
     }
+    reportProvider('weather', r.status === 'ok' ? 'available' : 'unavailable', {
+      reason: r.status === 'unconfigured' ? 'No weather location configured.' : r.reason || null, silent: r.status === 'unconfigured',
+    });
     return send(res, 200, r);
   }
   if (route === 'GET /api/market') {
     const s = model.getSettings();
-    return send(res, 200, await getMarket(s.integrations?.markets?.symbols || []));
+    const r = await getMarket(s.integrations?.markets?.symbols || []);
+    reportProvider('markets', r.status === 'ok' ? 'available' : 'unavailable', {
+      reason: r.status === 'unconfigured' ? 'No market symbols configured.' : r.reason || null, silent: r.status === 'unconfigured',
+    });
+    return send(res, 200, r);
   }
 
   // ---------- activity ----------
@@ -284,7 +384,13 @@ export async function handleApi(req, res, url) {
     const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 100));
     const source = url.searchParams.get('source') || null;
     const before = Number(url.searchParams.get('before')) || null;
-    return send(res, 200, readEvents({ limit, source, before }));
+    const grouped = url.searchParams.get('grouped') === '1' || url.searchParams.get('grouped') === 'true';
+    return send(res, 200, { ...readEvents({ limit, source, before, grouped }), watchingSince: firstEventAt() });
+  }
+
+  // ---------- provider health ----------
+  if (route === 'GET /api/providers') {
+    return send(res, 200, providerHealthDoc());
   }
 
   // ---------- search ----------

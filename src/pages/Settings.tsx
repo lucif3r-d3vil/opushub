@@ -4,12 +4,12 @@ import { api, invalidateShared, post, put, usePolled, useSave } from '../lib/api
 import { relTime } from '../lib/format';
 import { useLayout, useSettings, type DeepPartial } from '../lib/theme';
 import type {
-  DiscoveryDoc, HealthDoc, LayoutDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
+  DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
   TemplatesDoc, WidgetCatalogueEntry, WidgetDoc, WidgetInstance, WidgetZone,
 } from '../lib/types';
 import { Icon } from '../components/Icon';
 import { IconPickerModal } from '../components/IconPicker';
-import { Menu, type MenuItem, Modal, PageHero, ProviderNote, Segmented, Switch } from '../components/ui';
+import { Menu, type MenuItem, Modal, PageHero, ProviderNote, Segmented, StatusLine, Switch } from '../components/ui';
 import { Sortable } from '../components/Sortable';
 import { HubPreview } from '../components/hub/HubPreview';
 import {
@@ -1177,8 +1177,35 @@ function SystemTab() {
         <Row label="Runtime" tight><span className="mono-meta">OpusHub {health?.version || '0.1'} · node {health?.node || '…'} · {health?.platform || ''}</span></Row>
       </Block>
 
+      <ProvidersBlock />
       <DiscoveryBlock health={health} />
     </>
+  );
+}
+
+/** Provider health — one quiet table, technical detail behind disclosure. The Hub itself is
+ *  never dominated by this; it lives here for the moment something stops answering. */
+function ProvidersBlock() {
+  const { data } = usePolled<ProvidersDoc>('/api/providers', 30_000);
+  if (!data) return <Block title="Providers"><p className="stale-note">Checking providers…</p></Block>;
+  const word = (s: string) => s === 'available' ? 'Available' : s === 'degraded' ? 'Degraded' : s === 'idle' ? 'Idle' : 'Unavailable';
+  return (
+    <Block title="Providers" aside={<span className="stale-note">checked {relTime(data.at)}</span>}>
+      <div className="prov-table" role="table" aria-label="Provider health">
+        {data.providers.map((p) => (
+          <div className="prov-row" role="row" key={p.name}>
+            <span role="cell" className="prov-name">{p.name[0].toUpperCase() + p.name.slice(1)}</span>
+            <span role="cell"><StatusLine state={p.state} note={word(p.state)} /></span>
+            <span role="cell" className="stale-note">
+              {p.lastOk ? `last success ${relTime(p.lastOk)}` : 'never succeeded'}
+            </span>
+            {p.reason && (
+              <details className="tech" role="cell"><summary>Why</summary><code>{p.reason}</code></details>
+            )}
+          </div>
+        ))}
+      </div>
+    </Block>
   );
 }
 

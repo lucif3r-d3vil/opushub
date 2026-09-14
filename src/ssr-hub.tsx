@@ -12,10 +12,10 @@
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import type { LayoutDoc, NewsDoc, ServicesDoc, WeatherDoc, WidgetInstance } from './lib/types';
+import type { LayoutDoc, NewsDoc, ServicesDoc, StacksDoc, WeatherDoc, WidgetInstance } from './lib/types';
 import type { HubData } from './lib/hubData';
 import {
-  activityDoc, bookmarksDoc, catalogue, layoutWith, marketDoc, newsDoc, servicesDoc, stacksDoc,
+  activityDoc, bookmarksDoc, catalogue, layoutWith, marketDoc, newsDoc, providersDoc, servicesDoc, stacksDoc,
   systemSnapshot, weatherDoc,
 } from './ssr-fixtures';
 import { HubSurface } from './components/hub/HubSurface';
@@ -48,6 +48,7 @@ function hubData(overrides: Partial<HubData> = {}): HubData {
     news: query(newsDoc),
     markets: query(marketDoc),
     widgets: query({ catalogue, widgets: [], spacing: 'comfortable' }),
+    providers: query(providersDoc),
     ...overrides,
   } as HubData;
 }
@@ -211,6 +212,46 @@ const W = (type: string, extra: Partial<WidgetInstance> = {}): WidgetInstance =>
   );
   check('loading: quiet, layout-stable placeholders', html, ['Reading', 'Sampling']);
   if (html.includes('skeleton')) { failures++; console.error('✗ skeleton grids are not part of this design'); }
+}
+
+// 10. Phase 3: the stacks widget shows compact real state, not just names
+{
+  const doc: StacksDoc = {
+    ...stacksDoc,
+    stacks: [{
+      ...stacksDoc.stacks[0],
+      status: 'degraded', containerCount: 7, runningCount: 5,
+      unhealthyCount: 1, stoppedCount: 1, attentionCount: 1,
+    }],
+  };
+  const layout = layoutWith([W('stacks')]);
+  const html = render(<HubSurface data={hubData({ stacks: query(doc) })} layout={layout} interactive={false} />);
+  check('stacks rollup: container counts and the bits that need attention', html, ['7 containers', '5 running', '1 unhealthy', '1 attention']);
+}
+
+// 11. Phase 3: attention surfaces real problems — and only those
+{
+  const base = (servicesDoc.services || [])[0];
+  const down = { ...base, name: 'downsvc', displayName: 'DownSvc', status: 'down', url: null };
+  const paused = { ...base, name: 'pausvc', displayName: 'PauSvc', status: 'paused', url: null };
+  const healthy = base; // status: 'up'
+  const doc: ServicesDoc = { ...servicesDoc, groups: [], services: [down, paused, healthy] };
+  const provs: import('./lib/types').ProvidersDoc = {
+    at: Date.now(),
+    providers: [
+      { name: 'docker', state: 'available', lastOk: Date.now(), lastTry: Date.now(), staleMs: 0, reason: null },
+      { name: 'system', state: 'available', lastOk: Date.now(), lastTry: Date.now(), staleMs: 0, reason: null },
+      { name: 'news', state: 'unavailable', lastOk: null, lastTry: Date.now(), staleMs: null, reason: 'feeds unreachable' },
+      { name: 'weather', state: 'idle', lastOk: null, lastTry: null, staleMs: null, reason: null },
+      { name: 'markets', state: 'idle', lastOk: null, lastTry: null, staleMs: null, reason: null },
+    ],
+  };
+  const layout = layoutWith([W('attention')]);
+  const html = render(<HubSurface data={hubData({ services: query(doc as ServicesDoc), providers: query(provs) })} layout={layout} interactive={false} />);
+  check('attention: stopped and paused services are surfaced', html, ['DownSvc', 'Offline', 'PauSvc', 'Paused']);
+  check('attention: a failed provider is surfaced too', html, ['News provider', 'unavailable', 'feeds unreachable']);
+  if (visibleText(html).includes('Wave')) { failures++; console.error('✗ a healthy service must not demand attention'); }
+  else console.log('✓ attention: healthy services stay off the list');
 }
 
 if (failures) {

@@ -62,6 +62,7 @@ async function main() {
     system: q(system), services: q(services), stacks: q(stacks),
     activity: q(activity as never), bookmarks: q(bookmarks), widgets: q(widgets),
     weather: q(weather), news: q(news), markets: q(markets),
+    providers: q(null),
   } as HubData;
 
   let html = '';

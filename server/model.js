@@ -579,7 +579,9 @@ export async function getStacksDoc() {
       id: s.id, project: s.project, name: s.name, displayName: s.displayName,
       description: s.description, icon: s.icon, notes: s.notes, compose: s.compose,
       source: s.source, configured: s.configured, status: s.status, statusReason: null,
-      containerCount: s.containerCount, runningCount: s.runningCount, services: s.services, members: s.members,
+      containerCount: s.containerCount, runningCount: s.runningCount,
+      unhealthyCount: s.unhealthyCount || 0, stoppedCount: s.stoppedCount || 0, attentionCount: s.attentionCount || 0,
+      services: s.services, members: s.members,
     })),
     live: inv.live,
     statusReason: inv.statusReason,
@@ -611,13 +613,19 @@ export async function enrichStackMembers(stack) {
   }));
 }
 
-/** Status of a stack given its member container states (kept as a helper for tests/callers). */
+/** Status of a stack given its member container states (helper for tests/callers).
+ *  Mirrors the documented model in discovery.js `stackStatusOf` exactly:
+ *  unavailable > unlinked > unknown > { operational | degraded | stopped | attention }. */
 export function stackStatus(memberContainers, live) {
   if (!live) return 'unavailable';
   if (!memberContainers.length) return 'unlinked';
   const states = memberContainers.map((c) => c?.state ?? null);
-  if (states.every((s) => s === 'running')) return states.some((s) => s == null) ? 'degraded' : 'operational';
-  if (states.some((s) => s === 'running')) return 'degraded';
-  if (states.every((s) => s == null)) return 'unlinked';
-  return 'attention';
+  if (states.some((s) => s == null)) return 'unknown';
+  const running = states.filter((s) => s === 'running');
+  if (running.length === states.length) {
+    const unhealthy = memberContainers.some((c) => c?.state === 'running' && c?.health === 'unhealthy');
+    return unhealthy ? 'degraded' : 'operational';
+  }
+  if (running.length === 0) return states.every((s) => s === 'exited') ? 'stopped' : 'attention';
+  return 'degraded';
 }

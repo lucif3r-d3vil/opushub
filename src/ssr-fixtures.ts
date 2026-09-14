@@ -5,7 +5,7 @@
 // to. They are never imported by the application, never served, and contain no measurement
 // presented as real: every value is obviously a fixture.
 import type {
-  ActivityEvent, LayoutDoc, NewsDoc, ServicesDoc, StacksDoc, SystemSnapshot, WeatherDoc, WidgetCatalogueEntry, WidgetInstance,
+  ActivityEvent, LayoutDoc, NewsDoc, ProvidersDoc, ServicesDoc, StacksDoc, SystemSnapshot, WeatherDoc, WidgetCatalogueEntry, WidgetInstance,
 } from './lib/types';
 import type { BookmarkDoc, HubData } from './lib/hubData';
 
@@ -145,6 +145,17 @@ export const newsDoc: NewsDoc = {
 export const marketDoc = {
   status: 'ok' as const,
   items: [{ symbol: 'AAPL', status: 'ok', price: 231.4, change: 1.2, changePct: 0.52, spark: [1, 2, 3, 2.6, 3.4] }],
+};
+
+export const providersDoc: ProvidersDoc = {
+  at: Date.now(),
+  providers: [
+    { name: 'docker', state: 'available' as const, lastOk: Date.now() - 5000, lastTry: Date.now() - 5000, staleMs: 5000, reason: null },
+    { name: 'system', state: 'available' as const, lastOk: Date.now() - 5000, lastTry: Date.now() - 5000, staleMs: 5000, reason: null },
+    { name: 'news', state: 'available' as const, lastOk: Date.now() - 60_000, lastTry: Date.now() - 60_000, staleMs: 60_000, reason: null },
+    { name: 'weather', state: 'idle' as const, lastOk: null, lastTry: null, staleMs: null, reason: null },
+    { name: 'markets', state: 'idle' as const, lastOk: null, lastTry: null, staleMs: null, reason: null },
+  ],
 };
 
 /** Mirrors server/widgets.js for the harness (test/layout.test.js owns the real catalogue). */

@@ -6,6 +6,7 @@ import { APP_ROOT, loadEnv, resolveConfigDir } from './env.js';
 import { handleApi, markBoot, history } from './api.js';
 import { logEvent } from './activity.js';
 import * as docker from './providers/docker.js';
+import { reportProvider } from './providers/health.js';
 import { DATA_DIR, CONFIG_DIR } from './configStore.js';
 
 // ---- 1. environment & config discovery (first thing, always) ----
@@ -132,28 +133,79 @@ const server = http.createServer(async (req, res) => {
 });
 
 // ---- background loops: metric history + docker state watcher ----
-history.start(async () => (await import('./providers/system.js')).collect());
+// The watcher only REPORTS transitions it observes between two polls — it never writes to
+// Docker. Events carry stable signatures so a flapping container produces one event per real
+// transition, and compose-wide deployments group on the Activity page (see activity.js).
+history.start(async () => {
+  try {
+    const s = await (await import('./providers/system.js')).collect();
+    reportProvider('system', 'available', { silent: true });
+    return s;
+  } catch (err) {
+    reportProvider('system', 'unavailable', { reason: 'Host metrics are unreadable right now.' });
+    throw err;
+  }
+});
+// seed the registry once at boot (silently — the first successful contact is not an event).
+// A socket file that exists is NOT proof the daemon answers: when the path looks healthy we
+// probe before claiming "available", so provider health can never say healthy off stale data.
+{
+  const a = docker.availability();
+  if (!a.ok) {
+    reportProvider('docker', 'unavailable', { reason: a.public, silent: true });
+  } else {
+    void docker.probe().then((p) => {
+      reportProvider('docker', p.ok ? 'available' : 'unavailable', { reason: p.ok ? null : p.public, silent: true });
+    });
+  }
+}
 
-let lastDockerSnapshot = null;
+const HEALTH_IN_STATUS = /\((healthy|unhealthy|starting)\)\s*$/i;
+let lastDockerSnapshot = null; // id → { state, health, project }
+let lastProjects = null;       // Set<project>
 let lastDockerErr = null;
+
 async function dockerWatcher() {
   const a = docker.availability();
   if (!a.ok) return;
   try {
     const containers = await docker.listContainers({ all: true });
-    const snap = new Map(containers.map((c) => [c.id, `${c.state}:${c.status}`]));
+    const snap = new Map();
+    const projects = new Set();
+    for (const c of containers) {
+      const health = c.health || (HEALTH_IN_STATUS.exec(c.status || '') || [])[1]?.toLowerCase() || null;
+      snap.set(c.id, { state: c.state, health, project: c.labels?.project || null, name: c.name, status: c.status });
+      if (c.labels?.project) projects.add(c.labels.project);
+    }
     if (lastDockerSnapshot) {
-      for (const [id, st] of snap) {
+      for (const [id, cur] of snap) {
         const prev = lastDockerSnapshot.get(id);
-        const c = containers.find((x) => x.id === id);
-        if (prev && prev !== st) logEvent({ source: 'docker', type: c.state === 'running' ? 'container.started' : c.state === 'exited' ? 'container.exited' : 'container.state', subject: c.name, message: `${c.state} · ${c.status}` });
-        if (!prev) logEvent({ source: 'docker', type: 'container.discovered', subject: c.name, message: c.status });
+        if (!prev) {
+          logEvent({ source: 'docker', type: 'container.discovered', subject: cur.name, message: cur.status, meta: { project: cur.project }, signature: `container.discovered:${id}:${cur.state}` });
+          continue;
+        }
+        if (prev.state === cur.state && prev.health === cur.health) continue;
+        const meta = { project: cur.project, state: cur.state, health: cur.health };
+        if (prev.state !== cur.state) {
+          const type = cur.state === 'running' ? 'container.started' : cur.state === 'exited' ? 'container.exited' : 'container.state';
+          logEvent({ source: 'docker', type, subject: cur.name, message: `${cur.state} · ${cur.status}`, meta, signature: `${type}:${id}:${cur.state}` });
+        }
+        if (prev.state === cur.state && prev.health !== cur.health && cur.health) {
+          // health moved while the state held — its own fact (became unhealthy / recovered)
+          logEvent({ source: 'docker', type: 'container.health', subject: cur.name, message: `health: ${cur.health}`, meta, signature: `container.health:${id}:${cur.health}` });
+        }
       }
-      for (const [id] of lastDockerSnapshot) {
-        if (!snap.has(id)) logEvent({ source: 'docker', type: 'container.removed', subject: id, message: 'no longer listed' });
+      for (const [id, prev] of lastDockerSnapshot) {
+        if (!snap.has(id)) logEvent({ source: 'docker', type: 'container.removed', subject: prev.name || id, message: 'no longer listed', meta: { project: prev.project }, signature: `container.removed:${id}` });
+      }
+      // whole-project changes read as stack events, not N container events
+      if (lastProjects) {
+        for (const p of projects) if (!lastProjects.has(p)) logEvent({ source: 'docker', type: 'stack.appeared', subject: p, message: `compose project “${p}” is now on the engine`, signature: `stack.appeared:${p}` });
+        for (const p of lastProjects) if (!projects.has(p)) logEvent({ source: 'docker', type: 'stack.removed', subject: p, message: `compose project “${p}” is no longer on the engine`, signature: `stack.removed:${p}` });
       }
     }
     lastDockerSnapshot = snap;
+    lastProjects = projects;
   } catch (err) {
     const msg = String(err.message || err);
     if (msg !== lastDockerErr) {
@@ -164,13 +216,15 @@ async function dockerWatcher() {
 }
 setInterval(dockerWatcher, 30_000).unref();
 
+// Docker reachability goes through the provider registry: one honest state, transitions logged
+// exactly once, and the System pane can say when it last worked.
 const providerWatcher = setInterval(async () => {
   const a = docker.availability();
-  const now = a.ok ? 'ok' : 'unavailable';
-  if (providerWatcher.last !== now) {
-    const prev = providerWatcher.last;
-    providerWatcher.last = now;
-    if (prev !== undefined) logEvent({ source: 'system', type: `docker.${now}`, subject: 'docker', message: a.ok ? 'Docker engine reachable' : a.reason });
+  if (a.ok) {
+    try { await docker.probe(); reportProvider('docker', 'available'); }
+    catch { reportProvider('docker', 'unavailable', { reason: 'Docker engine is not responding.' }); }
+  } else {
+    reportProvider('docker', 'unavailable', { reason: a.public });
   }
 }, 60_000);
 providerWatcher.unref();
