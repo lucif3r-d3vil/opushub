@@ -196,6 +196,70 @@ export async function handleApi(req, res, url) {
     return send(res, 200, { ok: true, authenticated: false });
   }
 
+  // ---------- account maintenance (authenticated, same-origin) ----------
+  // The audit surface: what is signed in, and the one credential change there is. Both are
+  // session-scoped — an admin can only ever see and revoke *their own* sessions, and the password
+  // route requires the current password even though a session is already held, so a borrowed
+  // browser cannot lock the owner out. Session ids here are derived handles (see auth.sessionHandle):
+  // the bearer token itself is never serialized, by any route, ever.
+  if (route === 'GET /api/auth/sessions') {
+    const rows = auth.listSessions(activeToken);
+    return send(res, 200, {
+      sessions: rows,
+      count: rows.length,
+      current: rows.find((s) => s.current) || null,
+      limits: { absoluteMs: auth.SESSION_TTL_MS, idleMs: auth.SESSION_IDLE_MS, max: 50 },
+    });
+  }
+  if (route === 'POST /api/auth/sessions/revoke') {
+    const body = await jsonBody();
+    const scope = String(body?.scope || '');
+    if (scope === 'others') {
+      if (!session) return send(res, 401, { error: 'Authentication required.', code: 'auth_required' });
+      const revoked = auth.revokeSessions({ except: activeToken });
+      logEvent({ source: 'system', type: 'auth.sessions_revoked', subject: session.username, message: `revoked ${revoked} other session(s)` });
+      return send(res, 200, { ok: true, revoked, signedOut: false });
+    }
+    if (scope === 'all') {
+      const username = session?.username ?? auth.getUser()?.username ?? 'admin';
+      const revoked = auth.revokeSessions();
+      res.setHeader('set-cookie', auth.clearedCookie());
+      logEvent({ source: 'system', type: 'auth.sessions_revoked', subject: username, message: `signed out everywhere (${revoked} session(s))` });
+      return send(res, 200, { ok: true, revoked, signedOut: true });
+    }
+    if (scope === 'one') {
+      const handle = String(body?.id || '');
+      if (!handle) return send(res, 400, { error: 'A session id is required.', code: 'session_id' });
+      const revoked = auth.revokeSessions({ handles: [handle] });
+      // revoking your own session is a sign-out, and must clear the cookie with it
+      const isCurrent = handle === auth.sessionHandle(activeToken);
+      if (isCurrent) res.setHeader('set-cookie', auth.clearedCookie());
+      logEvent({ source: 'system', type: 'auth.sessions_revoked', subject: session?.username ?? 'admin', message: `revoked 1 session` });
+      return send(res, 200, { ok: true, revoked, signedOut: isCurrent });
+    }
+    return send(res, 400, { error: 'scope must be one of: others, all, one.', code: 'scope' });
+  }
+  if (route === 'POST /api/auth/password') {
+    const body = await jsonBody();
+    if (!session) return send(res, 401, { error: 'Authentication required.', code: 'auth_required' });
+    const ip = clientIp(req);
+    const result = await auth.changePassword({
+      currentPassword: body?.currentPassword,
+      newPassword: body?.newPassword,
+      token: activeToken,
+      ip,
+    });
+    if (!result.ok) {
+      // Never log either password — only the fact that the attempt failed, and for whom.
+      logEvent({ source: 'system', type: 'auth.password_failed', subject: session.username, message: result.status === 401 ? 'current password incorrect' : 'refused by policy' });
+      return send(res, result.status, { error: result.error, code: result.status === 401 ? 'invalid_password' : 'password_policy' });
+    }
+    // Rotate the cookie exactly like a login: the presented id is retired by changePassword.
+    res.setHeader('set-cookie', auth.sessionCookie(result.token, { maxAgeMs: result.expiresAt - Date.now(), secure }));
+    logEvent({ source: 'system', type: 'auth.password_changed', subject: session.username, message: `password changed; ${result.revoked} other session(s) revoked` });
+    return send(res, 200, { ok: true, user: result.user, revoked: result.revoked, authenticated: true });
+  }
+
   // ---------- health & meta ----------
   // Public on purpose: this is what the container healthcheck calls, and what a load balancer
   // needs. Unauthenticated callers get liveness only — no paths, no provider internals.
@@ -203,7 +267,9 @@ export async function handleApi(req, res, url) {
     if (!session) {
       const setupState = auth.getSetupState();
       return send(res, 200, {
-        name: 'OpusHub', version: '0.1.0', ok: true,
+        // The configured name (settings.yaml → app.name) is presentation, not a secret: the login
+        // screen and the tab title use it, and both render before a session exists.
+        name: appName(), version: '0.1.0', ok: true,
         setup: { required: setupState.required, complete: setupState.complete },
         authenticated: false,
         note: 'Sign in for provider detail.',
@@ -212,7 +278,7 @@ export async function handleApi(req, res, url) {
     const env = loadEnv(CONFIG_DIR);
     const dockerProv = await dockerAvailabilityCached();
     return send(res, 200, {
-      name: 'OpusHub',
+      name: appName(),
       version: '0.1.0',
       node: process.version,
       platform: `${process.platform}/${process.arch}`,
@@ -598,6 +664,15 @@ export async function handleApi(req, res, url) {
   }
 
   notFound();
+}
+
+/** What this install calls itself. Falls back to the product name if settings.yaml has no app.name
+ *  (or cannot be read) — never an empty string in a response. */
+function appName() {
+  try {
+    const v = model.getSettings()?.app?.name;
+    return typeof v === 'string' && v.trim() ? v.trim().slice(0, 80) : 'OpusHub';
+  } catch { return 'OpusHub'; }
 }
 
 function hashOf(body) {

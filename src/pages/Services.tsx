@@ -85,7 +85,7 @@ export default function ServicesPage() {
         <ProviderNote
           status="unavailable"
           reason={data?.statusReason || 'Docker is not connected, so OpusHub has no inventory to show. Services are discovered from the engine — nothing is listed from config alone.'}
-          fixHref="/settings/system"
+          fixHref="/settings/environment"
           fixLabel="Check the connection →"
         />
       )}
@@ -93,7 +93,7 @@ export default function ServicesPage() {
         <ProviderNote
           status="unconfigured"
           reason="No containers with a web endpoint on this engine yet. Discovery is live — the moment a container appears it shows up here, with no configuration needed."
-          fixHref="/settings/system"
+          fixHref="/settings/environment"
           fixLabel="See discovery status →"
         />
       )}

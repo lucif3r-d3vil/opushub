@@ -236,6 +236,14 @@ input[type='range'] { accent-color: var(--accent); width: 180px; }
 /* settings layout */
 .settings-grid { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: var(--sp-12); align-items: start; }
 .settings-nav { display: flex; flex-direction: column; gap: 1px; position: sticky; top: var(--sp-8); }
+/* The nav is grouped by section: one quiet uppercase label, then its panes. Structure comes from
+   the label and the spacing — no boxes, no rules between nine short lists. */
+.settings-nav-group { display: flex; flex-direction: column; gap: 1px; }
+.settings-nav-group + .settings-nav-group { margin-top: var(--sp-4); }
+.settings-nav-label {
+  font-size: 10.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3); padding: 0 10px 4px;
+}
 .settings-nav a { padding: 7px 10px; border-radius: var(--r-sm); color: var(--ink-2); font-size: var(--fs-body); }
 .settings-nav a:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink); }
 .settings-nav a.active { color: var(--ink); font-weight: 590; background: color-mix(in srgb, var(--ink) 8%, transparent); }
@@ -258,7 +266,18 @@ input[type='range'] { accent-color: var(--accent); width: 180px; }
   .settings-nav { position: static; flex-direction: row; overflow: auto; padding-bottom: 6px; scrollbar-width: none; }
   .settings-nav::-webkit-scrollbar { display: none; }
   .settings-nav a { white-space: nowrap; }
+  /* one horizontal strip on a phone: the section labels would cost more width than they explain */
+  .settings-nav-group { flex-direction: row; }
+  .settings-nav-group + .settings-nav-group { margin-top: 0; }
+  .settings-nav-label { display: none; }
 }
+
+/* signed-in sessions (Settings → Authentication): a hairline row, not a card */
+.session-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5);
+  padding: 12px 0; border-top: 1px solid var(--hair);
+}
+.session-head { font-weight: 570; display: flex; align-items: center; gap: 8px; }
 
 /* timeline */
 .timeline { position: relative; padding-left: 34px; }

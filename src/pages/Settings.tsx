@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, invalidateShared, post, put, usePolled, useSave } from '../lib/api';
 import { relTime } from '../lib/format';
 import { useLayout, useSettings, type DeepPartial } from '../lib/theme';
+import { useAuth } from '../lib/auth';
 import type {
   DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
   TemplatesDoc, WidgetCatalogueEntry, WidgetDoc, WidgetInstance, WidgetZone,
@@ -22,25 +23,43 @@ import {
   saveOverlay, setGroupDescription, setIcon, type DraftGroup, type DraftService,
 } from '../lib/overlay';
 
+/**
+ * The settings map. `section` is what the nav groups by — the ten surfaces this app actually has,
+ * in the order they matter: who you are, how it looks, what it shows, how you get in, what it is
+ * connected to, and the escape hatch.
+ *
+ * The panes themselves are unchanged by the grouping (nothing was rebuilt, only filed): every
+ * route that existed before still exists at the same URL, so old bookmarks and the command palette
+ * keep working. `system` is kept as an alias of `environment`, which is what it always described.
+ */
 const TABS = [
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'background', label: 'Background' },
-  { id: 'hub', label: 'Hub layout' },
-  { id: 'widgets', label: 'Widgets' },
-  { id: 'templates', label: 'Templates' },
-  { id: 'services', label: 'Services' },
-  { id: 'groups', label: 'Groups' },
-  { id: 'bookmarks', label: 'Bookmarks' },
-  { id: 'integrations', label: 'Integrations' },
-  { id: 'system', label: 'System' },
-  { id: 'advanced', label: 'Advanced' },
+  { id: 'general', label: 'General', section: 'General' },
+  { id: 'appearance', label: 'Appearance', section: 'Appearance' },
+  { id: 'background', label: 'Background', section: 'Appearance' },
+  { id: 'services', label: 'Services', section: 'Services' },
+  { id: 'groups', label: 'Groups', section: 'Groups' },
+  { id: 'bookmarks', label: 'Bookmarks', section: 'Bookmarks' },
+  { id: 'widgets', label: 'Widgets', section: 'Widgets' },
+  { id: 'hub', label: 'Hub layout', section: 'Widgets' },
+  { id: 'templates', label: 'Templates', section: 'Widgets' },
+  { id: 'integrations', label: 'Integrations', section: 'Integrations' },
+  { id: 'authentication', label: 'Account & sessions', section: 'Authentication' },
+  { id: 'environment', label: 'Environment', section: 'Environment' },
+  { id: 'advanced', label: 'Advanced', section: 'Advanced' },
 ];
+
+/** Old route → current route. Nothing that worked before may 404 now. */
+const TAB_ALIAS: Record<string, string> = { system: 'environment' };
 
 /** Tabs where seeing the result is the point. */
 const PREVIEW_TABS = new Set(['appearance', 'background', 'hub', 'widgets', 'templates']);
 
+const SECTIONS = [...new Set(TABS.map((t) => t.section))];
+
 export default function SettingsPage() {
-  const { tab = 'appearance' } = useParams();
+  const params = useParams();
+  const raw = params.tab ?? 'general';
+  const tab = TAB_ALIAS[raw] ?? raw;
   const nav = useNavigate();
   const [previewTemplate, setPreviewTemplate] = useState<TemplateEntry | null>(null);
   const { layout } = useLayout();
@@ -54,8 +73,13 @@ export default function SettingsPage() {
       />
       <div className={`settings-grid${showPreview ? ' settings-grid--preview' : ''}`}>
         <nav className="settings-nav" aria-label="Settings sections">
-          {TABS.map((t) => (
-            <Link key={t.id} to={`/settings/${t.id}`} className={t.id === tab ? 'active' : ''}>{t.label}</Link>
+          {SECTIONS.map((section) => (
+            <div className="settings-nav-group" key={section}>
+              <div className="settings-nav-label" aria-hidden="true">{section}</div>
+              {TABS.filter((t) => t.section === section).map((t) => (
+                <Link key={t.id} to={`/settings/${t.id}`} className={t.id === tab ? 'active' : ''} aria-current={t.id === tab ? 'page' : undefined}>{t.label}</Link>
+              ))}
+            </div>
           ))}
           <Link to="/icons" style={{ marginTop: 'var(--sp-4)' }}>Icon browser</Link>
         </nav>
@@ -74,6 +98,7 @@ export default function SettingsPage() {
               )}
             </div>
           )}
+          {tab === 'general' && <GeneralTab />}
           {tab === 'appearance' && <AppearanceTab />}
           {tab === 'background' && <BackgroundTab />}
           {tab === 'hub' && <HubTab />}
@@ -83,7 +108,8 @@ export default function SettingsPage() {
           {tab === 'groups' && <GroupsTab />}
           {tab === 'bookmarks' && <BookmarksTab />}
           {tab === 'integrations' && <IntegrationsTab />}
-          {tab === 'system' && <SystemTab />}
+          {tab === 'authentication' && <AuthenticationTab />}
+          {tab === 'environment' && <EnvironmentTab />}
           {tab === 'advanced' && <AdvancedTab />}
           {!TABS.some((t) => t.id === tab) && (
             <p className="stale-note">Unknown section. <button className="section-link" onClick={() => nav('/settings/appearance')}>Go to Appearance →</button></p>
@@ -112,6 +138,271 @@ function Block({ title, children, aside }: { title: ReactNode; children: ReactNo
       <div className="section-head" style={{ marginBottom: 2 }}><h2 className="section-title">{title}</h2><span className="section-aside">{aside}</span></div>
       {children}
     </section>
+  );
+}
+
+/* ============ General ============ */
+/**
+ * Identity, not decoration: what this install calls itself, and the two lines of state the Hub
+ * greets you with. Nothing here is infrastructure — the name is a string in settings.yaml.
+ */
+function GeneralTab() {
+  const { settings, update } = useSettings();
+  const { layout } = useLayout();
+  const { data: health } = usePolled<HealthDoc>('/api/health', 0);
+  if (!settings) return <p className="stale-note">Loading settings…</p>;
+  return (
+    <>
+      <p className="lede">
+        What this install calls itself and who it greets. The name is presentation only — it never
+        changes how anything is discovered or addressed.
+      </p>
+
+      <Block title="Identity" aside={<span className="stale-note">settings.yaml → app</span>}>
+        <Row label="Name" desc="The browser tab, on every page. `tagline` also lives in settings.yaml for Homepage-compatible files but is not rendered anywhere.">
+          <input className="input" style={{ maxWidth: 240 }} defaultValue={settings.app.name} aria-label="App name"
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== settings.app.name) update({ app: { name: v } }); else e.target.value = settings.app.name; }} />
+        </Row>
+        <Row label="Greeting name" desc="Who the Hub says good morning to.">
+          <input className="input" style={{ maxWidth: 220 }} defaultValue={settings.hub.greetingName || ''} placeholder="(none)" aria-label="Greeting name"
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            onBlur={(e) => update({ hub: { greetingName: e.target.value.trim() || null } })} />
+        </Row>
+        <Row label="24-hour clock" tight><Switch checked={settings.hub.clock24h} onChange={(v) => update({ hub: { clock24h: v } })} label="24-hour clock" /></Row>
+      </Block>
+
+      <Block title="This install" aside={<span className="stale-note">read-only</span>}>
+        <Row label="Version" tight><span className="mono-meta">OpusHub {health?.version || '0.1.0'} · node {health?.node || '…'}</span></Row>
+        <Row label="Configured widgets" tight><span className="mono-meta">{layout?.hub.widgets.length ?? 0} instance(s)</span></Row>
+        <Row label="Where the files live" desc="Presentation in config/, account and history in data/ — both mounted, never baked into the image.">
+          <Link className="btn btn-sm" to="/settings/environment">Environment</Link>
+        </Row>
+      </Block>
+    </>
+  );
+}
+
+/* ============ Authentication ============ */
+interface SessionRow {
+  id: string; createdAt: number; lastSeenAt: number; expiresAt: number; idleExpiresAt: number;
+  ip: string | null; current: boolean;
+}
+interface SessionsDoc {
+  sessions: SessionRow[]; count: number; current: SessionRow | null;
+  limits: { absoluteMs: number; idleMs: number; max: number };
+}
+
+/**
+ * The account surface. Two things only, both real: the password, and what is currently signed in.
+ *
+ * Every value that could be a credential is absent by construction — the session list carries
+ * derived handles (the server hashes the token and truncates it), and neither this pane nor the
+ * API it reads can see a token or a hash. Revoking is by handle, so a compromised browser can be
+ * cut off from here without ever printing what it holds.
+ */
+function AuthenticationTab() {
+  const { user, refresh } = useAuth();
+  const { data, refresh: reload } = usePolled<SessionsDoc>('/api/auth/sessions', 30_000);
+  const { save, busy, err } = useSave();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [note, setNote] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const submit = async () => {
+    setProblem(null); setNote(null);
+    if (next.length < 8) { setProblem('Choose a password of at least 8 characters.'); return; }
+    if (next !== confirm) { setProblem('The two passwords do not match.'); return; }
+    const r = await save(async () => {
+      await post<{ revoked: number }>('/api/auth/password', { currentPassword: current, newPassword: next });
+      return true;
+    });
+    if (r) {
+      setCurrent(''); setNext(''); setConfirm('');
+      setNote('Password changed. Other sessions were signed out.');
+      reload(); void refresh();
+    }
+  };
+
+  const revoke = (body: { scope: string; id?: string }) => save(async () => {
+    const r = await post<{ revoked: number; signedOut: boolean }>('/api/auth/sessions/revoke', body);
+    if (r?.signedOut) { window.location.reload(); return r; }
+    setNote(`Revoked ${r?.revoked ?? 0} session(s).`);
+    reload();
+    return r;
+  });
+
+  const when = (ms: number) => new Date(ms).toLocaleString();
+  const age = (ms: number) => relTime(ms);
+
+  return (
+    <>
+      <p className="lede">
+        One local account guards this Hub, and sessions live on the server — the browser only holds an
+        opaque cookie it cannot read. Nothing on this page is a credential: the list below identifies
+        sessions by a derived handle, never by the token itself.
+      </p>
+
+      <Block title="Account" aside={<span className="stale-note">stored in data/auth.json</span>}>
+        <Row label="Username" tight><span className="mono-meta">{user?.username || '—'}</span></Row>
+        <Row label="Password hashing" desc="scrypt with a per-account salt. The hash never leaves the server and is never logged." tight>
+          <span className="mono-meta">scrypt · N=32768 · r=8 · p=1</span>
+        </Row>
+        <Row label="Recovery" desc="A forgotten password is a host-level action: stop the container, remove data/auth.json, start it again — the wizard returns. Nothing else can reset it." tight>
+          <span className="stale-note">data/auth.json</span>
+        </Row>
+      </Block>
+
+      <Block title="Change password">
+        <div className="field">
+          <label htmlFor="pw-current">Current password</label>
+          <input id="pw-current" className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="pw-new">New password</label>
+          <input id="pw-new" className="input" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+          <span className="hint">At least 8 characters. Changing it signs every other browser out and rotates this one.</span>
+        </div>
+        <div className="field">
+          <label htmlFor="pw-confirm">Confirm new password</label>
+          <input id="pw-confirm" className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'center', marginTop: 'var(--sp-2)' }}>
+          <button className="btn btn-primary btn-sm" disabled={busy || !current || !next} onClick={() => void submit()}>
+            {busy ? 'Changing…' : 'Change password'}
+          </button>
+          {note && <span className="stale-note" role="status">{note}</span>}
+          {(problem || err) && <span className="stale-note" role="alert" style={{ color: 'var(--fail)' }}>{problem || err}</span>}
+        </div>
+      </Block>
+
+      <Block
+        title="Signed-in sessions"
+        aside={data ? <span className="stale-note">{data.count} of {data.limits.max} · expires after {Math.round(data.limits.absoluteMs / 86400000)} days, or {Math.round(data.limits.idleMs / 86400000)} days idle</span> : undefined}
+      >
+        {!data && <p className="stale-note">Loading sessions…</p>}
+        {data?.sessions.map((s) => (
+          <div className="session-row" key={s.id}>
+            <div style={{ minWidth: 0 }}>
+              <div className="session-head">
+                {s.current ? 'This browser' : 'Another browser'}
+                {s.current && <span className="chip tl-src">current</span>}
+              </div>
+              <div className="stale-note">
+                signed in {age(s.createdAt)} · last seen {age(s.lastSeenAt)} · expires {when(s.expiresAt)}
+                {s.ip ? ` · ${s.ip}` : ''}
+              </div>
+              <div className="mono-meta" style={{ fontSize: 11, opacity: 0.65 }}>handle {s.id}</div>
+            </div>
+            <button className="btn btn-quiet btn-sm" disabled={busy} onClick={() => void revoke({ scope: 'one', id: s.id })}>
+              {s.current ? 'Sign out' : 'Revoke'}
+            </button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 'var(--sp-3)', marginTop: 'var(--sp-4)', flexWrap: 'wrap' }}>
+          <button className="btn btn-sm" disabled={busy || (data?.count ?? 0) < 2} onClick={() => void revoke({ scope: 'others' })}>
+            Sign out other browsers
+          </button>
+          <button className="btn btn-sm" disabled={busy} onClick={() => void revoke({ scope: 'all' })}>Sign out everywhere</button>
+          <button className="btn btn-quiet btn-sm" onClick={reload}>Refresh</button>
+          {err && <span className="stale-note" style={{ color: 'var(--fail)' }}>{err}</span>}
+        </div>
+      </Block>
+    </>
+  );
+}
+
+/* ============ Environment ============ */
+/**
+ * Where OpusHub is plugged in, and what the presentation layer is allowed to decide. This is the
+ * same pane that used to be called "System": the name now matches what it describes, and the
+ * Homepage-compatibility block below is a statement of the rule the whole app is built on.
+ */
+function EnvironmentTab() {
+  const { data: health } = usePolled<HealthDoc>('/api/health', 0);
+  // Every field is read defensively: this pane must render even when a provider is down and the
+  // route answers with an error object rather than the document.
+  const { data: discovery } = usePolled<{
+    overlays?: { serviceOverlays?: number; stackOverlays?: number; serviceEntries?: number; stackEntries?: number; unmatched?: number; unmatchedList?: { name?: string; kind?: string; reason?: string }[] };
+    inventory?: { applications?: number; infrastructure?: number; stacks?: number; standalone?: number };
+    urlDiscovery?: { sources?: Record<string, number>; withUrl?: number; withoutUrl?: number; hostAddress?: string | null; hostAddressSource?: string | null };
+  }>('/api/discovery', 30_000);
+  const { data: bookmarks } = usePolled<{ groups?: { name: string; bookmarks: unknown[] }[] }>('/api/bookmarks', 0);
+  const overlays = discovery?.overlays;
+  const inventory = discovery?.inventory;
+  const urls = discovery?.urlDiscovery;
+  const bookmarkCount = (bookmarks?.groups || []).reduce((a, g) => a + (g?.bookmarks?.length || 0), 0);
+  return (
+    <>
+      <p className="lede">Where OpusHub is plugged in. Paths are resolved at startup and logged on the server; infrastructure access stays read-only.</p>
+      <Block title="Configuration">
+        <Row label="Config directory" tight><span className="mono-meta">{health?.configDir || '…'}</span></Row>
+        <Row label="Data directory" tight><span className="mono-meta">{health?.dataDir || '…'}</span></Row>
+        <Row
+          label=".env discovery"
+          desc="Order: $OPUSHUB_ENV_FILE → config/.env → ./.env → $HOMEPAGE_DIR/.env → /app/config/.env. First hit wins; real env vars always beat files. Values never reach the browser."
+        >
+          <span className="mono-meta">
+            {health?.env.files.length
+              ? health.env.files.map((f) => `${f.file.split('/').slice(-2).join('/')} (${f.keys.length} key${f.keys.length === 1 ? '' : 's'}${f.error ? ' — ' + f.error : ''})`).join(' · ')
+              : 'none found — keys fall through to process.env only'}
+          </span>
+        </Row>
+        <Row label="Runtime" tight><span className="mono-meta">OpusHub {health?.version || '0.1'} · node {health?.node || '…'} · {health?.platform || ''}</span></Row>
+      </Block>
+
+      <Block title="Host address for published ports" aside={<span className="stale-note">used by the URL resolver</span>}>
+        <Row label="Address" desc="Only consulted when a container publishes a port and has no proxy route. Detected automatically from the host's own interfaces when it is not set.">
+          <span className="mono-meta">
+            {urls?.hostAddress
+              ? <>{urls.hostAddress} <span className="stale-note">· {urls.hostAddressSource}</span></>
+              : <span className="stale-note">none detected — published-port URLs are omitted rather than guessed</span>}
+          </span>
+        </Row>
+      </Block>
+
+      <Block title="Homepage-compatible presentation layer" aside={<span className="stale-note">config/</span>}>
+        <p className="stale-note" style={{ marginBottom: 'var(--sp-4)' }}>
+          The files are shaped like Homepage's, and they do the same one job: <b>Docker decides what
+          exists; configuration decides how it is presented.</b> A group with no containers is not a
+          group, an overlay entry with no container binds to nothing, and a bookmark is a link —
+          never an infrastructure object. Nothing below can add, rename or remove a service.
+        </p>
+        <Row label="services.yaml" desc="Renames, icons, groups, ordering, URL overrides, visibility." tight>
+          <span className="mono-meta">
+            {overlays ? `${overlays.serviceOverlays ?? 0} bound of ${overlays.serviceEntries ?? 0} entr${overlays.serviceEntries === 1 ? 'y' : 'ies'}` : '…'}
+            {overlays?.unmatched ? <span className="stale-note"> · {overlays.unmatched} unmatched</span> : null}
+          </span>
+        </Row>
+        <Row label="stacks.yaml" desc="Renames and describes a compose project the engine reported." tight>
+          <span className="mono-meta">
+            {overlays ? `${overlays.stackOverlays ?? 0} bound of ${overlays.stackEntries ?? 0} entr${overlays.stackEntries === 1 ? 'y' : 'ies'}` : '…'}
+          </span>
+        </Row>
+        <Row label="bookmarks.yaml" desc="Flat links with groups. No status, no discovery — they are yours, not the engine's." tight>
+          <span className="mono-meta">{bookmarks ? `${bookmarkCount} in ${bookmarks.groups?.length ?? 0} group(s)` : '…'}</span>
+        </Row>
+        <Row label="layout.json" desc="The Hub composition: widget instances, zones, sizes, spacing and ordering." tight>
+          <span className="mono-meta">widgets, groups and order</span>
+        </Row>
+        <Row label="theme.css · app.js · icons/ · backgrounds/" desc="Custom code and assets, all opt-in, all same-origin, all served behind the session." tight>
+          <Link className="btn btn-sm" to="/settings/advanced">Custom code</Link>
+        </Row>
+        {!!overlays?.unmatchedList?.length && (
+          <Row label="Unmatched overlays" desc="Entries naming a container that is not on this engine right now. They are reported here and rendered nowhere — that is the phantom-service rule working.">
+            <span className="mono-meta">{overlays.unmatchedList.slice(0, 4).map((u) => u.name || u.kind || 'entry').join(', ')}</span>
+          </Row>
+        )}
+        <Row label="Inventory" desc="Everything the engine reports, after presentation." tight>
+          <span className="mono-meta">{inventory ? `${inventory.applications ?? 0} applications · ${inventory.infrastructure ?? 0} infrastructure · ${inventory.stacks ?? 0} stacks · ${inventory.standalone ?? 0} standalone` : '…'}</span>
+        </Row>
+      </Block>
+
+      <ProvidersBlock />
+      <DiscoveryBlock health={health} />
+    </>
   );
 }
 
@@ -294,16 +585,9 @@ function HubTab() {
   if (!settings || !layout) return <p className="stale-note">Loading…</p>;
   return (
     <>
-      <Block title="Greeting">
-        <Row label="Name" desc="“Good evening, Nora.” Leave it empty for a greeting with no name — nothing is assumed about you.">
-          <input className="input" style={{ maxWidth: 220 }} defaultValue={settings.hub.greetingName || ''}
-            placeholder="(none)" aria-label="Greeting name"
-            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-            onBlur={(e) => update({ hub: { greetingName: e.target.value.trim() || null } })} />
-        </Row>
-        <Row label="24-hour clock" tight><Switch checked={settings.hub.clock24h} onChange={(v) => update({ hub: { clock24h: v } })} label="24-hour clock" /></Row>
-        <Row label="Seconds" desc="Off by default — the clock shouldn’t twitch." tight>
-          <Switch checked={settings.hub.showSeconds} onChange={(v) => update({ hub: { showSeconds: v } })} label="Show seconds" />
+      <Block title="Greeting" aside={<Link className="section-link" to="/settings/general">General →</Link>}>
+        <Row label="Name and clock" desc="“Good evening, Nora.” Leave the name empty for a greeting with nobody in it — nothing is assumed about you.">
+          <span className="mono-meta">{settings.hub.greetingName || '(no name)'} · {settings.hub.clock24h ? '24-hour' : '12-hour'}{settings.hub.showSeconds ? ' · seconds' : ''}</span>
         </Row>
       </Block>
 
@@ -694,7 +978,7 @@ function ServicesTab() {
         <ProviderNote
           status="unavailable"
           reason={data?.statusReason || 'Docker is not connected, so there is nothing to overlay. Connect the engine and every container appears here automatically.'}
-          fixHref="/settings/system"
+          fixHref="/settings/environment"
           fixLabel="Discovery status →"
         />
       )}
@@ -1307,34 +1591,6 @@ function AdvancedTab() {
   );
 }
 
-/* ============ System ============ */
-function SystemTab() {
-  const { data: health } = usePolled<HealthDoc>('/api/health', 0);
-  return (
-    <>
-      <p className="lede">Where OpusHub is plugged in. Paths are resolved at startup and logged on the server; infrastructure access stays read-only.</p>
-      <Block title="Configuration">
-        <Row label="Config directory" tight><span className="mono-meta">{health?.configDir || '…'}</span></Row>
-        <Row label="Data directory" tight><span className="mono-meta">{health?.dataDir || '…'}</span></Row>
-        <Row
-          label=".env discovery"
-          desc="Order: $OPUSHUB_ENV_FILE → config/.env → ./.env → $HOMEPAGE_DIR/.env → /app/config/.env. First hit wins; real env vars always beat files. Values never reach the browser."
-        >
-          <span className="mono-meta">
-            {health?.env.files.length
-              ? health.env.files.map((f) => `${f.file.split('/').slice(-2).join('/')} (${f.keys.length} key${f.keys.length === 1 ? '' : 's'}${f.error ? ' — ' + f.error : ''})`).join(' · ')
-              : 'none found — keys fall through to process.env only'}
-          </span>
-        </Row>
-        <Row label="Runtime" tight><span className="mono-meta">OpusHub {health?.version || '0.1'} · node {health?.node || '…'} · {health?.platform || ''}</span></Row>
-      </Block>
-
-      <ProvidersBlock />
-      <DiscoveryBlock health={health} />
-    </>
-  );
-}
-
 /** Provider health — one quiet table, technical detail behind disclosure. The Hub itself is
  *  never dominated by this; it lives here for the moment something stops answering. */
 function ProvidersBlock() {
@@ -1402,7 +1658,7 @@ function DiscoveryBlock(_props: { health: HealthDoc | null }) {
         <ProviderNote
           status="unavailable"
           reason="OpusHub cannot see containers right now, so live status, stats and logs stay off. Set OPUSHUB_DOCKER_SOCKET (or DOCKER_HOST) and restart."
-          fixHref="/settings/system"
+          fixHref="/settings/environment"
           fixLabel="How discovery resolves →"
         />
       )}

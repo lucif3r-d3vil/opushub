@@ -6,6 +6,7 @@
 import { act, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { LayoutProvider, SettingsProvider, useLayout } from '../../src/lib/theme';
+import { AuthProvider } from '../../src/lib/auth';
 import { useHubData } from '../../src/lib/hubData';
 import { HubSurface } from '../../src/components/hub/HubSurface';
 import { SearchOverlay, useGlobalSearchHotkey } from '../../src/components/SearchOverlay';
@@ -254,13 +255,24 @@ export async function runWebTests(): Promise<WebResult> {
     expect(text().includes('Wave') && text().includes('Photos'), 'a discovered service is missing from the launcher');
     expect(/good (morning|afternoon|evening)/i.test(text()), 'the greeting is missing');
     expect(text().includes('3 services'), 'the header does not report the discovered count');
-    expect(document.title === 'Nora · OpusHub', `the document title follows the configured name (got “${document.title}”)`);
+    // the tab is the install's own name (settings.yaml → app.name), set once for every page
+    expect(document.title === 'OpusHub', `the document title should be the configured name (got “${document.title}”)`);
     expect(text().includes('Friday') || /day/i.test(text()), 'the date is missing');
     expect(qa('.launcher-items > li').length >= 3, 'the launcher list is short');
     // a service with no resolved URL must not offer a launch button
     const noWeb = qa('.launch-item').find((el) => el.getAttribute('data-noweb') != null);
     expect(noWeb, 'the fixture has a service with no URL, so one row should be marked');
     expect(!q('button.li-open', noWeb!) && !q('a.li-open', noWeb!), 'a URL-less service rendered a launch button');
+  });
+
+  /* 1b — a renamed install renames the tab, on any page that has settings loaded */
+  await test('settings: app.name drives the document title', async (h) => {
+    const named = JSON.parse(JSON.stringify(settings));
+    named.app.name = 'Grid Control';
+    h.setRoutes({ ...stubRoutes(), '/api/settings': named });
+    await h.mount(<TestApp><Hub /></TestApp>);
+    await h.flush(50);
+    await h.waitFor(() => document.title === 'Grid Control', 'the configured name to reach the tab');
   });
 
   /* 2 — the search surface opens from every documented trigger */
@@ -1041,6 +1053,77 @@ export async function runWebTests(): Promise<WebResult> {
     expect((put.body as { integrations: { markets: { symbols: string[] } } }).integrations.markets.symbols.join() === 'AAPL,BTC-USD,MSFT',
       `symbols were not normalized (got ${JSON.stringify((put.body as { integrations: { markets: { symbols: string[] } } }).integrations.markets.symbols)})`);
     expect(input().value === '', 'the field was not cleared after a successful add');
+  });
+
+  /* 30 — Phase 5: the Authentication pane changes the password and audits sessions */
+  await test('settings: Authentication lists sessions, changes the password, and shows no credential', async (h) => {
+    const sessionsDoc = {
+      count: 2,
+      limits: { absoluteMs: 30 * 24 * 3600_000, idleMs: 7 * 24 * 3600_000, max: 50 },
+      current: { id: 'aaaabbbbccccdddd', createdAt: Date.now() - 60_000, lastSeenAt: Date.now() - 1000, expiresAt: Date.now() + 1000, idleExpiresAt: Date.now() + 2000, ip: '192.0.2.5', current: true },
+      sessions: [
+        { id: 'aaaabbbbccccdddd', createdAt: Date.now() - 60_000, lastSeenAt: Date.now() - 1000, expiresAt: Date.now() + 86_400_000, idleExpiresAt: Date.now() + 86_400_000, ip: '192.0.2.5', current: true },
+        { id: 'eeeeffff00001111', createdAt: Date.now() - 900_000, lastSeenAt: Date.now() - 500_000, expiresAt: Date.now() + 86_400_000, idleExpiresAt: Date.now() + 86_400_000, ip: '198.51.100.9', current: false },
+      ],
+    };
+    h.setRoutes({
+      '/api/setup/status': { required: false, complete: true, hasAccount: true, version: '0.1.0' },
+      '/api/auth/me': { authenticated: true, user: { username: 'admin' }, setupComplete: true },
+      '/api/auth/sessions': sessionsDoc,
+      '/api/auth/password': { $status: 401, body: { error: 'The current password is incorrect.', code: 'invalid_password' } },
+      '/api/settings': settings,
+      '/api/layout': layout,
+    });
+    await h.mount(
+      <MemoryRouter initialEntries={['/settings/authentication']}>
+        <AuthProvider>
+          <SettingsProvider>
+            <LayoutProvider>
+              <Routes><Route path="/settings/:tab" element={<Settings />} /></Routes>
+            </LayoutProvider>
+          </SettingsProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await h.waitFor(() => text().includes('Signed-in sessions'), 'the sessions block');
+    expect(h.calls.some((c) => c.path === '/api/auth/sessions'), 'the pane never asked for the session list');
+    expect(text().includes('This browser') && text().includes('Another browser'), 'the two sessions are not distinguished');
+    expect(text().includes('handle aaaabbbbccccdddd'), 'the derived handle is not shown');
+    expect(!text().includes('scrypt$') && !text().includes('passwordHash'), 'credential material reached the page');
+
+    // a wrong current password is reported inline, in the server's own words, without wiping the form
+    type(q<HTMLInputElement>('#pw-current')!, 'definitely-wrong');
+    type(q<HTMLInputElement>('#pw-new')!, 'a-much-longer-new-one');
+    type(q<HTMLInputElement>('#pw-confirm')!, 'a-much-longer-new-one');
+    click(qa('button').find((b) => text(b).includes('Change password'))!);
+    await h.waitFor(() => /current password is incorrect/i.test(text()), 'the refusal message');
+    const attempt = h.writes('POST', '/api/auth/password')[0];
+    expect(!!attempt, 'no password request was sent');
+    expect(attempt.body && (attempt.body as { newPassword?: string }).newPassword === 'a-much-longer-new-one', 'the request body is wrong');
+    expect(q<HTMLInputElement>('#pw-new')!.value === 'a-much-longer-new-one', 'a failed attempt cleared the fields');
+
+    // local validation runs before the network: mismatched confirmation never reaches the server
+    const before = h.writes('POST', '/api/auth/password').length;
+    type(q<HTMLInputElement>('#pw-confirm')!, 'something-else-entirely');
+    click(qa('button').find((b) => text(b).includes('Change password'))!);
+    await h.flush(30);
+    expect(h.writes('POST', '/api/auth/password').length === before, 'a mismatched confirmation was still sent');
+    expect(/do not match/i.test(text()), 'the mismatch is not explained');
+  });
+
+  /* 31 — Phase 5: General is where the install names itself, and the name is actually written */
+  await test('settings: General writes the install name to settings.yaml', async (h) => {
+    h.setRoutes({ ...stubRoutes() });
+    await h.mount(<TestApp entry="/settings/general"><Settings /></TestApp>);
+    await h.waitFor(() => !!q('[aria-label="App name"]'), 'the name field');
+    const field = q<HTMLInputElement>('[aria-label="App name"]')!;
+    expect(field.value === 'OpusHub', `the saved name is not shown (got ${field.value})`);
+    act(() => { field.focus(); });
+    type(field, 'Grid Control');
+    act(() => { field.blur(); });
+    await h.waitFor(() => h.writes('PUT', '/api/settings').length > 0, 'the settings write');
+    const put = h.writes('PUT', '/api/settings').pop()!;
+    expect((put.body as { app?: { name?: string } }).app?.name === 'Grid Control', `the name was not written (${JSON.stringify(put.body)})`);
   });
 
   for (const r of results) {

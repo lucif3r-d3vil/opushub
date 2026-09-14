@@ -437,7 +437,7 @@ async function main() {
         JSON.stringify((settings.body?.results || []).slice(0, 3)));
       const docker = await get('/api/search?q=docker');
       check('search: a query about the engine reaches discovery and, when live, real services',
-        docker.body?.results?.some((r) => r.href === '/settings/system'),
+        docker.body?.results?.some((r) => r.href === '/settings/environment'),
         `${(docker.body?.results || []).length} results`);
       const advanced = await get('/api/search?q=advanced');
       check('search: the Advanced tab is reachable by the words people would type',

@@ -6,7 +6,7 @@ import App from './App';
 const routes = [
   '/', '/services', '/services/Media/Stream', '/stacks', '/stacks/Media', '/system', '/activity',
   '/settings/appearance', '/settings/background', '/settings/hub', '/settings/widgets', '/settings/templates',
-  '/settings/services', '/settings/groups', '/settings/bookmarks', '/settings/integrations', '/settings/system',
+  '/settings/general', '/settings/services', '/settings/groups', '/settings/bookmarks', '/settings/integrations', '/settings/authentication', '/settings/environment',
   '/settings/advanced',
   '/icons', '/nope',
 ];

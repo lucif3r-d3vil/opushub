@@ -123,7 +123,7 @@ export default function IconsPage() {
         </div>
         {!chosen && <p className="stale-note">Choose an icon above; the list then applies it in one click.</p>}
         {services.data && !services.data.live && (
-          <ProviderNote status="unavailable" reason="Docker isn't connected, so there is nothing to apply an icon to right now." fixHref="/settings/system" fixLabel="Discovery status →" />
+          <ProviderNote status="unavailable" reason="Docker isn't connected, so there is nothing to apply an icon to right now." fixHref="/settings/environment" fixLabel="Discovery status →" />
         )}
         {err && <p className="stale-note" style={{ color: 'var(--fail)', marginBottom: 8 }}>{err}</p>}
         {done && <p className="stale-note" style={{ color: 'var(--ok)', marginBottom: 8 }}>Applied {done}</p>}

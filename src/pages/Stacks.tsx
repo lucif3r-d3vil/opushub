@@ -57,7 +57,7 @@ export default function StacksPage() {
         <ProviderNote
           status="unavailable"
           reason={data?.statusReason || 'Stacks come from compose labels on the Docker engine. Without a connection there is nothing to list — an entry in stacks.yaml alone does not make a stack.'}
-          fixHref="/settings/system"
+          fixHref="/settings/environment"
           fixLabel="Check the connection →"
         />
       )}

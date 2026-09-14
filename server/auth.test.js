@@ -209,3 +209,85 @@ test('a successful login clears the failure window for that client', async () =>
   const again = await auth.login({ username: 'admin', password: PASSWORD, ip: '10.1.1.1', at: t });
   assert.equal(again.ok, true, 'and the next sign-in is immediate');
 });
+
+// ── the session audit surface: handles, listing, revocation ──────────────────
+
+test('sessions are listed as opaque handles — never as bearer tokens', () => {
+  auth.destroyAllSessions();
+  const a = auth.createSession({ username: 'admin', ip: '192.0.2.10' });
+  const b = auth.createSession({ username: 'admin', ip: '192.0.2.11' });
+  const rows = auth.listSessions(a.id);
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    assert.match(row.id, /^[A-Za-z0-9_-]{16}$/, `handle looks wrong: ${row.id}`);
+    assert.ok(!row.id.includes(a.id) && !row.id.includes(b.id), 'a handle must not contain the token');
+    assert.ok(!('token' in row) && !('id_token' in row));
+  }
+  assert.equal(rows.filter((r) => r.current).length, 1, 'exactly one session is the caller');
+  assert.equal(rows.find((r) => r.current).id, auth.sessionHandle(a.id));
+  // a handle is a pure function of the token, so it is stable across calls…
+  assert.equal(auth.sessionHandle(a.id), auth.sessionHandle(a.id));
+  assert.notEqual(auth.sessionHandle(a.id), auth.sessionHandle(b.id));
+  // …and irreversible: the token cannot be recovered from it
+  assert.ok(!a.id.startsWith(auth.sessionHandle(a.id)));
+});
+
+test('revocation takes handles, spares the caller when asked, and never writes the token', () => {
+  auth.destroyAllSessions();
+  const keep = auth.createSession({ username: 'admin' });
+  const drop = auth.createSession({ username: 'admin' });
+  assert.equal(auth.revokeSessions({ except: keep.id }), 1);
+  assert.equal(auth.getSession(keep.id)?.username, 'admin', 'the caller stays signed in');
+  assert.equal(auth.getSession(drop.id), null, 'the other session is gone');
+
+  const third = auth.createSession({ username: 'admin' });
+  assert.equal(auth.revokeSessions({ handles: [auth.sessionHandle(third.id)] }), 1);
+  assert.equal(auth.getSession(third.id), null);
+  assert.equal(auth.revokeSessions({ handles: ['not-a-handle'] }), 0, 'an unknown handle revokes nothing');
+
+  // the raw token for a revoked session, offered as if it were a handle, must not revoke anything
+  const fourth = auth.createSession({ username: 'admin' });
+  assert.equal(auth.revokeSessions({ handles: [fourth.id] }), 0, 'a token is not a handle');
+  assert.equal(auth.getSession(fourth.id)?.username, 'admin', 'the session survives that attempt');
+  assert.equal(auth.revokeSessions(), 2, 'no filter = everything');
+  assert.equal(auth.getSession(keep.id), null);
+  assert.equal(auth.getSession(fourth.id), null);
+  assert.equal(auth.listSessions(keep.id).length, 0);
+});
+
+// ── password change ─────────────────────────────────────────────────────────
+
+test('the password can be changed, and only with the current password', async () => {
+  const weak = await auth.changePassword({ currentPassword: PASSWORD, newPassword: 'short' });
+  assert.equal(weak.ok, false);
+  assert.equal(weak.status, 400);
+
+  const wrong = await auth.changePassword({ currentPassword: 'not-the-password', newPassword: 'a-new-long-password' });
+  assert.equal(wrong.ok, false);
+  assert.equal(wrong.status, 401);
+  assert.equal((await auth.login({ username: 'admin', password: PASSWORD })).ok, true, 'a failed change leaves the old password working');
+
+  const same = await auth.changePassword({ currentPassword: PASSWORD, newPassword: PASSWORD });
+  assert.equal(same.ok, false, 're-using the same password is refused rather than silently accepted');
+});
+
+test('a successful change rotates the session, revokes the others, and never stores plaintext', async () => {
+  auth.destroyAllSessions();
+  const phone = auth.createSession({ username: 'admin', ip: '198.51.100.7' });
+  const laptop = auth.createSession({ username: 'admin', ip: '198.51.100.8' });
+  const next = 'a-brand-new-passphrase';
+  const result = await auth.changePassword({ currentPassword: PASSWORD, newPassword: next, token: phone.id, ip: '198.51.100.7' });
+  assert.equal(result.ok, true);
+  assert.equal(result.revoked, 1, 'the other session is revoked');
+  assert.ok(result.token && result.token !== phone.id, 'a fresh session id is minted');
+  assert.equal(auth.getSession(laptop.id), null, 'the other device is signed out');
+  assert.equal(auth.getSession(result.token)?.username, 'admin');
+  assert.equal(auth.sessionCount(), 1);
+
+  const text = fs.readFileSync(AUTH_FILE, 'utf8');
+  assert.ok(!text.includes(next), 'the new password is never written in plaintext');
+  assert.match(text, /"passwordHash":\s*"scrypt\$/);
+
+  assert.equal((await auth.login({ username: 'admin', password: PASSWORD })).ok, false, 'the old password no longer works');
+  assert.equal((await auth.login({ username: 'admin', password: next })).ok, true, 'the new one does');
+});

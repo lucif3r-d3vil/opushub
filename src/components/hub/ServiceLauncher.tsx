@@ -187,7 +187,7 @@ export function ServiceLauncher({ services, error, loading, layout, widget, inte
       return <WidgetEmpty href="/settings/widgets" linkLabel="Change this widget's groups →">This widget shows {only.join(', ')}, and nothing is filed there yet.</WidgetEmpty>;
     }
     return (
-      <WidgetEmpty href="/settings/system" linkLabel="Discovery status →">
+      <WidgetEmpty href="/settings/environment" linkLabel="Discovery status →">
         No containers yet. The launcher fills itself the moment Docker reports one — nothing is configured by hand.
       </WidgetEmpty>
     );

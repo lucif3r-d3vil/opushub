@@ -187,7 +187,7 @@ export default function StackDetailPage() {
                 ))}
               </div>
             ) : (
-              <ProviderNote compact status={data.live ? 'unavailable' : 'unconfigured'} reason={data.live ? 'The engine here does not expose container stats.' : 'Connect Docker to see live resource use.'} fixHref={data.live ? undefined : '/settings/system'} fixLabel="Configure Docker →" />
+              <ProviderNote compact status={data.live ? 'unavailable' : 'unconfigured'} reason={data.live ? 'The engine here does not expose container stats.' : 'Connect Docker to see live resource use.'} fixHref={data.live ? undefined : '/settings/environment'} fixLabel="Configure Docker →" />
             )}
           </section>
 

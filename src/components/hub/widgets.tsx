@@ -160,7 +160,7 @@ function AttentionWidget({ widget, data }: WidgetProps) {
       ))}
       {providerIssues.slice(0, Math.max(0, cap - list.length) || 2).map((p) => (
         <li key={`prov-${p.name}`}>
-          <Link to="/settings/system" className="hub-attention-row">
+          <Link to="/settings/environment" className="hub-attention-row">
             <StatusDot state={p.state === 'degraded' ? 'degraded' : 'down'} title={p.state} />
             <span className="grow">
               <span className="title">{p.name[0].toUpperCase() + p.name.slice(1)} provider</span>

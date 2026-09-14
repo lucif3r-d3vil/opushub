@@ -193,21 +193,59 @@ export async function createAdmin({ username, password, at = now() }) {
 // sessions (data/sessions.json)
 // ---------------------------------------------------------------------------
 
-function readSessions() {
+/**
+ * Live sessions, held in memory and mirrored to disk.
+ *
+ * Why the cache: `authenticate()` runs on *every* request — including a dashboard that polls
+ * five endpoints a second apart — and re-reading + re-parsing a JSON file for each of them is
+ * pure waste. The file is therefore read once per process and thereafter treated as the
+ * persistence of this process's own state (OpusHub is a single process by design; sharing one
+ * data directory between two instances is not supported, and the README says so).
+ *
+ * Structural changes (create / destroy / revoke) are written *synchronously*: the file on disk is
+ * never behind on who is signed in, so a restart cannot resurrect a session an admin revoked.
+ * Only the idle timestamp is debounced, because losing 60 s of it is a nuisance and not a hole.
+ */
+let sessionCache = null;
+let flushTimer = null;
+
+function readSessionsFromDisk() {
   const doc = readJson(SESSION_FILE, { version: 1, sessions: [] });
   return Array.isArray(doc.sessions) ? doc.sessions : [];
 }
 
-let pendingFlush = false;
-function writeSessions(rows) {
-  const live = rows
+function readSessions() {
+  if (sessionCache) return sessionCache;
+  sessionCache = readSessionsFromDisk();
+  return sessionCache;
+}
+
+/** In-memory only — the caller decides when the file is written. */
+function normalize(rows) {
+  return rows
     .filter((s) => s && typeof s.id === 'string' && s.expiresAt > now())
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, MAX_SESSIONS);
+}
+
+/** Persist the current set. Returns the (bounded, unexpired) rows actually kept. */
+function writeSessions(rows = readSessions()) {
+  const live = normalize(rows);
+  sessionCache = live;
   try { writeJsonPrivate(SESSION_FILE, { version: 1, sessions: live }); } catch { /* a session that
     cannot be persisted still works in memory; losing it on restart is a nuisance, not a security
     hole, and failing the login because a disk is read-only would be worse. */ }
   return live;
+}
+
+/** The idle clock is the only thing that does not need to hit the disk on every request. */
+function scheduleIdleFlush() {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    writeSessions();
+  }, 60_000);
+  flushTimer.unref?.();
 }
 
 /** Mint a session. A new random id every time — this is also the session-fixation defence. */
@@ -235,12 +273,7 @@ export function getSession(token, at = now()) {
     return null;
   }
   found.lastSeenAt = at;
-  // Persisting on every request would rewrite the file on every poll; a minute is plenty.
-  if (!pendingFlush) {
-    pendingFlush = true;
-    const t = setTimeout(() => { pendingFlush = false; try { writeSessions(readSessions()); } catch { /* ok */ } }, 60_000);
-    t.unref?.();
-  }
+  scheduleIdleFlush();
   return found;
 }
 
@@ -257,6 +290,84 @@ export function destroyAllSessions() {
 
 export function sessionCount() {
   return readSessions().length;
+}
+
+/**
+ * A stable, non-reversible handle for a session — what the UI lists and revokes by.
+ *
+ * The session token is a bearer credential: putting it in an API response (even to the admin who
+ * owns it) would spread it into logs, screenshots and browser history. A truncated SHA-256 of the
+ * token names the same session without being usable to authenticate, and it cannot be reversed.
+ */
+export function sessionHandle(token) {
+  if (typeof token !== 'string' || !token) return null;
+  return crypto.createHash('sha256').update(token).digest('base64url').slice(0, 16);
+}
+
+/** Every live session, described for display. `current` marks the one making the request. */
+export function listSessions(currentToken = null) {
+  const at = now();
+  const rows = readSessions().filter((s) => s.expiresAt > at);
+  return rows
+    .map((s) => ({
+      id: sessionHandle(s.id),
+      createdAt: s.createdAt,
+      lastSeenAt: s.lastSeenAt,
+      expiresAt: s.expiresAt,
+      idleExpiresAt: Math.min(s.expiresAt, s.lastSeenAt + SESSION_IDLE_MS),
+      ip: s.ip || null,
+      current: !!currentToken && s.id === currentToken,
+    }))
+    .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+}
+
+/** Revoke by handle (never by token), or everything except one. Returns how many were removed. */
+export function revokeSessions({ handles = [], except = null } = {}) {
+  const wanted = new Set((handles || []).map(String));
+  const rows = readSessions();
+  const keep = rows.filter((s) => {
+    if (except && s.id === except) return true;
+    if (!wanted.size) return false;      // no handle filter = "all" (of what `except` spares)
+    return !wanted.has(sessionHandle(s.id));
+  });
+  const removed = rows.length - keep.length;
+  writeSessions(keep);
+  return removed;
+}
+
+/**
+ * Change the administrator's password.
+ *
+ * The current password is required even though the caller already holds a session: a borrowed
+ * browser must not be able to lock the owner out of their own Hub. Every other session is revoked
+ * (a stolen cookie does not survive a password change) and the presented session is retired so the
+ * caller is re-minted — the same no-fixation rule as sign-in.
+ */
+export async function changePassword({ currentPassword, newPassword, token = null, ip = null, at = now() }) {
+  const doc = readAuth();
+  const user = doc.user;
+  if (!user) throw Object.assign(new Error('No administrator account exists yet.'), { status: 409 });
+  const ok = await verifyPassword(user.passwordHash, typeof currentPassword === 'string' ? currentPassword : '');
+  if (!ok) {
+    return { ok: false, status: 401, error: 'The current password is incorrect.' };
+  }
+  const p = validatePassword(newPassword);
+  if (!p.ok) return { ok: false, status: 400, error: p.reason };
+  if (typeof newPassword === 'string' && typeof currentPassword === 'string' && newPassword === currentPassword) {
+    return { ok: false, status: 400, error: 'The new password is the same as the current one.' };
+  }
+  const passwordHash = await hashPassword(newPassword);
+  writeAuth({
+    ...doc,
+    user: { ...user, passwordHash, updatedAt: new Date(at).toISOString() },
+  });
+  // Every session dies — the other devices immediately, and the presented id too (it is retired
+  // and replaced below, exactly like sign-in: a token that existed before a credential change is
+  // not carried across it). `revoked` counts what the admin would call "the other sessions".
+  const revoked = readSessions().filter((s) => s.id !== token).length;
+  writeSessions([]);
+  const session = createSession({ username: user.username, ip, at });
+  return { ok: true, user: publicUser(doc.user), token: session.id, expiresAt: session.expiresAt, revoked };
 }
 
 // ---------------------------------------------------------------------------
