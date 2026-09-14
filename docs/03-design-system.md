@@ -149,6 +149,17 @@ light: bg #f7f7f5 (paper) · raised #fff · overlay rgba(255,255,255,.9)+blur
   metadata, not uniform tile farms; System = full-width band sections with oversized numerals and
   charts spanning to the grid edge; Activity = single vertical rule timeline; Settings = docs-like
   two-column (nav 200px + pane) with form rows, not boxes.
+- **Hub zones**: `main` (composition, section-sized titles) and `rail` (sidebar, 380px, uppercase
+  micro-labels). Spacing is a composition choice, not a slider: cozy 32 / comfortable 48 / airy 96.
+  Below 1180px the rail becomes a two-column band under the main column instead of a stack of
+  full-width blocks; below 860px the header stacks and the launcher drops to one column.
+- **Widget frames are not cards**: a title, an optional one-line note of real state, and controls
+  that appear on hover/focus (always visible where there is no hover). Structure comes from
+  hairlines, whitespace and type weight; a surface appears only where you can interact with
+  something. Each widget picks the form its information wants — a clock is typography, markets is a
+  compact table, news is a list of headlines with source and age, system is a status strip of
+  labelled values with hairline meters, activity is a timeline, bookmarks are chips, and the
+  attention widget is the only list that is empty when everything is healthy.
 
 ## Components (few, honest)
 
@@ -164,6 +175,9 @@ light: bg #f7f7f5 (paper) · raised #fff · overlay rgba(255,255,255,.9)+blur
   "Configure →" text link. No illustrations.
 - **Command overlay**: 640px, top-third, translucent raised surface (the one place glass belongs),
   grouped results, 12px section headers.
+- **Live preview** (Settings → Hub layout): the real Hub component at reduced scale inside a framed
+  surface, labelled *Preview*, non-interactive (no drag handles, no menus) so it cannot be mistaken
+  for the page. Never a second renderer, never a mock.
 
 ## Motion
 

@@ -26,14 +26,14 @@ or just use the built app — the node server serves it.
 
 | Page | What it shows |
 | --- | --- |
-| **Hub** (`/`) | Greeting + clock, global search (`/` or ⌘K), host overview strip, draggable service launcher, rail widgets: weather, markets, news, bookmarks, recent activity — all reorderable, resizable (S/M/L), hideable, persisted |
+| **Hub** (`/`) | Greeting (name, date, real time, weather when configured) + global search (`/` or ⌘K), host summary strip, the draggable service launcher built from the live inventory, and rail widgets — clock, weather, news, markets, bookmarks, activity, stacks, attention. Every widget has a zone (main/sidebar), a size (S/M/L), visibility and its own config; drag to reorder, resize or hide, all persisted. Composition presets live in Settings → Templates |
 | **Services** (`/services`) | Every discovered container, grouped; applications and infrastructure rails separated by what the engine says about them; click → OpusHub's own service page |
 | **Service page** (`/services/:group/:name`) | Identity, runtime stats (real, from Docker), infrastructure (ports/networks/volumes), related activity, Open/Logs actions only where actually implemented |
 | **Stacks** (`/stacks`) | Compose projects as Docker reports them (`com.docker.compose.project`), with their member containers, plus standalone containers; aggregate status |
 | **Stack page** (`/stacks/:name`) | Member containers with stats, ports, networks, volumes, logs drawer |
 | **System** (`/system`) | CPU / memory / storage / network / host — oversized numerals, per-core grid, charts from a real 5s sample history, honest `Unavailable` where the kernel offers nothing |
 | **Activity** (`/activity`) | Timeline of real events: config writes, launches, app lifecycle, Docker state changes |
-| **Settings** (`/settings/…`) | Appearance (theme, accent, density, background — live preview, no restart), Hub templates & widget control, services/bookmarks editor with icon picker, integrations, system/env diagnostics |
+| **Settings** (`/settings/…`) | Appearance (theme, accent, density), Background, Hub layout (composition presets + a live preview of the real Hub), Widgets, Templates, Services (customization overlay + icon picker), Groups, Bookmarks, Integrations, System (paths, discovery) and Advanced (custom CSS/JS, refresh intervals) |
 | **Icons** (`/icons`) | Bundled Lucide + Material Design Icons + Simple Icons (resolve offline), Iconify when online, your own files in `config/icons/`, monogram fallback by design |
 
 ## Configuration & `.env` discovery
@@ -47,7 +47,8 @@ config/stacks.yaml      OPTIONAL presentation overlay — renames/describes a co
 config/settings.yaml    appearance, hub behavior, integrations (news feeds, weather, markets),
                         host address + proxy entrypoint ports used by URL discovery
 config/bookmarks.yaml   flat links
-config/layout.json      hub layout written by drag & drop
+config/layout.json      hub composition (v2): widget instances with zone/size/visibility/config,
+                        spacing, section order, per-group service order — written by drag & drop
 config/theme.css        optional custom CSS (enable in Settings → System)
 config/app.js           optional custom JS (enable deliberately)
 config/icons/           served at /user/icons/*
@@ -123,9 +124,23 @@ entrypoint, not a public service); put a reverse proxy with auth in front if you
 
 ```
 npm run check               # tsc + production build
-npm test                    # 130 tests: label grammar, URL precedence, the discovery join, model
-                            # integration (with and without overlays), provider, env, API boundary,
-                            # and the offline contract — all against the mock engine
+npm test                    # 147 tests: label grammar, URL precedence, the discovery join, layout v2
+                            # normalisation and templates, model integration (with and without
+                            # overlays), provider, env, API boundary, and the offline contract —
+                            # all against the mock engine
+npm run test:web            # DOM interaction checks in jsdom: search hotkeys/arrows/Enter, widget
+                            # menus writing the layout, keyboard reordering, preview inertness,
+                            # shared-data request counts (needs the jsdom devDependency)
+npm run verify              # the whole API surface against a *scratch* config dir on its own port:
+                            # empty config, overlay, hidden/reordered services, templates, search,
+                            # detail pages, provider-unavailable paths. Safe on a live host — your
+                            # config/ is never touched. OPUSHUB_DOCKER_SOCKET=/var/run/docker.sock
+                            # npm run verify points it at the real engine
+npm run smoke               # server-render checks: every route renders; the Hub under nine data
+                            # states (empty, docker off, providers down, unconfigured, hidden,
+                            # reordered, unknown widget type, preview, loading)
+npm run smoke:live          # fetches a *running* OpusHub and renders the real Hub from its payloads
+                            # (OPUSHUB_URL=http://host:3000 points it at another instance)
 npm run mock-engine         # standalone fake Engine API for live validation:
                             # OPUSHUB_DOCKER_SOCKET=/tmp/opushub-mock-docker.sock npm start
                             # (OPUSHUB_MOCK_HIDE=seerr removes a container to test disappearance)
