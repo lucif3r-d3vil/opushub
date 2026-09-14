@@ -304,6 +304,13 @@ input[type='range'] { accent-color: var(--accent); width: 180px; }
 .tl-filters { display: flex; gap: 6px; flex-wrap: wrap; }
 .tl-filters .chip.active { border-color: var(--hair-strong); color: var(--ink); background: var(--surface-2); }
 /* the finer activity filters: four small fields that collapse to two columns on a phone */
+/* a loading line is a status, not decoration: quiet, one line, never a skeleton screen */
+.loading-note { padding: var(--sp-4) 0; }
+.loading-note-sub { opacity: 0.75; }
+
+/* the palette's input suppresses its own outline, so the panel carries the focus ring instead */
+.cmdk-panel:focus-within { box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-2); }
+
 .tl-scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3) var(--sp-4); margin-top: var(--sp-4); max-width: 860px; }
 .tl-field { display: grid; gap: 5px; min-width: 0; }
 .tl-field .input { width: 100%; }

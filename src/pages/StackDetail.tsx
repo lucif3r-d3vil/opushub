@@ -6,7 +6,7 @@ import { useSettings } from '../lib/theme';
 import type { ActivityEvent } from '../lib/types';
 import { Icon } from '../components/Icon';
 import { AreaChart, MeterBar } from '../components/Charts';
-import { PageHero, ProviderNote, SectionHead, StatusLine } from '../components/ui';
+import { Loading, PageHero, ProviderNote, SectionHead, StatusLine } from '../components/ui';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
 
@@ -93,6 +93,7 @@ function StackHistory({ stackId, members }: { stackId: string; members: number }
   const first = samples[0].t, last = samples[samples.length - 1].t;
   const windowMs = Math.min(30 * 60_000, Math.max(2 * 60_000, last - first));
   const avgCount = Math.round(samples.reduce((a, s) => a + s.count, 0) / samples.length);
+  const spanMinutes = Math.max(1, Math.round((last - first) / 60_000));
 
   return (
     <div className="res-history">
@@ -108,9 +109,10 @@ function StackHistory({ stackId, members }: { stackId: string; members: number }
       </div>
       <AreaChart height={118} windowMs={windowMs} fmt={fmt} series={series} maxHint={reading === 'cpu' ? 100 : undefined} />
       <p className="stale-note">
-        {samples.length} aggregated sample{samples.length === 1 ? '' : 's'} summing {avgCount} container{avgCount === 1 ? '' : 's'} per point
-        {data.containers > members ? '' : ` of ${members}`} — members nobody has looked at contribute nothing, and aggregates are
-        collected only while this page is open.
+        {samples.length} aggregated point{samples.length === 1 ? '' : 's'} over the last {spanMinutes} min — each point sums{' '}
+        {avgCount} of {members} container{members === 1 ? '' : 's'}. Members nobody has looked at contribute nothing, and the
+        aggregate exists only for the time this page has been open
+        {data.watchingSince ? ` (sampling began ${relTime(data.watchingSince)})` : ''}. Anything older was never recorded.
       </p>
     </div>
   );
@@ -126,7 +128,7 @@ export default function StackDetailPage() {
   );
   const activity = usePolled<{ items: ActivityEvent[] }>('/api/activity?limit=80', 60_000);
 
-  if (loading && !data) return <div className="stale-note" style={{ padding: 'var(--sp-12) 0' }}>Loading stack…</div>;
+  if (loading && !data) return <div style={{ padding: 'var(--sp-12) 0' }}><Loading what="this stack" note="one container at a time, bounded" /></div>;
   if (error && !data) return <ProviderNote status="error" reason={error} fixHref="/stacks" fixLabel="All stacks →" />;
   if (!data) return <ProviderNote status="error" reason="Stack not found." fixHref="/stacks" fixLabel="All stacks →" />;
 

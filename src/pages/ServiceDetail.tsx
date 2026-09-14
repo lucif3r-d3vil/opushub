@@ -11,7 +11,7 @@ import { useSettings } from '../lib/theme';
 import type { ActivityEvent, ContainerStats, ImageInfo, Service, ServiceHistoryDoc, Stack, StatsSample, SystemSnapshot } from '../lib/types';
 import { Icon } from '../components/Icon';
 import { AreaChart, MeterBar, Sparkline } from '../components/Charts';
-import { Freshness, OpenLink, ProviderNote, SectionHead, StatusLine } from '../components/ui';
+import { Freshness, Loading, OpenLink, ProviderNote, SectionHead, StatusLine } from '../components/ui';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
 
@@ -80,7 +80,7 @@ export default function ServiceDetail() {
   const activity = usePolled<{ items: ActivityEvent[] }>(`/api/activity?limit=40`, 60_000);
   const sys = usePolled<SystemSnapshot>('/api/system', 10_000);
 
-  if (loading && !data) return <div className="stale-note" style={{ padding: 'var(--sp-12) 0' }}>Loading service…</div>;
+  if (loading && !data) return <div style={{ padding: 'var(--sp-12) 0' }}><Loading what="this service" note="from the engine and the presentation overlay" /></div>;
   if (error && !data) return <ProviderNote status="error" reason={error} fixHref="/services" fixLabel="Back to Services →" />;
   if (!data) return <ProviderNote status="error" reason="Service not found." fixHref="/services" fixLabel="Back to Services →" />;
 

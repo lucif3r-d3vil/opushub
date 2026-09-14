@@ -97,6 +97,11 @@ test('every application endpoint refuses an anonymous caller', async () => {
     ['GET', '/api/bookmarks'], ['GET', '/api/assets'], ['GET', '/api/icons'], ['GET', '/api/discovery'],
     ['GET', '/api/providers'], ['GET', '/api/inventory'], ['GET', '/api/urls'],
     ['PUT', '/api/settings'], ['PUT', '/api/layout'], ['PUT', '/api/overlays'], ['POST', '/api/icons/search'],
+    // Phase 5 additions: search (which indexes services, stacks and activity), per-service and
+    // per-stack history, the session inventory, and the password endpoint.
+    ['GET', '/api/search?q=stream'], ['GET', '/api/services/Music/wave/stats/history'],
+    ['GET', '/api/services/Music/wave/history'], ['GET', '/api/stacks/media/history'],
+    ['GET', '/api/auth/sessions'], ['POST', '/api/auth/password'], ['POST', '/api/auth/sessions/revoke'],
   ];
   for (const [method, p] of routes) {
     const r = await call(method, p, { auth: false, body: method === 'GET' ? undefined : {} });
@@ -104,6 +109,21 @@ test('every application endpoint refuses an anonymous caller', async () => {
     assert.match(r.json?.error || '', /authentication required/i);
     assert.ok(!r.text.includes('fixture'), 'a refused response must not carry data');
   }
+});
+
+test('a deep link is the shell and nothing else — no data behind a URL', async () => {
+  // The SPA routes are public *files*; every byte of data behind them is not. An unauthenticated
+  // deep link must return the app shell (which then shows the sign-in screen) and nothing more.
+  for (const path of ['/activity?service=wave', '/settings/authentication', '/services/Media/wave', '/system']) {
+    const r = await get(path, { auth: false });
+    assert.ok(r.status === 200 || r.status === 404, `${path} → ${r.status}`);
+    assert.ok(!r.text.includes('fixture'), `${path} served fixture data to an anonymous caller`);
+    assert.ok(!/container\.started|auth\.login|jellyfin/.test(r.text), `${path} served activity or inventory data`);
+  }
+  // and the search index — which is a live view of the inventory — is served to nobody but a session
+  const anonSearch = await get('/api/search?q=stream', { auth: false });
+  assert.equal(anonSearch.status, 401);
+  assert.ok(!anonSearch.text.includes('jellyfin'));
 });
 
 test('an unknown API path is refused too — no route enumeration without a session', async () => {

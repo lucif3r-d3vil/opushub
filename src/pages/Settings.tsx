@@ -10,7 +10,7 @@ import type {
 } from '../lib/types';
 import { Icon } from '../components/Icon';
 import { IconPickerModal } from '../components/IconPicker';
-import { Menu, MenuButton, type MenuItem, Modal, PageHero, ProviderNote, Segmented, StatusLine, Switch } from '../components/ui';
+import { Loading, Menu, MenuButton, type MenuItem, Modal, PageHero, ProviderNote, Segmented, StatusLine, Switch } from '../components/ui';
 import { GroupNameField } from '../components/GroupNameField';
 import { checkGroupName, renameGroupAt, uniqueGroupName } from '../lib/groupName';
 import { Sortable } from '../components/Sortable';
@@ -32,20 +32,27 @@ import {
  * route that existed before still exists at the same URL, so old bookmarks and the command palette
  * keep working. `system` is kept as an alias of `environment`, which is what it always described.
  */
+// The settings information architecture: five groups, thirteen panes. Panes stay where they were —
+// only their headings are new — so nothing an operator learned in Phase 4 moved.
+//   Home          what this install is and how it looks
+//   Hub           the composition of the front page
+//   Content       what is presented, and how it is grouped
+//   Connections   the outside world (feeds, weather, markets)
+//   This install  the engine, the account and the escape hatches
 const TABS = [
-  { id: 'general', label: 'General', section: 'General' },
-  { id: 'appearance', label: 'Appearance', section: 'Appearance' },
-  { id: 'background', label: 'Background', section: 'Appearance' },
-  { id: 'services', label: 'Services', section: 'Services' },
-  { id: 'groups', label: 'Groups', section: 'Groups' },
-  { id: 'bookmarks', label: 'Bookmarks', section: 'Bookmarks' },
-  { id: 'widgets', label: 'Widgets', section: 'Widgets' },
-  { id: 'hub', label: 'Hub layout', section: 'Widgets' },
-  { id: 'templates', label: 'Templates', section: 'Widgets' },
-  { id: 'integrations', label: 'Integrations', section: 'Integrations' },
-  { id: 'authentication', label: 'Account & sessions', section: 'Authentication' },
-  { id: 'environment', label: 'Environment', section: 'Environment' },
-  { id: 'advanced', label: 'Advanced', section: 'Advanced' },
+  { id: 'general', label: 'General', section: 'Home' },
+  { id: 'appearance', label: 'Appearance', section: 'Home' },
+  { id: 'background', label: 'Background', section: 'Home' },
+  { id: 'hub', label: 'Hub layout', section: 'Hub' },
+  { id: 'widgets', label: 'Widgets', section: 'Hub' },
+  { id: 'templates', label: 'Templates', section: 'Hub' },
+  { id: 'services', label: 'Services', section: 'Content' },
+  { id: 'groups', label: 'Groups', section: 'Content' },
+  { id: 'bookmarks', label: 'Bookmarks', section: 'Content' },
+  { id: 'integrations', label: 'Integrations', section: 'Connections' },
+  { id: 'environment', label: 'Environment', section: 'This install' },
+  { id: 'authentication', label: 'Account & sessions', section: 'This install' },
+  { id: 'advanced', label: 'Advanced', section: 'This install' },
 ];
 
 /** Old route → current route. Nothing that worked before may 404 now. */
@@ -150,7 +157,7 @@ function GeneralTab() {
   const { settings, update } = useSettings();
   const { layout } = useLayout();
   const { data: health } = usePolled<HealthDoc>('/api/health', 0);
-  if (!settings) return <p className="stale-note">Loading settings…</p>;
+  if (!settings) return <Loading what="settings.yaml" />;
   return (
     <>
       <p className="lede">
@@ -282,7 +289,7 @@ function AuthenticationTab() {
         title="Signed-in sessions"
         aside={data ? <span className="stale-note">{data.count} of {data.limits.max} · expires after {Math.round(data.limits.absoluteMs / 86400000)} days, or {Math.round(data.limits.idleMs / 86400000)} days idle</span> : undefined}
       >
-        {!data && <p className="stale-note">Loading sessions…</p>}
+        {!data && <Loading what="signed-in browsers" />}
         {data?.sessions.map((s) => (
           <div className="session-row" key={s.id}>
             <div style={{ minWidth: 0 }}>
@@ -419,7 +426,7 @@ function AppearanceTab() {
   const { settings, update, resolvedTheme } = useSettings();
   const a = settings?.appearance;
   const set = useCallback((patch: DeepPartial<SettingsDoc>) => update(patch), [update]);
-  if (!settings || !a) return <p className="stale-note">Loading settings…</p>;
+  if (!settings || !a) return <Loading what="appearance settings" />;
   return (
     <>
       <Block title="Theme">
@@ -486,7 +493,7 @@ function BackgroundTab() {
   // a ref (not state): Enter blurs the field, and the blur commit must see the attempt that
   // the Enter commit just recorded — state would not have flushed yet
   const lastAttemptRef = useRef<string | null>(null);
-  if (!settings || !a) return <p className="stale-note">Loading settings…</p>;
+  if (!settings || !a) return <Loading what="service settings" />;
 
   const check = async (value: string) => {
     const v = value.trim();
@@ -582,7 +589,7 @@ function BackgroundTab() {
 function HubTab() {
   const { settings, update } = useSettings();
   const { layout, setLayout, resetLayout } = useLayout();
-  if (!settings || !layout) return <p className="stale-note">Loading…</p>;
+  if (!settings || !layout) return <Loading what="the Hub composition" />;
   return (
     <>
       <Block title="Greeting" aside={<Link className="section-link" to="/settings/general">General →</Link>}>
@@ -627,7 +634,7 @@ function WidgetsTab() {
   const categoryLabel = (id: string) => categories.find((c) => c.id === id)?.label || id;
 
   const entries = useMemo(() => new Map(catalogue.map((c) => [c.type, c])), [catalogue]);
-  if (!layout) return <p className="stale-note">Loading layout…</p>;
+  if (!layout) return <Loading what="layout.json" />;
 
   const zoneBlock = (zone: WidgetZone) => {
     const list = widgets.filter((w) => w.zone === zone);
@@ -952,7 +959,7 @@ function ServicesTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus, data]);
 
-  if (!groups) return <p className="stale-note">Loading services.yaml…</p>;
+  if (!groups) return <Loading what="services.yaml" />;
 
   const dirty = !!draft;
   const commit = () => save(async () => { await saveOverlay(groups); setDraft(null); });
@@ -1215,7 +1222,7 @@ function GroupsTab() {
     return seen;
   }, [inventory]);
 
-  if (!groups) return <p className="stale-note">Loading groups…</p>;
+  if (!groups) return <Loading what="the service groups" />;
   const dirty = !!draft;
   const renameAt = (index: number, next: string) => setDraft(renameGroupAt(groups, index, next));
   const addGroup = () => {
@@ -1346,7 +1353,7 @@ function BookmarksTab() {
   const [freshGroup, setFreshGroup] = useState<number | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const groups = draft ?? data?.groups ?? [];
-  if (!data && !draft) return <p className="stale-note">Loading bookmarks…</p>;
+  if (!data && !draft) return <Loading what="bookmarks.yaml" />;
   const renameAt = (index: number, next: string) => setDraft(cloneAt(groups, (d) => { d[index].name = next; }));
   const addGroup = () => {
     const name = uniqueGroupName(groups.map((g) => g.name));
@@ -1447,7 +1454,7 @@ function IntegrationsTab() {
   const [feedUrl, setFeedUrl] = useState('');
   const [sym, setSym] = useState('');
   const [symProblem, setSymProblem] = useState<string | null>(null);
-  if (!settings || !intg) return <p className="stale-note">Loading…</p>;
+  if (!settings || !intg) return <Loading what="integration settings" />;
   const feeds = intg.news.feeds || [];
   const symbols = intg.markets.symbols || [];
   const touch = () => { invalidateShared('/api/news'); invalidateShared('/api/weather'); invalidateShared('/api/market'); };
@@ -1621,7 +1628,7 @@ function ProvidersBlock() {
 function DiscoveryBlock(_props: { health: HealthDoc | null }) {
   const { data, refresh } = usePolled<DiscoveryDoc>('/api/discovery', 30_000);
   const { busy, save } = useSave();
-  if (!data) return <Block title="Service discovery"><p className="stale-note">Reading engine status…</p></Block>;
+  if (!data) return <Block title="Service discovery"><Loading what="the engine's status" /></Block>;
   const e = data.engine;
   return (
     <Block

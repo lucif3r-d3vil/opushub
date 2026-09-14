@@ -17,6 +17,7 @@ import ServiceDetail from '../../src/pages/ServiceDetail';
 import StackDetail from '../../src/pages/StackDetail';
 import SystemPage from '../../src/pages/System';
 import ActivityPage from '../../src/pages/Activity';
+import { Loading } from '../../src/components/ui';
 import type { LayoutDoc, WidgetInstance } from '../../src/lib/types';
 import type { HubData } from '../../src/lib/hubData';
 import App from '../../src/App';
@@ -597,7 +598,7 @@ export async function runWebTests(): Promise<WebResult> {
   await test('stack detail renders the project, its rollup, and an aggregate chart', async (h) => {
     await h.mount(<TestApp entry="/stacks/media"><Hub /></TestApp>);
     await h.waitFor(() => text().includes('Media'), 'the stack page');
-    await h.waitFor(() => text().includes('aggregated sample'), 'the aggregate history');
+    await h.waitFor(() => text().includes('aggregated point'), 'the aggregate history');
     expect(text().includes('Wave') || text().includes('wave'), 'the stack members are missing');
     expect(!/Docker isn.t connected/.test(text()) || stackDetail.live === false, 'a live stack reported as disconnected');
 
@@ -611,7 +612,8 @@ export async function runWebTests(): Promise<WebResult> {
     // the aggregate chart is measured (fixed box) and honest about what it covers
     const chart = q('.res-history .chart');
     expect(!!chart && !!chart.querySelector('svg'), 'the stack history chart did not render');
-    expect(text().includes('members nobody has looked at contribute nothing'), 'the aggregate chart does not explain its own limits');
+    expect(/each point sums \d+ of \d+ container/.test(text()), 'the aggregate chart does not say what a point covers');
+    expect(text().includes('never recorded'), 'the aggregate chart does not bound its own history');
 
     // and the page says out loud that a compose project is not a presentation group
     expect(text().includes('Compose project is infrastructure'), 'the compose-project ≠ group note is missing');
@@ -784,6 +786,41 @@ export async function runWebTests(): Promise<WebResult> {
     expect(h.calls.some((c) => c.path.startsWith('/api/providers')), 'the settings page never asked for provider health');
   });
 
+  /* 17b — Phase 5: the settings navigation is grouped, current, and honest about loading */
+  await test('settings: grouped navigation, a current section, and announced loading states', async (h) => {
+    await h.mount(<TestApp entry="/settings/general"><Settings /></TestApp>);
+    await h.waitFor(() => !!q('.settings-nav'), 'the settings navigation');
+    const labels = qa('.settings-nav-label').map((el) => text(el));
+    expect(labels.length === 5, `the nav is not grouped into five sections (${labels.join(' / ')})`);
+    for (const section of ['Home', 'Hub', 'Content', 'Connections', 'This install']) {
+      expect(labels.includes(section), `the “${section}” section heading is missing (${labels.join(' / ')})`);
+    }
+    // every section of the IA is reachable, including the three Phase 5 panes
+    const navText = text(q('.settings-nav')!);
+    for (const item of ['General', 'Appearance', 'Services', 'Groups', 'Bookmarks', 'Widgets', 'Integrations', 'Account & sessions', 'Environment', 'Advanced']) {
+      expect(navText.includes(item), `“${item}” is missing from the settings navigation`);
+    }
+    // the item you are on says so — visually and to assistive tech
+    const current = qa('[aria-current="page"]').map((el) => text(el));
+    expect(current.some((c) => c.includes('General')), `no section is marked current (${current.join(', ')})`);
+
+    // the old /settings/system route still lands on Environment rather than 404-ing
+    const h2 = await createHarness({ routes: stubRoutes(), fallback: () => ({}) });
+    try {
+      await h2.mount(<TestApp entry="/settings/system"><Settings /></TestApp>);
+      await h2.waitFor(() => text().includes('Homepage-compatible'), 'the Environment pane');
+      expect(qa('[aria-current="page"]').some((el) => text(el).includes('Environment')), 'the alias did not select Environment');
+    } finally {
+      await h2.unmount();
+    }
+
+    // loading is announced, names what it waits for, and never claims data it does not have
+    await h.mount(<Loading what="the engine's status" />);
+    await h.flush(10);
+    expect(!!q('.loading-note[role="status"]'), 'the loading line is not a status');
+    expect(text().includes("Reading the engine's status"), `the loading line does not name its subject: ${text()}`);
+  });
+
   /* 18 — Phase 4: an uninitialized install gets the wizard, and no application data is fetched */
   await test('auth gate: setup required shows the wizard and never loads the app', async (h) => {
     h.setRoutes({
@@ -888,6 +925,21 @@ export async function runWebTests(): Promise<WebResult> {
     // …and the hand-off is explicit
     await advance('Enter OpusHub');
     await h.waitFor(() => !!q('.rail'), 'the application shell after entering');
+  });
+
+  /* 18c — Phase 5: a deep link into a filtered view is still behind the door */
+  await test('deep links: /activity?service=… shows the sign-in screen and fetches no application data', async (h) => {
+    h.setRoutes({
+      '/api/setup/status': { required: false, complete: true, hasAccount: true, version: '0.1.0' },
+      '/api/auth/me': { authenticated: false, user: null, setupComplete: true },
+      '/api/docker/status': { ok: true, state: 'connected', version: '26.1.0-mock' },
+    });
+    await h.mount(<MemoryRouter initialEntries={['/activity?service=wave']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('#login-pass'), 'the sign-in screen');
+    expect(!q('.rail'), 'the shell rendered behind a deep link');
+    expect(!text().includes('wave'), 'the deep link leaked a service name into the sign-in screen');
+    const appPaths = h.calls.filter((c) => c.path.startsWith('/api/') && !c.path.startsWith('/api/auth/') && !c.path.startsWith('/api/setup/'));
+    expect(appPaths.length === 0, `an unauthenticated deep link fetched ${appPaths.map((c) => c.path).join(', ')}`);
   });
 
   /* 19 — Phase 4: an initialized install asks for a password; a wrong one is reported, a right one enters */

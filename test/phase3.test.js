@@ -278,6 +278,37 @@ test('stack detail: members are enriched; totals stay read-only projections', as
 
 // ── ACTIVITY: dedupe + grouping ─────────────────────────────────────────────
 
+test('activity: looking at pages and polling never writes an event', async () => {
+  // OpusHub polls constantly — a dashboard refreshes five endpoints, the Hub polls widgets, the
+  // detail pages poll stats. None of that is "something happening", so none of it may reach the log.
+  activity._resetActivity();
+  const before = (await get('/api/activity?limit=500')).json.total;
+  for (let i = 0; i < 3; i++) {
+    await get('/api/services');
+    await get('/api/stacks');
+    await get('/api/system');
+    await get('/api/discovery');
+    await get('/api/providers');
+    await get('/api/activity?limit=50');
+    await get('/api/search?q=wave');
+    await get('/api/services/Music/wave');
+    await get('/api/stacks/media');
+    await get('/api/services/Music/wave/stats/history');
+    await get('/api/stacks/media/history');
+  }
+  const after = (await get('/api/activity?limit=500')).json.total;
+  assert.equal(after, before, `polling wrote ${after - before} activity event(s)`);
+  assert.ok(!(await get('/api/activity?limit=50')).json.items.some((e) => /view|poll|refresh/i.test(e.type || '')),
+    'a view-shaped event type exists');
+
+  // a provider that keeps failing is reported once, not once per poll
+  healthMod.reportProvider('weather', 'unavailable', { reason: 'fixture outage' });
+  healthMod.reportProvider('weather', 'unavailable', { reason: 'fixture outage' });
+  healthMod.reportProvider('weather', 'unavailable', { reason: 'fixture outage' });
+  const outages = (await get('/api/activity?limit=200')).json.items.filter((e) => e.type === 'provider.unavailable' && e.subject === 'weather');
+  assert.equal(outages.length, 1, `a steady-state failure logged ${outages.length} times`);
+});
+
 test('activity filters: service, stack, type and time narrow the whole log, not the last page', async () => {
   activity._resetActivity();
   // a small, known history: three services, two projects, three event families
