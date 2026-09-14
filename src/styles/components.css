@@ -234,6 +234,10 @@ input[type='range'] { accent-color: var(--accent); width: 180px; }
 .settings-nav a:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink); }
 .settings-nav a.active { color: var(--ink); font-weight: 590; background: color-mix(in srgb, var(--ink) 8%, transparent); }
 .settings-pane { max-width: 760px; }
+/* live preview: sticky at the top of the pane so edits and result are on screen together */
+.settings-preview { position: sticky; top: var(--sp-4); z-index: 6; margin-bottom: var(--sp-8); }
+.settings-grid--preview .settings-preview { background: var(--bg); padding-bottom: var(--sp-2); }
+.settings-preview-clear { margin-top: 6px; }
 .settings-pane h2 { font-size: var(--fs-title); margin-bottom: var(--sp-2); }
 .settings-pane .lede { color: var(--ink-2); margin-bottom: var(--sp-8); }
 .form-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-4) 0; border-top: 1px solid var(--hair); }

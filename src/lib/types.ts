@@ -264,15 +264,83 @@ export interface SettingsDoc {
   _text?: string;
 }
 
+/* ---------------- Hub composition (layout.json v2) ---------------- */
+
+export type WidgetZone = 'main' | 'rail';
+export type WidgetSize = 'sm' | 'md' | 'lg';
+export type HubSpacing = 'cozy' | 'comfortable' | 'airy';
+
+/** One Hub block. `type` decides what it is; the rest decides where it sits and how big it is. */
+export interface WidgetInstance {
+  id: string;
+  type: string;
+  title?: string;
+  zone: WidgetZone;
+  size: WidgetSize;
+  visible: boolean;
+  config: Record<string, unknown>;
+}
+
+export interface WidgetConfigField {
+  key: string;
+  label: string;
+  type: 'text' | 'boolean' | 'number' | 'list' | 'group-list';
+  hint?: string;
+  options?: string[];
+}
+
+/** What the server will accept — the client renders from this, it does not define it. */
+export interface WidgetCategory { id: string; label: string; description: string }
+
+export interface WidgetCatalogueEntry {
+  type: string;
+  /** where this widget's information comes from — system · grid · information · personal */
+  category?: string;
+  title: string;
+  description: string;
+  zone: WidgetZone;
+  size: WidgetSize;
+  sizes: WidgetSize[];
+  config: WidgetConfigField[];
+}
+
+export interface WidgetDoc {
+  catalogue: WidgetCatalogueEntry[];
+  /** the picker's organisation: system · grid · information · personal */
+  categories?: WidgetCategory[];
+  widgets: WidgetInstance[];
+  spacing: HubSpacing;
+}
+
+export interface TemplateEntry {
+  id: string;
+  name: string;
+  tagline: string;
+  description: string;
+  spacing: HubSpacing;
+  widgets: { id: string; type: string; zone: WidgetZone; size: WidgetSize; title: string }[];
+  groupPriority: string[];
+  /** preferences that match no group on this system right now — shown, never faked */
+  unmatchedGroups: string[];
+  preview: LayoutDoc;
+}
+
+export interface TemplatesDoc {
+  templates: TemplateEntry[];
+  layout: LayoutDoc;
+  spacing: HubSpacing;
+  groupNames: string[];
+}
+
 export interface LayoutDoc {
+  version?: number;
   hub: {
-    main: string[];
-    rail: string[];
-    hidden: string[];
-    sizes: Record<string, 'sm' | 'md' | 'lg'>;
+    /** ordered per zone: the array order IS the position */
+    widgets: WidgetInstance[];
+    spacing: HubSpacing;
     setupDismissed?: boolean;
   };
-  services: { groupOrder: string[] | null; order: Record<string, string[]> };
+  services: { groupOrder: string[] | null; order: Record<string, string[]>; hiddenGroups: string[] };
 }
 
 export interface HealthDoc {
