@@ -1,5 +1,6 @@
 // Small shared UI primitives: status, empty states, section heads, buttons, modals.
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import type { ProviderStatus } from '../lib/types';
 import { relTime } from '../lib/format';
@@ -115,19 +116,116 @@ export function Modal({ title, onClose, children, footer, wide }: { title: React
 
 export interface MenuItem { label?: string; icon?: ReactNode; action?: () => void; href?: string; danger?: boolean; sep?: boolean; active?: boolean }
 
-export function Menu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
+const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+export interface MenuProps {
+  items: MenuItem[];
+  onClose: () => void;
+  /** the control the menu belongs to — positioning is derived from its real box */
+  anchor?: HTMLElement | null;
+  /** fallback anchor point, for context menus opened at the pointer */
+  x?: number;
+  y?: number;
+  align?: 'start' | 'end';
+  /** accessible name of the popup itself (the trigger carries its own) */
+  label?: string;
+  /** focus the first item on open (default) — set false when the caller manages focus */
+  autoFocus?: boolean;
+}
+
+/**
+ * A menu that is *placed relative to its trigger*, measured after mount.
+ *
+ * Two details matter, and both were the reason a popup could land in the wrong place:
+ *
+ *  1. it renders through a portal on document.body. `position: fixed` inside a transformed or
+ *     filtered ancestor (the page transition, a blurred surface) is positioned against that
+ *     ancestor, not the viewport — so a menu could sit hundreds of pixels away from its button.
+ *  2. the position comes from measuring the menu itself and the anchor's real rect: it opens
+ *     below the trigger, flips above when there is no room, and is clamped into the viewport
+ *     with an 8px gutter. It re-measures on resize and on any scroll.
+ */
+export function Menu({ items, onClose, anchor = null, x, y, align = 'end', label, autoFocus = true }: MenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  useIsoLayoutEffect(() => {
+    const place = () => {
+      const el = ref.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const gap = 6;
+      const gutter = 8;
+      let left: number;
+      let top: number;
+      const a = anchor?.getBoundingClientRect();
+      if (a && (a.width || a.height)) {
+        left = align === 'end' ? a.right - rect.width : a.left;
+        top = a.bottom + gap;
+        const above = a.top - gap - rect.height;
+        if (top + rect.height > vh - gutter && above > gutter) top = above;
+      } else {
+        left = (x ?? 0) + 2;
+        top = (y ?? 0) + 2;
+        if (left + rect.width > vw - gutter) left = left - rect.width;      // context menu flips left
+        if (top + rect.height > vh - gutter) top = Math.max(gutter, vh - gutter - rect.height);
+      }
+      left = Math.max(gutter, Math.min(left, vw - rect.width - gutter));
+      top = Math.max(gutter, Math.min(top, vh - rect.height - gutter));
+      setPos((cur) => (cur && Math.abs(cur.left - left) < 0.5 && Math.abs(cur.top - top) < 0.5 ? cur : { left, top }));
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [anchor, align, x, y, items.length]);
+
+  // keyboard: the menu behaves like a real menu, and closing restores focus to its trigger
   useEffect(() => {
-    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('mousedown', onDown);
+    const el = ref.current;
+    const focusables = () => [...(el?.querySelectorAll<HTMLElement>('[role="menuitem"]') || [])];
+    const restore = () => { if (typeof anchor?.focus === 'function') anchor.focus(); };
+    if (autoFocus) focusables()[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); restore(); return; }
+      if (e.key === 'Tab') { onClose(); return; }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
+      const list = focusables();
+      if (!list.length) return;
+      e.preventDefault();
+      const at = list.indexOf(document.activeElement as HTMLElement);
+      const next = e.key === 'Home' ? 0
+        : e.key === 'End' ? list.length - 1
+          : e.key === 'ArrowDown' ? (at + 1) % list.length
+            : (at - 1 + list.length) % list.length;
+      list[next]?.focus();
+    };
     window.addEventListener('keydown', onKey);
-    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey); };
-  }, [onClose]);
-  const left = Math.min(x, window.innerWidth - 220);
-  const top = Math.min(y, window.innerHeight - items.length * 34 - 20);
-  return (
-    <div className="menu" ref={ref} style={{ left, top }} role="menu">
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, anchor, autoFocus]);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (ref.current?.contains(target)) return;
+      // a click on the trigger is the trigger's business — it toggles (and closing here would
+      // make the toggle a no-op, leaving the menu apparently stuck open)
+      if (anchor && (anchor === target || anchor.contains(target))) return;
+      onClose();
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('touchstart', onDown);
+    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('touchstart', onDown); };
+  }, [onClose, anchor]);
+
+  const menu = (
+    <div
+      className="menu" ref={ref} role="menu" aria-label={label}
+      data-anchored={anchor ? 'true' : undefined}
+      style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
+    >
       {items.map((it, i) =>
         it.sep ? <div className="sep" key={i} /> :
           it.label === undefined ? null :
@@ -137,6 +235,56 @@ export function Menu({ x, y, items, onClose }: { x: number; y: number; items: Me
               <button key={i} role="menuitem" data-hl={it.active || undefined} aria-checked={it.active} className={it.danger ? 'danger' : ''} onClick={() => { it.action?.(); onClose(); }}>{it.icon}{it.label}</button>
             ))}
     </div>
+  );
+  // No portal when there is no DOM (server render) — the menu only ever opens on interaction.
+  return typeof document === 'undefined' ? menu : createPortal(menu, document.body);
+}
+
+/**
+ * A trigger + its menu, as one component. The button owns `aria-haspopup`/`aria-expanded`, opens
+ * on click or ArrowDown, and the menu is always positioned against this exact element.
+ */
+export function MenuButton({
+  items, label, className = 'icon-btn', align = 'end', menuAlign, title, children, disabled = false,
+}: {
+  items: MenuItem[];
+  label: string;
+  className?: string;
+  align?: 'start' | 'end';
+  /** alias kept for readability at call sites that think in terms of the popup */
+  menuAlign?: 'start' | 'end';
+  title?: string;
+  children: ReactNode;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        className={className}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={title}
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); } }}
+      >
+        {children}
+      </button>
+      {open && (
+        <Menu
+          anchor={trigger.current}
+          align={menuAlign || align}
+          items={items}
+          label={label}
+          onClose={() => { setOpen(false); trigger.current?.focus(); }}
+        />
+      )}
+    </>
   );
 }
 

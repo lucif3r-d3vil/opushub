@@ -3,7 +3,7 @@
 // claims to write, and that keyboard reordering commits the order the user asked for.
 //
 // Run with: npm run test:web   (jsdom; see test/web-run.mjs)
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { act, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { LayoutProvider, SettingsProvider, useLayout } from '../../src/lib/theme';
 import { useHubData } from '../../src/lib/hubData';
@@ -16,6 +16,10 @@ import ServiceDetail from '../../src/pages/ServiceDetail';
 import StackDetail from '../../src/pages/StackDetail';
 import type { LayoutDoc, WidgetInstance } from '../../src/lib/types';
 import type { HubData } from '../../src/lib/hubData';
+import App from '../../src/App';
+import { GroupNameField } from '../../src/components/GroupNameField';
+import { MenuButton } from '../../src/components/ui';
+import { AreaChart } from '../../src/components/Charts';
 import { createHarness, click, key, q, qa, text, type, type Harness } from './harness';
 import {
   activityDoc, bookmarksDoc, catalogue, layoutWith, marketDoc, newsDoc, servicesDoc, stacksDoc,
@@ -610,6 +614,334 @@ export async function runWebTests(): Promise<WebResult> {
     expect(text().includes('Unavailable'), 'the failed provider is not marked unavailable');
     expect(text().includes('feeds unreachable'), 'the failure reason is hidden');
     expect(h.calls.some((c) => c.path.startsWith('/api/providers')), 'the settings page never asked for provider health');
+  });
+
+  /* 18 — Phase 4: an uninitialized install gets the wizard, and no application data is fetched */
+  await test('auth gate: setup required shows the wizard and never loads the app', async (h) => {
+    h.setRoutes({
+      '/api/setup/status': {
+        required: true, complete: false, hasAccount: false, version: '0.1.0',
+        discovery: { docker: { ok: true, version: '26.1.0-mock', state: 'connected' }, stacks: 3, containers: 7, running: 6, services: 5, urls: { detected: 3, manual: 1, none: 1 }, infrastructure: 2, applications: 3, traefik: { routes: 3, tlsRoutes: 2 } },
+      },
+      '/api/auth/me': { authenticated: false, user: null, setupComplete: false },
+    });
+    await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    await h.waitFor(() => text().includes('Welcome'), 'the setup wizard');
+    expect(!q('.rail'), 'the application shell rendered before setup was complete');
+    expect(text().includes('Administrator') && text().includes('Discovery'), 'the wizard steps are missing');
+    expect(!h.calls.some((c) => c.path === '/api/services' || c.path === '/api/settings'), 'pre-auth requests were made for application data');
+    expect(!q('#setup-user'), 'the account fields appear before the welcome step');
+    click(qa('button').find((b) => text(b).trim() === 'Begin')!);
+    await h.flush(30);
+    expect(q('#setup-user'), 'the wizard did not advance to the account step');
+    expect(!!q('#setup-pass2'), 'the confirm field is missing on the account step');
+  });
+
+  /* 19 — Phase 4: an initialized install asks for a password; a wrong one is reported, a right one enters */
+  await test('auth gate: sign-in, wrong password, and no token kept in the browser', async (h) => {
+    h.setRoutes({
+      '/api/setup/status': { required: false, complete: true, hasAccount: true, version: '0.1.0' },
+      '/api/auth/me': () => (signedIn
+        ? { authenticated: true, user: { username: 'admin' }, setupComplete: true }
+        : { authenticated: false, user: null, setupComplete: true }),
+      '/api/auth/login': (body) => {
+        const b = body as { username?: string; password?: string } | undefined;
+        if (b?.password === 'correct-horse-battery') { signedIn = true; return { ok: true, user: { username: b.username }, authenticated: true }; }
+        return { $status: 401, body: { error: 'Incorrect username or password.' } };
+      },
+      '/api/docker/status': { ok: true, state: 'connected', version: '26.1.0-mock' },
+      '/api/providers': { providers: [] },
+    });
+    let signedIn = false;
+    await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('#login-pass'), 'the login screen');
+    expect(!q('.rail'), 'the shell rendered before a session existed');
+
+    type(q<HTMLInputElement>('#login-user')!, 'admin');
+    type(q<HTMLInputElement>('#login-pass')!, 'wrong-password');
+    click(q('button.auth-submit')!);
+    await h.flush(120);
+    expect(!!q('.auth-error'), 'the refusal is not shown');
+    expect(text().includes('Incorrect username or password.'), 'the server reason is not shown');
+    expect(q<HTMLInputElement>('#login-pass')!.value === '', 'the password field is not cleared after a failure');
+    expect(!q('.rail'), 'a failed sign-in let the shell through');
+
+    type(q<HTMLInputElement>('#login-user')!, 'admin');
+    type(q<HTMLInputElement>('#login-pass')!, 'correct-horse-battery');
+    click(q('button.auth-submit')!);
+    await h.waitFor(() => !!q('.rail'), 'the application shell');
+    expect(h.calls.some((c) => c.method === 'GET' && c.path === '/api/settings'), 'the shell did not load its data after sign-in');
+
+    // nothing is kept in browser storage — the session is an HttpOnly cookie and nothing else
+    expect(window.localStorage.length === 0 && window.sessionStorage.length === 0, 'a token was written to browser storage');
+    const loginCall = h.lastCall('POST', '/api/auth/login');
+    expect(!!loginCall && (loginCall.body as { password?: string }).password === 'correct-horse-battery', 'the password was not sent to the API');
+  });
+
+  /* 20 — Phase 4: the group-name contract (Enter commits, Escape reverts, invalid refused) */
+  await test('group names: Enter commits, Escape reverts, blank and duplicates are refused', async (h) => {
+    const committed: string[] = [];
+    // a parent that stores the committed name — exactly what Settings does
+    const Stored = ({ initial, existing = [], autoFocus = false }: { initial: string; existing?: string[]; autoFocus?: boolean }) => {
+      const [name, setName] = useState(initial);
+      return <GroupNameField name={name} existing={existing} ariaLabel="Group name" autoFocus={autoFocus} onCommit={(n) => { committed.push(n); setName(n); }} />;
+    };
+    await h.mount(<Stored initial="Media" />);
+    const input = () => q<HTMLInputElement>('input.group-name')!;
+    expect(input().value === 'Media', 'the field does not show the stored name');
+
+    type(input(), 'Film');
+    key(input(), 'Enter');
+    await h.flush(10);
+    expect(committed.join() === 'Film', `Enter did not commit the new name (got ${JSON.stringify(committed)})`);
+    expect(input().value === 'Film', 'the field did not keep the committed name');
+
+    type(input(), 'Music');
+    key(input(), 'Escape');
+    await h.flush(10);
+    expect(committed.length === 1, 'Escape committed an abandoned edit');
+    expect(input().value === 'Film', 'Escape did not restore the stored name');
+
+    type(input(), '   ');
+    key(input(), 'Enter');
+    await h.flush(10);
+    expect(committed.length === 1, 'a blank name was committed');
+    expect(!!q('.name-note'), 'a refused name is shown without a reason');
+    expect(input().getAttribute('aria-invalid') === 'true', 'the invalid state is not exposed to assistive tech');
+    expect(input().value === '   ', 'the refused draft was thrown away instead of being left to fix');
+
+    // leaving the field with invalid text restores the stored name rather than showing a phantom one
+    await act(async () => { input().focus(); });
+    await act(async () => { input().blur(); });
+    await h.flush(10);
+    expect(input().value === 'Film', 'blurring an invalid edit left the field out of sync with the stored name');
+    expect(!q('.name-note'), 'the refusal reason stayed after the edit was abandoned');
+    expect(committed.length === 1, 'abandoning an invalid edit committed something');
+
+    await h.mount(<Stored initial="Film" existing={['Music']} />);
+    await h.flush(5);
+    type(input(), 'music');
+    key(input(), 'Enter');
+    await h.flush(10);
+    expect(committed.length === 1, 'a duplicate name was committed');
+    expect(text().includes('Music'), 'the duplicate refusal does not name the clash');
+
+    await h.mount(<Stored initial="New group" autoFocus />);
+    await h.flush(10);
+    expect(document.activeElement === input(), 'a fresh group does not take focus');
+  });
+
+  /* 21 — Phase 4: the chart is a bounded region measured from its container */
+  await test('charts: the drawing is clipped to its own box and follows the measured width', async (h) => {
+    await h.mount(
+      <div className="host">
+        <AreaChart
+          windowMs={15 * 60_000}
+          series={[{ label: 'CPU', points: Array.from({ length: 20 }, (_, i) => ({ t: Date.now() - (20 - i) * 30_000, v: 20 + i })) }]}
+          fmt={(v) => `${v.toFixed(0)}%`}
+        />
+      </div>,
+    );
+    await h.flush(30);
+    const box = q('.chart')!;
+    const svg = q('.chart svg')!;
+    expect(box.style.height.endsWith('px'), `the chart box has no bounded height (${box.style.height})`);
+    expect(Number(svg.getAttribute('height')) === Number(box.style.height.replace('px', '')), 'the SVG height and its box disagree, so the drawing would scale past its region');
+    expect(svg.getAttribute('preserveAspectRatio') === 'none', 'the SVG is free to letterbox/scale itself');
+    expect(Number(svg.getAttribute('width')) > 0, 'the SVG has no explicit width');
+
+    // measurement: the container reports a new width, the observer fires, geometry follows
+    const instances = (globalThis as { __resizeObservers?: { cb: () => void; el?: Element }[] }).__resizeObservers;
+    expect(Array.isArray(instances) && instances.length > 0, 'the chart did not observe its container at all');
+    const target = instances![instances!.length - 1];
+    target.el!.getBoundingClientRect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 880, bottom: 148, width: 880, height: 148, toJSON: () => ({}) }) as DOMRect;
+    Object.defineProperty(target.el!, 'clientWidth', { value: 880, configurable: true });
+    await act(async () => { target.cb(); });
+    await h.flush(20);
+    const after = q('.chart svg')!;
+    expect(after.getAttribute('viewBox') === `0 0 880 ${after.getAttribute('height')}`, `the chart did not adopt the measured width (${after.getAttribute('viewBox')})`);
+  });
+
+  /* 22 — Phase 4: renaming a group through the Settings pane persists the rename */
+  await test('settings: a renamed group is written on save and survives the round trip', async (h) => {
+    await h.mount(<TestApp entry="/settings/groups"><Settings /></TestApp>);
+    await h.waitFor(() => !!q('.group-rows'), 'the group rows');
+    const row = qa('.group-row').find((r) => q<HTMLInputElement>('input.group-name', r)?.value === 'Media');
+    expect(row, 'the fixture group row is missing');
+    const input = q<HTMLInputElement>('input.group-name', row!)!;
+    type(input, 'Movies');
+    key(input, 'Enter');
+    await h.flush(20);
+    expect(input.value === 'Movies', 'the renamed group did not keep its new name in the pane');
+    expect(text().includes('unsaved changes'), 'the pane did not mark the rename as unsaved');
+
+    const saveBtn = qa('button').find((b) => text(b).trim() === 'Save groups');
+    expect(saveBtn && !(saveBtn as HTMLButtonElement).disabled, 'the save button is not enabled after a rename');
+    click(saveBtn!);
+    await h.waitFor(() => !!h.lastCall('PUT', '/api/services'), 'the save');
+    const body = h.lastCall('PUT', '/api/services')!.body as { groups: { name: string; services?: { group?: string }[] }[] };
+    expect(body.groups.some((g) => g.name === 'Movies'), 'the saved document does not contain the new name');
+    expect(!body.groups.some((g) => g.name === 'Media'), 'the old name is still in the saved document');
+    await h.waitFor(() => !text().includes('unsaved changes'), 'the dirty flag to clear');
+  });
+
+  /* 23 — Phase 4: the “…” menu is anchored to its trigger, inside the viewport, and keyboard-safe */
+  await test('anchored menu: placed against the trigger, flipped, clamped, and closed by Escape', async (h) => {
+    const hidden: string[] = [];
+    await h.mount(
+      <MenuButton
+        label="Media group options"
+        title="Options for Media"
+        items={[
+          { label: 'Hide from Hub', action: () => hidden.push('hide') },
+          { label: 'Open in Directory', href: '/services' },
+        ]}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2" /></svg>
+      </MenuButton>,
+    );
+    await h.flush(20);
+    const trigger = q<HTMLButtonElement>('[aria-haspopup]')!;
+    expect(!!trigger, 'the trigger did not render');
+    expect(trigger.getAttribute('aria-expanded') === 'false', 'the trigger does not report its closed state');
+    expect(!q('[role="menu"]'), 'the menu should start closed');
+
+    const rect = (r: Partial<DOMRect>) => () => ({
+      x: r.left ?? 0, y: r.top ?? 0, left: r.left ?? 0, top: r.top ?? 0,
+      right: (r.left ?? 0) + (r.width ?? 0), bottom: (r.top ?? 0) + (r.height ?? 0),
+      width: r.width ?? 0, height: r.height ?? 0, toJSON: () => ({}),
+    }) as DOMRect;
+
+    click(trigger);
+    await h.flush(20);
+    const menu = q('[role="menu"]')!;
+    expect(!!menu, 'clicking the trigger did not open the menu');
+    expect(trigger.getAttribute('aria-expanded') === 'true', 'the trigger does not report its open state');
+    // portaled to the body: a fixed-position menu inside a transformed/filtered ancestor would be
+    // positioned against that ancestor — the original clipping bug
+    expect(menu.parentElement === document.body, 'the menu is not portaled to the document body');
+    expect(!h.container.contains(menu), 'the menu was rendered inside the widget, where it can be clipped');
+    expect(menu.getAttribute('data-anchored') === 'true', 'the menu does not know it is anchored');
+    expect(document.activeElement?.getAttribute('role') === 'menuitem', 'opening the menu did not focus its first item');
+
+    // the trigger sits in the lower-middle of a 1024×768 viewport, the menu is 200×120
+    trigger.getBoundingClientRect = rect({ left: 900, top: 400, width: 60, height: 30 });
+    menu.getBoundingClientRect = rect({ width: 200, height: 120 });
+    await act(async () => { window.dispatchEvent(new window.Event('resize')); });
+    await h.flush(20);
+    const style = menu.getAttribute('style') || '';
+    const left = Number(/left:\s*([-\d.]+)px/.exec(style)?.[1]);
+    const top = Number(/top:\s*([-\d.]+)px/.exec(style)?.[1]);
+    expect(left === 760, `the menu is not right-aligned to its trigger (left ${left})`);
+    expect(top === 436, `the menu is not placed under its trigger (top ${top})`);
+
+    // near the bottom edge: flip above the trigger rather than overflow the viewport
+    trigger.getBoundingClientRect = rect({ left: 900, top: 700, width: 60, height: 30 });
+    await act(async () => { window.dispatchEvent(new window.Event('resize')); });
+    await h.flush(20);
+    const top2 = Number(/top:\s*([-\d.]+)px/.exec(menu.getAttribute('style') || '')?.[1]);
+    expect(top2 === 574, `the menu did not flip above the trigger (top ${top2})`);
+
+    // hard against the left edge: clamped inside the window, never negative
+    trigger.getBoundingClientRect = rect({ left: 10, top: 300, width: 50, height: 30 });
+    await act(async () => { window.dispatchEvent(new window.Event('resize')); });
+    await h.flush(20);
+    const style3 = menu.getAttribute('style') || '';
+    const left3 = Number(/left:\s*([-\d.]+)px/.exec(style3)?.[1]);
+    const top3 = Number(/top:\s*([-\d.]+)px/.exec(style3)?.[1]);
+    expect(left3 === 8, `the menu is not clamped to the viewport gutter (left ${left3})`);
+    expect(top3 === 336, `the menu lost its vertical anchor (top ${top3})`);
+
+    // keyboard: Escape closes and returns focus to the trigger that owns the menu
+    key(window, 'Escape');
+    await h.flush(20);
+    expect(!q('[role="menu"]'), 'Escape did not close the menu');
+    expect(document.activeElement === trigger, 'focus was not restored to the trigger');
+    expect(trigger.getAttribute('aria-expanded') === 'false', 'the trigger still reports itself as open');
+
+    // clicking elsewhere closes it too, and an item click runs its action
+    click(trigger);
+    await h.flush(20);
+    expect(!!q('[role="menu"]'), 'the menu did not reopen');
+    await act(async () => { document.body.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true })); });
+    await h.flush(20);
+    expect(!q('[role="menu"]'), 'a click outside did not close the menu');
+    click(trigger);
+    await h.flush(20);
+    const hideItem = qa('[role="menuitem"]').find((el) => text(el).includes('Hide from Hub'))!;
+    click(hideItem);
+    await h.flush(20);
+    expect(hidden.join() === 'hide', 'the menu item did not run its action');
+    expect(!q('[role="menu"]'), 'choosing an item left the menu open');
+  });
+
+  /* 24 — Phase 4: bookmark groups get the same naming contract, and the save guard speaks inline */
+  await test('bookmark groups: renamed in place, added with a unique name, refusal shown inline', async (h) => {
+    await h.mount(<TestApp entry="/settings/bookmarks"><Settings /></TestApp>);
+    await h.waitFor(() => !!q('.input.group-name-heading'), 'the bookmark group heading');
+    const headings = () => qa<HTMLInputElement>('input.group-name-heading');
+    const saveBtn = () => qa('button').find((b) => text(b).startsWith('Save bookmarks')) as HTMLButtonElement;
+    expect(headings()[0].value === 'Reading', 'the fixture bookmark group is missing');
+
+    type(headings()[0], 'Later');
+    key(headings()[0], 'Enter');
+    await h.flush(20);
+    expect(headings()[0].value === 'Later', 'Enter did not commit the bookmark group name');
+    expect(!saveBtn().disabled, 'the rename did not mark the pane as having unsaved changes');
+
+    // a new group gets a name nobody else has, and takes focus so it can be named immediately
+    click(qa('button').find((b) => text(b).trim() === '+ New group')!);
+    await h.flush(20);
+    expect(headings().length === 2, `expected 2 bookmark groups, saw ${headings().length}`);
+    expect(headings()[1].value === 'New group', `the new group was named ${headings()[1].value}`);
+    expect(document.activeElement === headings()[1], 'the new group did not take focus, so it cannot be named');
+
+    // a duplicate is refused by name, and nothing is written
+    type(headings()[1], 'later');
+    key(headings()[1], 'Enter');
+    await h.flush(20);
+    expect(text().includes('already uses that name'), 'a duplicate bookmark group name was accepted');
+    expect(headings()[1].value === 'later', 'the refused draft was thrown away instead of being left to fix');
+    key(headings()[1], 'Escape');
+    await h.flush(20);
+    expect(headings()[1].value === 'New group', 'Escape did not restore the stored group name');
+
+    // renaming it properly and saving writes the document
+    type(headings()[1], 'Watch list');
+    key(headings()[1], 'Enter');
+    await h.flush(20);
+    click(saveBtn());
+    await h.waitFor(() => !!h.lastCall('PUT', '/api/bookmarks'), 'the bookmark save');
+    const body = h.lastCall('PUT', '/api/bookmarks')!.body as { groups: { name: string }[] };
+    expect(body.groups.map((g) => g.name).join() === 'Later,Watch list', `saved groups: ${JSON.stringify(body.groups.map((g) => g.name))}`);
+    await h.waitFor(() => saveBtn().disabled, 'the pane to leave its dirty state');
+  });
+
+  /* 25 — Phase 4: a document that already contains duplicate names cannot be saved silently */
+  await test('bookmark groups: a document with duplicate names is refused inline, without a browser alert', async (h) => {
+    h.setRoutes({
+      ...stubRoutes(),
+      '/api/bookmarks': { groups: [{ name: 'Reading', items: [] }, { name: 'reading', items: [] }] },
+    });
+    let alerted = false;
+    const realAlert = window.alert;
+    window.alert = () => { alerted = true; };
+    try {
+      await h.mount(<TestApp entry="/settings/bookmarks"><Settings /></TestApp>);
+      await h.waitFor(() => qa('.input.group-name-heading').length === 2, 'both bookmark groups');
+      // an edit has to exist before there is anything to save at all
+      click(qa('button').find((b) => text(b).trim() === '+ link')!);
+      await h.flush(20);
+      click(qa('button').find((b) => text(b).startsWith('Save bookmarks'))!);
+      await h.flush(40);
+      expect(!h.lastCall('PUT', '/api/bookmarks'), 'a document with two identically named groups was saved');
+      const note = q('.name-note');
+      expect(!!note && note.getAttribute('role') === 'alert', 'the refusal is not shown inline');
+      expect(/reading/i.test(text(note!)), `the refusal does not name the clash: ${text(note!)}`);
+      expect(!alerted, 'the guard used a browser alert instead of the design system');
+    } finally {
+      window.alert = realAlert;
+    }
   });
 
   for (const r of results) {

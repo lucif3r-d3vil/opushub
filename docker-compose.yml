@@ -1,0 +1,65 @@
+# OpusHub — the clean install.
+#
+#   mkdir -p opushub && cd opushub
+#   # save this file here, then:
+#   docker compose up -d
+#   open http://<this-host>:3000      → the first-run setup wizard
+#
+# Everything the container writes lives in ./config (presentation: overlays, settings, icons) and
+# ./data (runtime state: the administrator account, sessions, backups). Deleting the container and
+# recreating it changes nothing in the app; deleting ./data means running setup again.
+#
+# The Docker socket is mounted read-only. OpusHub discovers and displays; it never starts, stops,
+# restarts, execs into or deploys anything.
+services:
+  opushub:
+    # the published image — or replace with `build: .` to run from source
+    image: ghcr.io/lucif3r-d3vil/opushub:latest
+
+    # shows up as `opushub` in your stack list instead of `opushub-opushub-1`
+    container_name: opushub
+    restart: unless-stopped
+
+    ports:
+      - "3000:3000"       # keep this on the LAN — see the security note in the README
+
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      # read-only, and the only reason OpusHub knows anything about your host
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    # The socket is root-owned (usually group `docker`). Running as the unprivileged `node` user
+    # (the image default) means the container needs that group instead of root privileges:
+    #
+    #   stat -c '%g' /var/run/docker.sock      # e.g. 999
+    #   then uncomment:   group_add: ["999"]
+    #
+    # Without it OpusHub still starts and tells you the socket is not readable — the setup wizard
+    # shows Docker as unavailable rather than pretending the host is empty.
+    # group_add:
+    #   - "999"
+
+    # Optional. The fallback host/IP used for services that publish a port but have no proxy
+    # labels (compose stacks on a plain host). Leave it out and set it in the setup wizard.
+    # environment:
+    #   OPUSHUB_HOST_ADDRESS: "192.168.1.20"
+
+    # Node drops no privileges and needs none; this stops a compromised container from gaining
+    # any through a setuid binary, and keeps PID 1 reaping children correctly.
+    security_opt:
+      - no-new-privileges:true
+    init: true
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      start_period: 8s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

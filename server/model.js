@@ -441,7 +441,9 @@ export async function getInventory({ refreshMs = 15000, force = false } = {}) {
     hostAddress: host.address ? String(host.address).replace(/^https?:\/\//, '').replace(/\/+$/, '') : null,
     hostAddressSource: host.source,
     entrypointPorts: infra.entrypointPorts && Object.keys(infra.entrypointPorts).length ? infra.entrypointPorts : null,
-    suggestIcon: (rec) => suggestRef([...(rec.imageSlugs || []), ...(rec.composeService ? [rec.composeService] : []), rec.containerName]),
+    // the only thing the model supplies is the *probe* (does an icon with this name exist in a
+    // bundled set?); discovery decides which identity signals to offer, and a miss is a monogram
+    suggestRef,
   });
   lastDiscoveryAt = Date.now();
   // “unmatched” compares an overlay against discovery. With no engine there is nothing to
@@ -483,6 +485,13 @@ export async function getInventory({ refreshMs = 15000, force = false } = {}) {
 export async function getDiscoveryStatus({ refreshMs = 15000 } = {}) {
   const inv = await getInventory({ refreshMs });
   const avail = docker.availability();
+  // Traefik facts, read off the containers' own labels (curated projection — never raw labels).
+  const routers = inv.services.flatMap((s) => s.container.labels?.proxy || []);
+  const entrypoints = [...new Set(routers.flatMap((r) => r.entrypoints || []))].sort();
+  const proxyNetworks = [...new Set(inv.services
+    .filter((s) => (s.container.labels?.proxy || []).length)
+    .flatMap((s) => s.container.networks.map((n) => n.name)))]
+    .sort();
   return {
     engine: {
       ok: !!inv.live,
@@ -502,6 +511,24 @@ export async function getDiscoveryStatus({ refreshMs = 15000 } = {}) {
       hostAddressSource: inv.hostAddressSource,
       entrypointPorts: getSettings().infrastructure?.entrypointPorts || {},
       traefikRouters: inv.services.filter((s) => s.container.labels?.proxy?.length).length,
+      // the services a first-run setup should mention as "attention": real containers with no
+      // browser URL, each carrying the honest reason the resolver refused to invent one
+      withoutUrlList: inv.services
+        .filter((s) => !s.url && !s.hidden && s.kind !== 'infrastructure')
+        .slice(0, 40)
+        .map((s) => ({ name: s.name, displayName: s.displayName, group: s.group, reason: s.urlNote || null })),
+    },
+    traefik: {
+      containers: inv.services.filter((s) => s.container.labels?.proxy?.length).length,
+      routers: routers.length,
+      tlsRouters: routers.filter((r) => r.tls).length,
+      entrypoints,
+      networks: proxyNetworks,
+      routes: routers.slice(0, 40).map((r) => ({
+        router: r.router, hosts: r.hosts, entrypoints: r.entrypoints, tls: !!r.tls, path: r.path || null,
+      })),
+      // routers that carry a matcher instead of a hostname — reported, never turned into a URL
+      hostRegexpOnly: routers.filter((r) => !(r.hosts || []).length).length,
     },
     overlays: {
       // bound = enriching a container that exists; entries = what the files actually contain,

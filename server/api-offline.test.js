@@ -2,16 +2,26 @@
 // so the availability cache starts cold and stays offline.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 process.env.OPUSHUB_DOCKER_SOCKET = '/tmp/opushub-offline-probe.sock';
 delete process.env.DOCKER_HOST;
+// scratch state — the offline boundary is about the engine, never about real config
+const CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'opushub-offline-cfg-'));
+const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'opushub-offline-data-'));
+process.env.OPUSHUB_CONFIG_DIR = CONFIG_DIR;
+process.env.OPUSHUB_DATA_DIR = DATA_DIR;
 
 const { handleApi } = await import('./api.js');
+const { seedSession } = await import('../test/auth-helper.js');
+const COOKIE = await seedSession();
 
 function req(method) {
   return {
     method,
-    headers: {},
+    headers: { cookie: COOKIE },
     [Symbol.asyncIterator]() {
       return { next: async () => ({ value: undefined, done: true }) };
     },

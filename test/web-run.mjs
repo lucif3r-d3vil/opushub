@@ -30,6 +30,22 @@ window.Element.prototype.getBoundingClientRect = function getBoundingClientRect(
   return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) };
 };
 window.Element.prototype.scrollIntoView = function scrollIntoView() { /* no layout */ };
+// jsdom has no ResizeObserver. Components that measure their container (the charts) install one,
+// so the stub records its callbacks and exposes them for the checks to fire with a chosen width.
+class FakeResizeObserver {
+  constructor(cb) { this.cb = cb; FakeResizeObserver.instances.push(this); }
+  observe(el) { this.el = el; }
+  unobserve() {}
+  // remove in place: the checks hold a reference to this array, so it must never be replaced
+  disconnect() {
+    const i = FakeResizeObserver.instances.indexOf(this);
+    if (i >= 0) FakeResizeObserver.instances.splice(i, 1);
+  }
+}
+FakeResizeObserver.instances = [];
+window.ResizeObserver = FakeResizeObserver;
+globalThis.__resizeObservers = FakeResizeObserver.instances;
+
 if (!window.PointerEvent) {
   window.PointerEvent = class PointerEvent extends window.MouseEvent {
     constructor(type, init = {}) { super(type, init); this.pointerId = init.pointerId || 1; }
@@ -38,7 +54,7 @@ if (!window.PointerEvent) {
 
 const globals = [
   'window', 'document', 'navigator', 'location', 'history', 'getComputedStyle', 'requestAnimationFrame',
-  'cancelAnimationFrame', 'HTMLElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'Element', 'Node',
+  'cancelAnimationFrame', 'ResizeObserver', 'HTMLElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'Element', 'Node',
   'Event', 'CustomEvent', 'KeyboardEvent', 'MouseEvent', 'PointerEvent', 'MessageChannel', 'matchMedia',
   'DocumentFragment', 'CSSStyleDeclaration', 'DOMRect', 'MutationObserver',
 ];

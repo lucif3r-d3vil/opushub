@@ -13,6 +13,7 @@ import { startMockEngine } from './mock-engine.js';
 const OLD_ENV = { ...process.env };
 let ENGINE = null;
 let handleApi, activity, healthMod, statsMod;
+let COOKIE = null;
 
 const CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'opushub-phase3-cfg-'));
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'opushub-phase3-data-'));
@@ -21,7 +22,7 @@ function req(method, p, body = null) {
   const chunks = body ? [Buffer.from(JSON.stringify(body))] : [];
   return {
     method,
-    headers: {},
+    headers: COOKIE ? { cookie: COOKIE } : {},
     [Symbol.asyncIterator]() {
       let i = 0;
       return { next: async () => (i < chunks.length ? { value: chunks[i++], done: false } : { value: undefined, done: true }) };
@@ -78,6 +79,8 @@ test.before(async () => {
     '        href: https://jellyfin.org/docs/',
   ].join('\n'), 'utf8');
   ({ handleApi } = await import('../server/api.js'));
+  const { seedSession } = await import('./auth-helper.js');
+  COOKIE = await seedSession();
   activity = await import('../server/activity.js');
   healthMod = await import('../server/providers/health.js');
   statsMod = await import('../server/statsHistory.js');

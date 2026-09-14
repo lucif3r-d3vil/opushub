@@ -14,7 +14,7 @@ import type { DeepPartial } from '../../lib/theme';
 import type { LayoutDoc, Service, ServicesDoc, WidgetInstance } from '../../lib/types';
 import { useSettings } from '../../lib/theme';
 import { Icon } from '../Icon';
-import { StatusDot, Menu, type MenuItem } from '../ui';
+import { StatusDot, Menu, MenuButton, type MenuItem } from '../ui';
 import { Sortable } from '../Sortable';
 import { DockerOffNote } from '../../lib/dockerStatus';
 import { WidgetEmpty } from './WidgetFrame';
@@ -89,6 +89,10 @@ function LaunchItem({ svc, groupName, handle, detailed }: { svc: Service; groupN
   );
 }
 
+const EyeOffIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" /><path d="m5 19 14-14" strokeLinecap="round" /></svg>;
+const GridIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z" /></svg>;
+const SlidersIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" strokeLinecap="round" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>;
+
 function GroupBlock({ group, saved, handle, detailed, interactive, onReorder, onHide }: {
   group: { name: string; description?: string | null; services: Service[] };
   saved: string[] | undefined;
@@ -115,9 +119,21 @@ function GroupBlock({ group, saved, handle, detailed, interactive, onReorder, on
         <span className="launcher-group-aside">
           <Link className="section-link" to="/services">Directory →</Link>
           {interactive && (
-            <button className="icon-btn" aria-label={`${group.name} group options`} onClick={onHide} title="Hide this group from the Hub">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" /><path d="m5 19 14-14" strokeLinecap="round" /></svg>
-            </button>
+            // A real menu, placed against this exact button by the shared popover primitive: it
+            // opens under the trigger, flips above when the viewport runs out, and stays inside
+            // the window — instead of a bare icon that acted immediately with no visible cause.
+            <MenuButton
+              label={`${group.name} group options`}
+              title={`Options for ${group.name}`}
+              className="icon-btn li-menu"
+              items={[
+                { label: 'Hide from Hub', icon: <EyeOffIcon />, action: onHide },
+                { label: 'Open in Directory', icon: <GridIcon />, href: '/services' },
+                { label: 'Group settings…', icon: <SlidersIcon />, href: '/settings/groups' },
+              ]}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
+            </MenuButton>
           )}
         </span>
       </div>

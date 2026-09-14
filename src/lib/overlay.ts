@@ -5,6 +5,7 @@
 // discovery reports: there is no path in this file that can create a service, and entries whose
 // container is gone are reported by the server as unmatched rather than rendered.
 import { invalidateShared, put } from './api';
+import { renameGroupAt } from './groupName';
 import type { Service, ServicesDoc, StacksDoc } from './types';
 
 export interface DraftService {
@@ -130,15 +131,17 @@ export function clearGroup(groups: DraftGroup[], container: string): DraftGroup[
   return next;
 }
 
+/**
+ * @deprecated Renaming is addressed by index now (src/lib/groupName.ts `renameGroupAt`): keying a
+ * rename by the old name made clearing the field a silent no-op and could rename the wrong row when
+ * two groups shared a name. Kept for any remaining caller; the Settings editors use the new one.
+ */
 export function renameGroup(groups: DraftGroup[], from: string, to: string): DraftGroup[] {
   const name = to.trim();
   if (!name || name === from) return groups;
-  const next = clone(groups);
-  for (const g of next) {
-    if (g.name === from) g.name = name;
-    for (const s of g.services) if (s.group === from) s.group = name;
-  }
-  return dedupeGroups(next);
+  const index = groups.findIndex((g) => g.name === from);
+  if (index < 0) return groups;
+  return dedupeGroups(renameGroupAt(groups, index, name));
 }
 
 export function setGroupDescription(groups: DraftGroup[], name: string, description: string | null): DraftGroup[] {

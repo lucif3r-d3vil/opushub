@@ -72,8 +72,13 @@ li > .row { margin: 0 calc(var(--sp-3) * -1); padding-left: var(--sp-3); padding
 .meter.fail > i { background: var(--fail); }
 .meter.muted > i { background: var(--ink-3); }
 
-.chart { position: relative; }
-.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+/* The chart owns a bounded region: its own height comes from the component (measured in pixels),
+   so the drawing can never scale up past its box and paint across neighbouring text. The old rule
+   here was `width: 100%; height: auto; overflow: visible` on a fixed 600-unit viewBox — the drawing
+   grew with the column and escaped downwards, which is exactly what crossed the labels. */
+.chart { position: relative; height: 148px; }
+.chart svg { display: block; width: 100%; height: 100%; overflow: hidden; }
+.chart--empty { display: grid; place-items: center; color: var(--ink-3); font-size: var(--fs-meta); border: 1px dashed var(--hair); border-radius: var(--r-md); }
 .chart .hover-line { stroke: var(--hair-strong); stroke-width: 1; }
 .chart-label { font-size: var(--fs-micro); fill: var(--ink-3); }
 .spark { display: block; }
@@ -368,3 +373,13 @@ a.chip:hover, button.chip:hover { border-color: var(--hair-strong); color: var(-
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .stale-note { color: var(--ink-3); font-size: var(--fs-micro); }
+
+/* inline name editing (groups, bookmark groups) */
+.name-note { display: block; margin-top: 4px; color: var(--fail); font-size: var(--fs-micro); }
+.input.group-name-heading {
+  width: auto; min-width: 160px; max-width: 320px; padding: 4px 8px;
+  font-size: var(--fs-section); font-weight: 620; letter-spacing: var(--track-tight);
+  background: transparent; border-color: transparent;
+}
+.input.group-name-heading:hover { border-color: var(--hair); background: var(--sunken); }
+.input.group-name-heading:focus { background: var(--sunken); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }

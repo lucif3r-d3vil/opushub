@@ -32,18 +32,38 @@ const check = (name, ok, detail = '') => {
   else { failures++; console.error(`✗ ${name}${detail ? ` — ${detail}` : ''}`); }
 };
 
-const get = async (p) => {
-  const r = await fetch(`${BASE}${p}`);
-  const body = await r.json().catch(() => null);
-  return { status: r.status, body };
+// A cookie jar, because every application endpoint now requires a session — exactly like a
+// browser. Origin is sent on writes, which is what the CSRF gate expects from a real client.
+let COOKIE = null;
+const jar = (headers = {}) => {
+  const h = { ...headers };
+  if (COOKIE) h.cookie = COOKIE;
+  return h;
 };
-const send = async (method, p, payload) => {
-  const r = await fetch(`${BASE}${p}`, {
-    method, headers: { 'content-type': 'application/json' },
-    body: payload === undefined ? undefined : JSON.stringify(payload),
-  });
+const capture = (res) => {
+  const raw = res.headers.getSetCookie?.() ?? [];
+  for (const c of raw) {
+    const m = /^opushub_session=([^;]*)/.exec(c);
+    if (m) COOKIE = m[1] ? `opushub_session=${m[1]}` : null;
+    if (/^opushub_session=;/.test(c) || /Max-Age=0/.test(c)) COOKIE = null;
+  }
+};
+const get = async (p, headers = {}) => {
+  const r = await fetch(`${BASE}${p}`, { headers: jar(headers), redirect: 'manual' });
+  capture(r);
   const body = await r.json().catch(() => null);
-  return { status: r.status, body };
+  return { status: r.status, body, headers: r.headers };
+};
+const send = async (method, p, payload, headers = {}) => {
+  const r = await fetch(`${BASE}${p}`, {
+    method,
+    headers: jar({ 'content-type': 'application/json', ...headers }),
+    body: payload === undefined ? undefined : JSON.stringify(payload),
+    redirect: 'manual',
+  });
+  capture(r);
+  const body = await r.json().catch(() => null);
+  return { status: r.status, body, headers: r.headers };
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -89,6 +109,77 @@ async function main() {
   let ok = true;
   try {
     await waitForServer(child);
+
+    // ---- 0. the door: setup, authentication, CSRF, logout --------------------
+    console.log('');
+    {
+      const status = await get('/api/setup/status');
+      check('auth: a fresh install reports that setup is required',
+        status.status === 200 && status.body?.required === true && status.body?.complete === false,
+        JSON.stringify(status.body).slice(0, 120));
+      check('auth: pre-setup the wizard gets a count-only discovery summary (no names)',
+        !!status.body?.discovery && typeof status.body.discovery.containers === 'number'
+        && !JSON.stringify(status.body.discovery).includes('jellyfin'),
+        JSON.stringify(status.body?.discovery || {}).slice(0, 140));
+      const closed = await get('/api/services');
+      check('auth: every application endpoint is closed before login', closed.status === 401, `status ${closed.status}`);
+      const closedSystem = await get('/api/system');
+      check('auth: system readings are not public either', closedSystem.status === 401, `status ${closedSystem.status}`);
+      const health = await get('/api/health');
+      check('auth: health stays public but says nothing about the host',
+        health.status === 200 && health.body?.ok === true && !health.body.providers && !health.body.configDir,
+        JSON.stringify(health.body).slice(0, 120));
+
+      const weak = await send('POST', '/api/setup', { username: 'admin', password: 'short' });
+      check('auth: setup refuses a weak password', weak.status === 400, `status ${weak.status}`);
+      const created = await send('POST', '/api/setup', { username: 'admin', password: 'verify-fixture-password' });
+      check('auth: setup creates the administrator and starts a session',
+        created.status === 201 && created.body?.user?.username === 'admin' && !!COOKIE,
+        JSON.stringify(created.body).slice(0, 120));
+      check('auth: the API never returns a password hash',
+        !JSON.stringify(created.body).includes('scrypt$') && !JSON.stringify(created.body).includes('passwordHash'));
+      const again = await send('POST', '/api/setup', { username: 'admin', password: 'verify-fixture-password' });
+      check('auth: setup cannot be repeated', again.status === 409, `status ${again.status}`);
+      const afterSetup = await get('/api/setup/status');
+      check('auth: after setup the status endpoint exposes no discovery summary at all',
+        afterSetup.body?.complete === true && afterSetup.body?.discovery === undefined,
+        JSON.stringify(afterSetup.body).slice(0, 120));
+
+      const authFile = join(dataDir, 'auth.json');
+      const storedText = fs.existsSync(authFile) ? fs.readFileSync(authFile, 'utf8') : '';
+      check('auth: the account is persisted with a scrypt hash and no plaintext password',
+        /"passwordHash":\s*"scrypt\$/.test(storedText) && !storedText.includes('verify-fixture-password'),
+        storedText.slice(0, 60));
+      check('auth: the auth file is not group/world readable',
+        fs.existsSync(authFile) && (fs.statSync(authFile).mode & 0o077) === 0,
+        `mode ${(fs.statSync(authFile).mode & 0o777).toString(8)}`);
+
+      const authed = await get('/api/settings');
+      check('auth: the session cookie opens the application',
+        authed.status === 200 && !!authed.body?.appearance, `status ${authed.status}`);
+      const me = await get('/api/auth/me');
+      check('auth: who-am-I names the signed-in account', me.body?.authenticated === true && me.body?.user?.username === 'admin');
+
+      const crossSite = await send('PUT', '/api/settings', { app: { tagline: 'The homelab, at a glance.' } }, { origin: 'https://evil.example' });
+      check('auth: a cross-origin write is refused (CSRF)', crossSite.status === 403, `status ${crossSite.status}`);
+      const site = await send('PUT', '/api/settings', { app: { tagline: 'The homelab, at a glance.' } }, { 'sec-fetch-site': 'cross-site' });
+      check('auth: a cross-site write is refused even without an Origin header', site.status === 403, `status ${site.status}`);
+
+      const out = await send('POST', '/api/auth/logout');
+      check('auth: logout clears the cookie', out.status === 200 && !COOKIE, `status ${out.status}`);
+      const afterLogout = await get('/api/services');
+      check('auth: the session is dead after logout', afterLogout.status === 401, `status ${afterLogout.status}`);
+
+      const wrong = await send('POST', '/api/auth/login', { username: 'admin', password: 'not-the-password' });
+      check('auth: a wrong password is refused without saying which half was wrong',
+        wrong.status === 401 && /Incorrect username or password/.test(wrong.body?.error || ''), JSON.stringify(wrong.body));
+      const nobody = await send('POST', '/api/auth/login', { username: 'nobody', password: 'not-the-password' });
+      check('auth: an unknown user gets the identical answer (no enumeration)',
+        nobody.status === 401 && wrong.body?.error === nobody.body?.error);
+      const login = await send('POST', '/api/auth/login', { username: 'admin', password: 'verify-fixture-password' });
+      check('auth: the administrator can sign in again', login.status === 200 && !!COOKIE, JSON.stringify(login.body).slice(0, 120));
+    }
+
     console.log(''); // ---- 1. first run: nothing configured yet -------------------------------
     {
       const s = await get('/api/settings');

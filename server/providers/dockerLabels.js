@@ -276,20 +276,27 @@ export function str(v, max = 300) {
 }
 
 const NOISE_WORDS = new Set(['docker', 'container', 'containers', 'app', 'apps', 'service', 'services', 'official', 'alpine', 'slim', 'latest', 'stable', 'edge', 'amd64', 'arm64']);
+// Words that are noise in an image reference ("…-app:latest" → drop `app`) but part of the identity
+// in a compose service name (`weird-service-name` is not "Weird Name"). The difference matters:
+// dropping an identity word can make two different services produce the same display name.
+const IDENTITY_WORDS = new Set(['app', 'apps', 'service', 'services']);
 
 /** `jellyfin` → `Jellyfin`, `home-assistant` → `Home Assistant`, `ghcr.io/immich-app/immich-server`
- * → `Immich Server`. Algorithmic: no application-name table anywhere. */
-export function humanize(raw) {
+ * → `Immich Server`. Algorithmic: no application-name table anywhere.
+ *
+ * `keepExtension` exists for *project* names: dropping a trailing dotted segment is right for an
+ * image reference (`immich.git`) but wrong for a compose project (`team.api` would collapse to
+ * `team`, which could collide with another project). */
+export function humanize(raw, { keepExtension = false, keepIdentityWords = false } = {}) {
   const s = String(raw || '').trim();
   if (!s) return '';
-  const words = s
-    .replace(/\.[A-Za-z0-9]{1,5}$/, '')            // drop a trailing extension (image.git)
+  const words = (keepExtension ? s : s.replace(/\.[A-Za-z0-9]{1,5}$/, ''))
     .replace(/[_\-./:]+/g, ' ')
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')        // camelCase → camel Case
     .replace(/\s+/g, ' ')
     .trim()
     .split(' ')
-    .filter((w) => w && !NOISE_WORDS.has(w.toLowerCase()));
+    .filter((w) => w && !(NOISE_WORDS.has(w.toLowerCase()) && !(keepIdentityWords && IDENTITY_WORDS.has(w.toLowerCase()))));
   if (!words.length) return s;
   return words
     .map((w) => (/^[A-Z0-9]{2,}$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))

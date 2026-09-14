@@ -1,5 +1,5 @@
 // Hand-drawn SVG charts — small, dependency-free, and tuned to the design system.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 export function Sparkline({
   values, width = 84, height = 26, color = 'var(--accent)', fill = true,
@@ -27,10 +27,47 @@ export function Sparkline({
 
 export interface AreaSeries { points: { t: number; v: number | null }[]; color?: string; label: string; fill?: boolean }
 
+/**
+ * The chart region, measured.
+ *
+ * This is the whole reason the graph used to run underneath text: the SVG carried a fixed 600-unit
+ * viewBox plus `width: 100%; height: auto; overflow: visible`, so its *rendered* height grew with
+ * the column width — a 1200px column produced a ~2× tall drawing that painted straight over the
+ * labels below it, and any metric row after it.
+ *
+ * Now the box is explicit: the chart measures its own container (ResizeObserver, falling back to
+ * the window resize event and then to a sane constant), draws 1:1 in that pixel space, and occupies
+ * exactly `height + 16` px of layout. Text and graph are separate regions at every width, and the
+ * drawing is clipped to its own box rather than allowed to escape it.
+ */
+function useMeasuredWidth() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth || el.getBoundingClientRect().width || 0;
+      setWidth((cur) => (w > 0 && Math.abs(cur - w) > 1 ? Math.round(w) : cur));
+    };
+    measure();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(measure);
+      ro.observe(el);
+    }
+    window.addEventListener('resize', measure);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', measure); };
+  }, []);
+  return { ref, width };
+}
+
 export function AreaChart({
   series, height = 132, windowMs, fmt = (v: number) => v.toFixed(0), maxHint,
 }: { series: AreaSeries[]; height?: number; windowMs: number; fmt?: (v: number) => string; maxHint?: number }) {
-  const W = 600, H = height, PAD_T = 10;
+  const H = height, PAD_T = 10, AXIS = 16;
+  const { ref: boxRef, width: measured } = useMeasuredWidth();
+  const W = measured || 600; // server render / no layout yet: the documented default geometry
   const ref = useRef<SVGSVGElement>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const now = Date.now();
@@ -88,16 +125,17 @@ export function AreaChart({
 
   if (!series.some((s) => s.points.some((p) => p.v != null))) {
     return (
-      <div className="chart" style={{ height: H, display: 'grid', placeItems: 'center', color: 'var(--ink-3)', fontSize: 'var(--fs-meta)', border: '1px dashed var(--hair)', borderRadius: 'var(--r-md)' }}>
+      <div className="chart chart--empty" ref={boxRef} style={{ height: H + AXIS }}>
         Collecting samples…
       </div>
     );
   }
 
   return (
-    <div className="chart">
+    <div className="chart" ref={boxRef} style={{ height: H + AXIS }}>
       <svg
-        ref={ref} viewBox={`0 0 ${W} ${H + 16}`} role="img"
+        ref={ref} viewBox={`0 0 ${W} ${H + AXIS}`} width={W} height={H + AXIS} role="img"
+        preserveAspectRatio="none"
         aria-label={series.map((s) => s.label).join(', ')}
         onMouseMove={(e) => {
           const r = ref.current!.getBoundingClientRect();
@@ -119,7 +157,7 @@ export function AreaChart({
             {/* first/last labels anchored inside the frame so nothing clips at the edges */}
             <text
               x={i === ticks.length - 1 ? W : geom.x(t.t) + 4}
-              y={H + 8}
+              y={H + 9}
               textAnchor={i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'start'}
               className="chart-label"
             >

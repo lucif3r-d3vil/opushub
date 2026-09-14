@@ -1,0 +1,115 @@
+# Publish the OpusHub image to GitHub Container Registry.
+#
+#   ghcr.io/lucif3r-d3vil/opushub:latest      every push to main
+#   ghcr.io/lucif3r-d3vil/opushub:1.4.0       a v1.4.0 release tag
+#   ghcr.io/lucif3r-d3vil/opushub:sha-abc1234 every build, for pinning a known-good commit
+#
+# Authentication is GITHUB_TOKEN — the workflow's own token, with `packages: write` and nothing
+# else. There is no registry password, no PAT, and nothing to rotate: if this repository's
+# settings ever change, the token follows automatically.
+#
+# `owner` is read from github.repository_owner, which GitHub fills in from this repository. It is
+# never typed by hand, so the image path cannot drift from the actual repo.
+name: ghcr
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ghcr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # owner/repository exactly as Git knows it (lowercased: GHCR paths are case-sensitive and
+  # GitHub usernames/tags are not)
+  IMAGE: ${{ github.repository }}
+
+jobs:
+  # A green build must mean something: type-check, unit + server tests and the production bundle
+  # all run before anything is pushed.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute the image name (lowercase owner/repository from git)
+        run: echo "IMAGE=${IMAGE,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to GHCR with the workflow token
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          tags: |
+            # :latest follows the default branch
+            type=raw,value=latest,enable={{is_default_branch}}
+            # :1.4.0 and :1.4 from a v1.4.0 tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # :sha-abc1234 on every build — pin this if you want a reproducible deploy
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=OpusHub
+            org.opencontainers.image.description=Read-only control center for a Docker host: live discovery, stacks, service pages, host vitals.
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # amd64 is what most homelab hosts (and every x86 NAS) run, so it ships first.
+          # arm64 / arm64 32-bit would be a matrix expansion here — the Dockerfile itself is
+          # already architecture-neutral (pure Node, no native build step).
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            OPUSHUB_VERSION=${{ steps.meta.outputs.version }}
+            OPUSHUB_REVISION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo
+            echo "Platform: \`linux/amd64\` · commit \`${GITHUB_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

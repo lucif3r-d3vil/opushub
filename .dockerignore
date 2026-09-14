@@ -36,6 +36,17 @@ config/backups
 config/icons
 config/backgrounds
 
+# anything key-shaped, wherever it is parked in the tree
+*.pem
+*.key
+*.crt
+*.p12
+id_rsa*
+id_ed25519*
+*.secret
+secrets
+secrets.*
+
 # source of truth for these exclusions / not needed at runtime
 docs
 test
