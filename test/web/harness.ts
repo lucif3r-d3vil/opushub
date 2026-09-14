@@ -31,6 +31,8 @@ export interface Harness {
   flush: (ms?: number) => Promise<void>;
   /** flush repeatedly until the predicate holds (or give up) */
   waitFor: (predicate: () => boolean, label?: string) => Promise<void>;
+  /** replace the route table (used by checks that must mount before the fixture is known) */
+  setRoutes: (next: Record<string, unknown | Responder>) => void;
   /** the last write to a path, e.g. `lastCall('PUT', '/api/layout')` */
   lastCall: (method: string, path: string) => Recorded | undefined;
   writes: (method: string, path: string) => Recorded[];
@@ -38,6 +40,7 @@ export interface Harness {
 }
 
 export interface HarnessOptions {
+  /** a route value, a responder, or `{ $status, body }` for a non-200 answer */
   routes?: Record<string, unknown | Responder>;
   /** called for unknown paths — the default answers 404 so a missing stub is visible */
   fallback?: (path: string) => unknown;
@@ -51,13 +54,25 @@ const json = (body: unknown, status = 200) => ({
   text: async () => JSON.stringify(body),
 });
 
+/**
+ * A responder may return a plain body (200) or `{ $status, body }` to answer with a status —
+ * that is how the harness tests what the app does with a 401 from a real server.
+ */
+const answer = (value: unknown) => {
+  if (value && typeof value === 'object' && '$status' in (value as Record<string, unknown>)) {
+    const { $status, body } = value as { $status: number; body: unknown };
+    return json(body, $status);
+  }
+  return json(value);
+};
+
 export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
   // every check starts from an empty cache, so "how many requests were made" means what it says
   resetSharedCache();
   const container = document.createElement('div');
   document.body.appendChild(container);
   const calls: Recorded[] = [];
-  const routes = options.routes || {};
+  const routes: Record<string, unknown | Responder> = { ...(options.routes || {}) };
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -71,7 +86,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
       .sort((a, b) => b.length - a.length)[0];
     if (hit == null) return json(options.fallback ? options.fallback(path) : { error: `no stub for ${path}` }, 404);
     const value = routes[hit];
-    return json(typeof value === 'function' ? (value as Responder)(body, path) : value);
+    return answer(typeof value === 'function' ? (value as Responder)(body, path) : value);
   }) as typeof fetch;
 
   const root = createRoot(container);
@@ -98,7 +113,12 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     globalThis.fetch = originalFetch;
   };
 
-  return { container, root, calls, mount, flush, waitFor, lastCall, writes, unmount };
+  const setRoutes = (next: Record<string, unknown | Responder>) => {
+    for (const key of Object.keys(routes)) delete routes[key];
+    Object.assign(routes, next);
+  };
+
+  return { container, root, calls, mount, flush, waitFor, lastCall, writes, setRoutes, unmount };
 }
 
 /* ---------------- event helpers ---------------- */

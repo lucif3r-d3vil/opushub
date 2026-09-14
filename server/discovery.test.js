@@ -66,8 +66,13 @@ test('a container with no configuration is discovered, with derived presentation
   assert.equal(svc.configured, false);
   assert.equal(svc.discovered, true);
   assert.equal(svc.overlaid, null);
-  assert.equal(svc.group, 'Other', 'no config → no invented category');
+  // Phase 4: the compose project IS the group — no configuration, no services.yaml entry, and
+  // still organised the way the operator's runtime is organised. A container with no stack at all
+  // falls back to one shared group instead of inventing a category (see the group suite).
+  assert.equal(svc.group, 'Music');
+  assert.equal(svc.groupSource, 'compose project');
   assert.equal(inv.groups[0].services.length, 1);
+  assert.equal(inv.groups[0].name, 'Music');
 });
 
 test('container + overlay is ONE enriched object, never two', () => {

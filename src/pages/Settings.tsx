@@ -9,14 +9,16 @@ import type {
 } from '../lib/types';
 import { Icon } from '../components/Icon';
 import { IconPickerModal } from '../components/IconPicker';
-import { Menu, type MenuItem, Modal, PageHero, ProviderNote, Segmented, StatusLine, Switch } from '../components/ui';
+import { Menu, MenuButton, type MenuItem, Modal, PageHero, ProviderNote, Segmented, StatusLine, Switch } from '../components/ui';
+import { GroupNameField } from '../components/GroupNameField';
+import { checkGroupName, renameGroupAt, uniqueGroupName } from '../lib/groupName';
 import { Sortable } from '../components/Sortable';
 import { HubPreview } from '../components/hub/HubPreview';
 import {
   addWidget, configSummary, hiddenWidgets, moveWidget, removeWidget, setSpacing, setWidget, visibleInZone,
 } from '../lib/hubLayout';
 import {
-  assignGroup, clearGroup, ensureOverlay, overlayFromInventory, removeEntry, removeGroup, renameGroup,
+  assignGroup, clearGroup, ensureOverlay, overlayFromInventory, removeEntry, removeGroup,
   saveOverlay, setGroupDescription, setIcon, type DraftGroup, type DraftService,
 } from '../lib/overlay';
 
@@ -104,7 +106,7 @@ function Row({ label, desc, children, tight }: { label: string; desc?: string; c
     </div>
   );
 }
-function Block({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
+function Block({ title, children, aside }: { title: ReactNode; children: ReactNode; aside?: ReactNode }) {
   return (
     <section style={{ marginBottom: 'var(--section-gap)' }}>
       <div className="section-head" style={{ marginBottom: 2 }}><h2 className="section-title">{title}</h2><span className="section-aside">{aside}</span></div>
@@ -634,8 +636,18 @@ function ServicesTab() {
 
       {groups.map((g, gi) => (
         <Block
-          key={g.name}
-          title={g.name}
+          key={`${g.name}-${gi}`}
+          title={
+            // the same rename contract as Settings → Groups: Enter commits, Escape reverts, blur
+            // commits, an invalid or duplicate name is refused with a reason beside the field
+            <GroupNameField
+              name={g.name}
+              existing={groups.filter((_, i) => i !== gi).map((x) => x.name)}
+              ariaLabel={`Group name for ${g.name}`}
+              className="input group-name-heading"
+              onCommit={(next) => setDraft(renameGroupAt(groups, gi, next))}
+            />
+          }
           aside={
             <span style={{ display: 'flex', gap: 'var(--sp-2)' }}>
               <button className="btn btn-quiet btn-sm" onClick={() => setDraft((d) => { const next = structuredClone((d ?? groups) as DraftGroup[]); next[gi].services.push({ name: 'new', container: null, displayName: null, app: null, description: null, url: null, icon: null, group: g.name, order: null, hidden: false, showOnHub: true, keywords: [], meta: [] }); return next; })}>+ entry</button>
@@ -830,7 +842,10 @@ function GroupsTab() {
   const { layout, setLayout } = useLayout();
   const { busy, err, save } = useSave();
   const [draft, setDraft] = useState<DraftGroup[] | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
+  // `editing` is an INDEX, never a name: a rename must not move its own identity out from under
+  // the row that is being edited (that was the bug behind “can't rename New group”).
+  const [editing, setEditing] = useState<number | null>(null);
+  const [freshGroup, setFreshGroup] = useState<number | null>(null);
   const inventory = useMemo(() => data?.services ?? [], [data]);
   const hiddenGroups = layout?.services?.hiddenGroups || [];
 
@@ -853,6 +868,13 @@ function GroupsTab() {
 
   if (!groups) return <p className="stale-note">Loading groups…</p>;
   const dirty = !!draft;
+  const renameAt = (index: number, next: string) => setDraft(renameGroupAt(groups, index, next));
+  const addGroup = () => {
+    const name = uniqueGroupName(groups.map((g) => g.name));
+    setDraft([...groups, { name, description: null, services: [] }]);
+    setFreshGroup(groups.length);
+    setEditing(groups.length);
+  };
 
   const moveService = (container: string, to: string | null) => {
     const svc = inventory.find((s) => s.name === container);
@@ -878,7 +900,8 @@ function GroupsTab() {
           setLayout({ services: { groupOrder: next } });
         }}
         renderItem={(name, ctx) => {
-          const g = groups.find((x) => x.name === name);
+          const gi = groups.findIndex((x) => x.name === name);
+          const g = groups[gi];
           if (!g) return null;
           const discovered = discoveredGroups.get(name) || [];
           const isHidden = hiddenGroups.includes(name);
@@ -886,33 +909,34 @@ function GroupsTab() {
             <div className="group-row" key={name}>
               <div className="group-row-head">
                 {ctx.handle}
-                <input
-                  className="input group-name"
-                  value={g.name}
-                  aria-label={`Group name for ${name}`}
-                  onChange={(e) => setDraft(renameGroup(groups, name, e.target.value))}
+                <GroupNameField
+                  name={g.name}
+                  existing={groups.filter((_, i) => i !== gi).map((x) => x.name)}
+                  ariaLabel={`Group name for ${g.name}`}
+                  autoFocus={freshGroup === gi}
+                  onCommit={(next) => { renameAt(gi, next); setFreshGroup(null); }}
                 />
                 <input
                   className="input group-desc"
                   value={g.description || ''}
                   placeholder="one line about this group (optional)"
-                  aria-label={`Description for ${name}`}
-                  onChange={(e) => setDraft(setGroupDescription(groups, name, e.target.value))}
+                  aria-label={`Description for ${g.name}`}
+                  onChange={(e) => setDraft(setGroupDescription(groups, g.name, e.target.value))}
                 />
                 <span className="stale-note">{g.services.length} overlay · {discovered.length} discovered</span>
-                <Switch checked={!isHidden} onChange={() => setLayout({ services: { hiddenGroups: isHidden ? hiddenGroups.filter((x) => x !== name) : [...hiddenGroups, name] } })} label={`Show ${name} on the Hub`} />
-                <button className="btn btn-sm" onClick={() => setEditing(editing === name ? null : name)}>{editing === name ? 'Done' : 'Services'}</button>
+                <Switch checked={!isHidden} onChange={() => setLayout({ services: { hiddenGroups: isHidden ? hiddenGroups.filter((x) => x !== g.name) : [...hiddenGroups, g.name] } })} label={`Show ${g.name} on the Hub`} />
+                <button className="btn btn-sm" onClick={() => setEditing(editing === gi ? null : gi)}>{editing === gi ? 'Done' : 'Services'}</button>
                 <button
                   className="icon-btn"
-                  aria-label={`Delete group ${name}`}
+                  aria-label={`Delete group ${g.name}`}
                   title="Delete this group — its services fall back to discovery"
-                  onClick={() => { setDraft(removeGroup(groups, name)); setLayout({ services: { hiddenGroups: hiddenGroups.filter((x) => x !== name) } }); }}
+                  onClick={() => { setDraft(removeGroup(groups, g.name)); setLayout({ services: { hiddenGroups: hiddenGroups.filter((x) => x !== g.name) } }); }}
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" /></svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" /></svg>
                 </button>
               </div>
 
-              {editing === name && (
+              {editing === gi && (
                 <div className="group-row-body">
                   {g.services.length === 0 && discovered.length === 0 && <p className="stale-note">Nothing is filed here yet. Assign a discovered service below, or leave the group empty — it renders nothing until a container matches.</p>}
                   {g.services.map((s) => (
@@ -928,7 +952,7 @@ function GroupsTab() {
                       <Icon ref={d.icon} name={d.displayName} size={20} plain />
                       <span className="grow">{d.displayName}</span>
                       <span className="stale-note">discovered · {d.container.composeProject || 'standalone'}</span>
-                      <button className="btn btn-quiet btn-sm" onClick={() => setDraft(assignGroup(groups, d, name))}>File here</button>
+                      <button className="btn btn-quiet btn-sm" onClick={() => setDraft(assignGroup(groups, d, g.name))}>File here</button>
                     </div>
                   ))}
                 </div>
@@ -956,7 +980,7 @@ function GroupsTab() {
       </Block>
 
       <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center' }}>
-        <button className="btn" onClick={() => { const name = `Group ${groups.length + 1}`; setDraft([...groups, { name, description: null, services: [] }]); setEditing(name); }}>+ New group</button>
+        <button className="btn" onClick={addGroup} title="Add a group and name it">+ New group</button>
         <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => save(async () => { await saveOverlay(groups); setDraft(null); })}>{busy ? 'Saving…' : 'Save groups'}</button>
         {dirty && <button className="btn btn-quiet" onClick={() => setDraft(null)}>Discard</button>}
       </div>
@@ -970,14 +994,35 @@ function BookmarksTab() {
   const { data } = usePolled<{ groups: BmGroup[] }>('/api/bookmarks', 0);
   const { busy, err, save } = useSave();
   const [draft, setDraft] = useState<BmGroup[] | null>(null);
+  const [freshGroup, setFreshGroup] = useState<number | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
   const groups = draft ?? data?.groups ?? [];
   if (!data && !draft) return <p className="stale-note">Loading bookmarks…</p>;
+  const renameAt = (index: number, next: string) => setDraft(cloneAt(groups, (d) => { d[index].name = next; }));
+  const addGroup = () => {
+    const name = uniqueGroupName(groups.map((g) => g.name));
+    setDraft(cloneAt(groups, (d) => d.push({ name, items: [] })));
+    setFreshGroup(groups.length);
+  };
   return (
     <>
       <p className="lede">Flat links, no status, no icon machinery. They appear in search and can be shown in the Hub sidebar.</p>
       {err && <p className="stale-note" style={{ color: 'var(--fail)' }}>{err}</p>}
+      {problem && <p className="name-note" role="alert">{problem}</p>}
       {groups.map((g, gi) => (
-        <Block key={g.name + gi} title={g.name} aside={
+        <Block
+          key={`${g.name}-${gi}`}
+          title={
+            <GroupNameField
+              name={g.name}
+              existing={groups.filter((_, i) => i !== gi).map((x) => x.name)}
+              ariaLabel={`Bookmark group name for ${g.name}`}
+              className="input group-name-heading"
+              autoFocus={freshGroup === gi}
+              onCommit={(next) => { renameAt(gi, next); setFreshGroup(null); }}
+            />
+          }
+          aside={
           <span style={{ display: 'flex', gap: 6 }}>
             <button className="btn btn-quiet btn-sm" onClick={() => setDraft(cloneAt(groups, (d) => d[gi].items.push({ name: 'New', href: 'https://' })))}>+ link</button>
             <button className="btn btn-quiet btn-sm" onClick={() => setDraft(cloneAt(groups, (d) => d.splice(gi, 1)))}>remove</button>
@@ -999,8 +1044,20 @@ function BookmarksTab() {
         </Block>
       ))}
       <div style={{ display: 'flex', gap: 'var(--sp-3)', marginTop: 'var(--sp-6)' }}>
-        <button className="btn" onClick={() => setDraft(cloneAt(groups, (d) => d.push({ name: 'New group', items: [] })))}>+ group</button>
-        <button className="btn btn-primary" disabled={!draft || busy} onClick={async () => { await save(async () => { await put('/api/bookmarks', { groups }); setDraft(null); }); }}>Save bookmarks.yaml</button>
+        <button className="btn" onClick={addGroup} title="Add a group and name it">+ New group</button>
+        <button className="btn btn-primary" disabled={!draft || busy} onClick={async () => {
+          // the same rule the editor enforces per field, applied to the whole document: a blank
+          // group is a mistake, and two groups with one name is a different mistake
+          const names = groups.map((g) => g.name);
+          const blank = names.some((n) => !String(n || '').trim());
+          const dupes = names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === String(n || '').toLowerCase()) !== i);
+          if (blank || dupes.length) {
+            setProblem(blank ? 'Every bookmark group needs a name.' : `Two groups cannot both be called “${dupes[0]}”.`);
+            return;
+          }
+          setProblem(null);
+          await save(async () => { await put('/api/bookmarks', { groups }); setDraft(null); });
+        }}>Save bookmarks.yaml</button>
       </div>
     </>
   );

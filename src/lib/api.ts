@@ -25,6 +25,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (text) { try { json = JSON.parse(text); } catch { json = { error: text.slice(0, 200) }; } }
   if (!res.ok) {
     const msg = (json && typeof json === 'object' && 'error' in json) ? String((json as { error: string }).error) : `${res.status} ${res.statusText}`;
+    // One place announces an expired or revoked session, so every page drops to the login screen
+    // instead of rendering a half-empty shell of unavailable panels.
+    if (res.status === 401 && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('opushub:unauthorized'));
     throw new ApiError(msg, res.status);
   }
   const et = res.headers.get('etag');

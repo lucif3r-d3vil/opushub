@@ -1,8 +1,10 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { LayoutProvider, SettingsProvider, useSettings } from './lib/theme';
+import { AuthProvider, useAuth } from './lib/auth';
 import { SearchOverlay, useGlobalSearchHotkey } from './components/SearchOverlay';
 import { Freshness } from './components/ui';
+import { LogoMark } from './components/Logo';
 
 const Hub = lazy(() => import('./pages/Hub'));
 const Services = lazy(() => import('./pages/Services'));
@@ -14,6 +16,8 @@ const Activity = lazy(() => import('./pages/Activity'));
 const Settings = lazy(() => import('./pages/Settings'));
 const IconsPage = lazy(() => import('./pages/Icons'));
 const NotFound = lazy(() => import('./pages/NotFound'));
+const Setup = lazy(() => import('./pages/Setup'));
+const Login = lazy(() => import('./pages/Login'));
 
 const NAV = [
   { to: '/', label: 'Hub', icon: 'M4 11.5 12 5l8 6.5V20h-5.5v-4.5h-5V20H4z' },
@@ -23,15 +27,6 @@ const NAV = [
   { to: '/activity', label: 'Activity', icon: 'M3 12h4l2.5-6 4 12 2.5-6H21' },
   { to: '/settings/appearance', label: 'Settings', icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7.4 7.4 0 0 0-.1-1.2l2-1.55-2-3.46-2.35.95a7.5 7.5 0 0 0-2.05-1.2L14.5 3h-5l-.4 2.54a7.5 7.5 0 0 0-2.05 1.2L4.7 5.79l-2 3.46 2 1.55a7.6 7.6 0 0 0 0 2.4l-2 1.55 2 3.46 2.35-.95a7.5 7.5 0 0 0 2.05 1.2L9.5 21h5l.4-2.54a7.5 7.5 0 0 0 2.05-1.2l2.35.95 2-3.46-2-1.55c.07-.4.1-.8.1-1.2Z' },
 ];
-
-function LogoMark() {
-  return (
-    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
-      <path d="M32 8 54 20v24L32 56 10 44V20z" stroke="var(--ink)" strokeWidth="3.2" strokeLinejoin="round" />
-      <circle cx="32" cy="32" r="6.5" fill="var(--accent)" />
-    </svg>
-  );
-}
 
 function Background() {
   const { settings } = useSettings();
@@ -91,6 +86,7 @@ function Shell() {
               <span className="tip">Search · /</span>
             </button>
             <ThemeToggle />
+            <SignOutButton />
           </div>
         </nav>
 
@@ -152,12 +148,55 @@ function CustomAssets() {
   );
 }
 
-export default function App() {
+/**
+ * The gate. Nothing that talks to the infrastructure renders before we know who is asking:
+ *
+ *   loading → a quiet mark (never a flash of the wrong screen)
+ *   setup   → the first-run wizard owns every route, because there is no account yet
+ *   login   → the login screen, whatever URL was typed
+ *   ready   → the application, exactly as before
+ */
+function Gate() {
+  const { status } = useAuth();
+  if (status === 'loading') {
+    return (
+      <div className="auth-boot" role="status" aria-live="polite">
+        <LogoMark size={34} />
+        <span className="stale-note">Starting OpusHub…</span>
+      </div>
+    );
+  }
+  if (status === 'setup') return <Suspense fallback={<div className="auth-boot" />}><Setup /></Suspense>;
+  if (status === 'login') return <Suspense fallback={<div className="auth-boot" />}><Login /></Suspense>;
+  // Only an authenticated session mounts the settings/layout providers — pre-auth there is
+  // nothing to fetch, and no request should be made that is going to be refused anyway.
   return (
     <SettingsProvider>
       <LayoutProvider>
-        <Routes>
-          <Route element={<Shell />}>
+        <ShellWithRoutes />
+      </LayoutProvider>
+    </SettingsProvider>
+  );
+}
+
+/** Sign out is a rail affordance: present, quiet, and never in the way. */
+function SignOutButton() {
+  const { user, logout } = useAuth();
+  if (!user) return null;
+  return (
+    <button className="rail-item" aria-label={`Sign out ${user.username}`} title={`Signed in as ${user.username} — click to sign out`} onClick={() => void logout()} style={{ height: 40 }}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M15 4h3.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H15M10 8l-4 4 4 4M6 12h9" />
+      </svg>
+      <span className="tip">Sign out · {user.username}</span>
+    </button>
+  );
+}
+
+function ShellWithRoutes() {
+  return (
+    <Routes>
+      <Route element={<Shell />}>
             <Route index element={<Hub />} />
             <Route path="services" element={<Services />} />
             <Route path="services/:group/:name" element={<ServiceDetail />} />
@@ -170,9 +209,15 @@ export default function App() {
             <Route path="settings/:tab/:item" element={<Settings />} />
             <Route path="icons" element={<IconsPage />} />
             <Route path="*" element={<NotFound />} />
-          </Route>
-        </Routes>
-      </LayoutProvider>
-    </SettingsProvider>
+      </Route>
+    </Routes>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
   );
 }

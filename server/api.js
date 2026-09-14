@@ -1,9 +1,15 @@
 // /api — the only door between the browser and the infrastructure. Read-mostly by design;
 // mutations write config files (atomically, validated). No shell, no Docker writes, no secrets.
+//
+// Authentication is enforced here, once, in front of every route: the door is closed unless the
+// request either names one of the small set of bootstrap endpoints (setup status / create the
+// administrator / login / logout / who-am-I / the container liveness probe) or carries a valid
+// session cookie. State-changing requests additionally have to be same-origin (see auth.js).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { CONFIG_DIR, APP_ROOT, readConfigText, writeText } from './configStore.js';
+import * as auth from './auth.js';
 import * as model from './model.js';
 import { collect as collectSystem, History } from './providers/system.js';
 import * as docker from './providers/docker.js';
@@ -45,6 +51,22 @@ export const history = new History({ intervalMs: 5000, samples: 720, file: path.
 let lastNews = { status: 'idle', items: [] };
 let bootAt = Date.now();
 
+/**
+ * The complete list of endpoints that answer without a session. Everything else — inventory,
+ * stacks, system, logs, activity, settings, layout, bookmarks, icons, discovery, providers,
+ * custom code — requires one. Adding a route here is a security decision; keep the list short.
+ */
+const PUBLIC_ROUTES = new Set([
+  'GET /api/health',
+  'GET /api/setup/status',
+  'POST /api/setup',
+  'GET /api/auth/me',
+  'POST /api/auth/login',
+  'POST /api/auth/logout',
+]);
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 function send(res, status, obj, { etagBody } = {}) {
   const body = etagBody ?? JSON.stringify(obj);
   const etag = '"' + crypto.createHash('sha1').update(body).digest('base64url').slice(0, 16) + '"';
@@ -59,7 +81,14 @@ export async function handleApi(req, res, url) {
   const p = url.pathname.replace(/\/+$/, '') || '/';
   const method = req.method;
   const route = `${method} ${p}`;
+  // Every mutating endpoint speaks JSON and only JSON. A form-encoded or text/plain body is
+  // refused outright: it can never be a legitimate Hub request, and it keeps simple cross-site
+  // form posts from ever being interpreted as an update.
   const jsonBody = async () => {
+    const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (type && type !== 'application/json') {
+      throw Object.assign(new Error('body must be application/json'), { status: 415 });
+    }
     const chunks = [];
     let size = 0;
     for await (const c of req) {
@@ -73,8 +102,112 @@ export async function handleApi(req, res, url) {
   };
   const notFound = () => { throw Object.assign(new Error(`no route: ${route}`), { status: 404 }); };
 
+  // ---------- identity: one gate in front of every route ----------
+  // Resolved fresh per request (a session can be revoked between two polls) and shared with the
+  // routes below, so nothing has to re-read the cookie or trust a query parameter.
+  const session = auth.authenticate(req);
+  // The cookie token currently in play, so signing in can retire it (see the login routes).
+  const activeToken = session?.session?.id ?? null;
+  const isPublic = PUBLIC_ROUTES.has(route);
+  if (!isPublic && !session) {
+    res.setHeader('www-authenticate', 'Cookie');
+    return send(res, 401, { error: 'Authentication required.', code: 'auth_required' });
+  }
+  if (!SAFE_METHODS.has(method)) {
+    const csrf = auth.csrfCheck(req);
+    if (!csrf.ok) {
+      logEvent({ source: 'system', type: 'auth.csrf_blocked', subject: route, message: csrf.reason });
+      return send(res, 403, { error: `Refused: ${csrf.reason}`, code: 'csrf' });
+    }
+  }
+  const secure = auth.isSecureRequest(req);
+
+  // ---------- setup (bootstrap; refuses to run twice) ----------
+  if (route === 'GET /api/setup/status') {
+    const state = auth.getSetupState();
+    const body = {
+      required: state.required,
+      complete: state.complete,
+      hasAccount: state.hasAccount,
+      version: '0.1.0',
+    };
+    // Before an account exists the wizard needs to show what the engine looks like. That is a
+    // count-only summary — no container names, no images, no URLs leave the server pre-auth.
+    if (state.required) body.discovery = await setupSummary();
+    return send(res, 200, body);
+  }
+  if (route === 'POST /api/setup') {
+    if (auth.getSetupState().complete) {
+      return send(res, 409, { error: 'OpusHub is already set up. Sign in instead.', code: 'already_setup' });
+    }
+    const body = await jsonBody();
+    const user = await auth.createAdmin({ username: body?.username, password: body?.password });
+    // Infrastructure knobs the wizard may set (host address for published-port URLs, entrypoint
+    // port mapping). Whitelisted: setup can never write anything else into settings.yaml.
+    const infra = body?.infrastructure && typeof body.infrastructure === 'object' ? body.infrastructure : null;
+    if (infra) {
+      const patch = {};
+      if (typeof infra.hostAddress === 'string' && infra.hostAddress.trim()) patch.hostAddress = infra.hostAddress.trim();
+      if (infra.entrypointPorts && typeof infra.entrypointPorts === 'object') patch.entrypointPorts = infra.entrypointPorts;
+      if (Object.keys(patch).length) {
+        model.putSettings({ infrastructure: patch });
+        model.invalidateDiscovery();
+      }
+    }
+    const minted = await auth.login({ username: user.username, password: body?.password, ip: clientIp(req) });
+    if (minted.ok) {
+      if (activeToken && activeToken !== minted.token) auth.destroySession(activeToken);
+      res.setHeader('set-cookie', auth.sessionCookie(minted.token, { maxAgeMs: minted.expiresAt - Date.now(), secure }));
+    }
+    logEvent({ source: 'system', type: 'setup.completed', subject: user.username, message: 'administrator account created' });
+    return send(res, 201, { ok: true, user, authenticated: true });
+  }
+
+  // ---------- authentication ----------
+  if (route === 'GET /api/auth/me') {
+    return send(res, 200, {
+      authenticated: !!session,
+      user: session ? auth.getUser() : null,
+      setupComplete: auth.getSetupState().complete,
+    });
+  }
+  if (route === 'POST /api/auth/login') {
+    const body = await jsonBody();
+    const ip = clientIp(req);
+    const result = await auth.login({ username: body?.username, password: body?.password, ip });
+    if (!result.ok) {
+      if (result.retryAfterMs) res.setHeader('retry-after', String(Math.ceil(result.retryAfterMs / 1000)));
+      logEvent({ source: 'system', type: 'auth.login_failed', subject: String(body?.username || '(none)').slice(0, 40), message: result.status === 429 ? 'throttled' : 'incorrect credentials' });
+      return send(res, result.status, { error: result.error, retryAfterMs: result.retryAfterMs });
+    }
+    // Signing in always mints a brand new session id (no fixation) and retires the id the client
+    // presented, so a token that leaked before sign-in cannot be reused afterwards.
+    if (activeToken && activeToken !== result.token) auth.destroySession(activeToken);
+    res.setHeader('set-cookie', auth.sessionCookie(result.token, { maxAgeMs: result.expiresAt - Date.now(), secure }));
+    logEvent({ source: 'system', type: 'auth.login', subject: result.user.username, message: `signed in${ip ? ` from ${ip}` : ''}` });
+    return send(res, 200, { ok: true, user: result.user, authenticated: true });
+  }
+  if (route === 'POST /api/auth/logout') {
+    const token = auth.tokenFrom(req);
+    if (token) auth.destroySession(token);
+    if (session) logEvent({ source: 'system', type: 'auth.logout', subject: session.username, message: 'signed out' });
+    res.setHeader('set-cookie', auth.clearedCookie());
+    return send(res, 200, { ok: true, authenticated: false });
+  }
+
   // ---------- health & meta ----------
+  // Public on purpose: this is what the container healthcheck calls, and what a load balancer
+  // needs. Unauthenticated callers get liveness only — no paths, no provider internals.
   if (route === 'GET /api/health') {
+    if (!session) {
+      const setupState = auth.getSetupState();
+      return send(res, 200, {
+        name: 'OpusHub', version: '0.1.0', ok: true,
+        setup: { required: setupState.required, complete: setupState.complete },
+        authenticated: false,
+        note: 'Sign in for provider detail.',
+      });
+    }
     const env = loadEnv(CONFIG_DIR);
     const dockerProv = await dockerAvailabilityCached();
     return send(res, 200, {
@@ -449,6 +582,44 @@ export async function handleApi(req, res, url) {
 
 function hashOf(body) {
   return '"' + crypto.createHash('sha1').update(body).digest('base64url').slice(0, 16) + '"';
+}
+
+/** The caller's address, for session records and login throttling. Forwarded headers are only
+ *  consulted because OpusHub is expected to sit behind a reverse proxy or a VPN; the value is
+ *  used for display and throttling, never for authorization. */
+function clientIp(req) {
+  const fwd = String(req?.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
+  if (fwd) return fwd.slice(0, 60);
+  return req?.socket?.remoteAddress || null;
+}
+
+/**
+ * Count-only view of discovery, used by the first-run wizard *before* an account exists.
+ * Deliberately names nothing: no container, image, URL or path crosses the boundary pre-auth.
+ */
+async function setupSummary() {
+  const s = await model.getDiscoveryStatus({ refreshMs: 0 });
+  return {
+    docker: { ok: s.engine.ok, state: s.engine.state, version: s.engine.version },
+    stacks: s.inventory.stacks,
+    containers: s.engine.containers,
+    running: s.engine.running,
+    services: s.inventory.applications,
+    infrastructure: s.inventory.infrastructure,
+    standalone: s.inventory.standalone,
+    urls: { detected: s.urlDiscovery.withUrl, missing: s.urlDiscovery.withoutUrl },
+    // Entrypoint *names* ("web", "websecure") are Traefik vocabulary, not host data: the wizard
+    // needs them to offer the port mapping when the entrypoint is not on 80/443.
+    traefik: {
+      routes: s.urlDiscovery.traefikRouters,
+      tlsRoutes: s.traefik.tlsRouters,
+      routedContainers: s.traefik.containers,
+      entrypoints: s.traefik.entrypoints,
+      entrypointPorts: s.urlDiscovery.entrypointPorts,
+    },
+    hostAddress: s.urlDiscovery.hostAddress,
+    hostAddressSource: s.urlDiscovery.hostAddressSource,
+  };
 }
 
 let dockerAvailCache = { at: 0, value: null };

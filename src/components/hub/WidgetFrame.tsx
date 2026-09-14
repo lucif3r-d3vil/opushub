@@ -3,11 +3,11 @@
 // It is deliberately not a card: a title, an optional quiet meta line, and a tools menu that
 // appears on hover/focus. Presentation stays inside the widget (a clock is typography, news is a
 // list, system is a strip); the frame only holds the name, the drag handle and the controls.
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { WidgetCatalogueEntry, WidgetInstance, WidgetSize, WidgetZone } from '../../lib/types';
 import { SIZE_LABEL, SIZE_ORDER, ZONE_LABEL } from '../../lib/hubLayout';
-import { Menu, type MenuItem } from '../ui';
+import { MenuButton, type MenuItem } from '../ui';
 
 export interface WidgetFrameProps {
   widget: WidgetInstance;
@@ -24,7 +24,6 @@ export interface WidgetFrameProps {
 }
 
 export function WidgetFrame({ widget, catalogue, zone, interactive, handle, right, note, onPatch, onMove, children }: WidgetFrameProps) {
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const entry = catalogue.find((c) => c.type === widget.type);
   const title = widget.title || entry?.title || widget.type;
   const sizes = entry?.sizes || SIZE_ORDER;
@@ -58,22 +57,17 @@ export function WidgetFrame({ widget, catalogue, zone, interactive, handle, righ
         <span className="widget-tools">
           {right}
           {interactive && items.length > 0 && (
-            <button
+            <MenuButton
               className="icon-btn"
-              aria-label={`${title} options`}
-              aria-haspopup="menu"
-              onClick={(e) => {
-                const r = e.currentTarget.getBoundingClientRect();
-                setMenu({ x: Math.min(r.right - 200, window.innerWidth - 212), y: r.bottom + 6 });
-              }}
+              label={`${title} options`}
+              items={items}
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
-            </button>
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
+            </MenuButton>
           )}
         </span>
       </div>
       <div className="widget-body">{children}</div>
-      {menu && <Menu x={menu.x} y={menu.y} items={items} onClose={() => setMenu(null)} />}
     </section>
   );
 }

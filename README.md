@@ -12,15 +12,42 @@ something and it disappears from every page. Nothing is hardcoded, and no domain
 same image runs on any host with no code change. YAML config is optional *presentation*: it renames,
 files, icons and orders what Docker already knows about.
 
+## Install
+
+```bash
+mkdir -p ~/opushub && cd ~/opushub
+# save docker-compose.yml from this repository here, then:
+docker compose up -d
+```
+
+Open `http://<this-host>:3000`. The first-run wizard takes it from there: create the administrator
+account, confirm the Docker endpoint, look over what discovery found, and finish — signed in, on the
+Hub. (Set the socket group first if you want Docker visible immediately: `stat -c '%g'
+/var/run/docker.sock`, then uncomment `group_add` in the compose file. Without it the wizard honestly
+reports Docker as not connected.)
+
+The image is `ghcr.io/lucif3r-d3vil/opushub:latest`, and the compose file mounts exactly what the app
+needs: `./config` (your presentation), `./data` (the account and runtime state) and
+`/var/run/docker.sock:ro`.
+
+**Keep port 3000 on your LAN.** OpusHub reads host vitals, container logs and your whole inventory;
+its login is one local account, not an identity provider. Use a VPN or a reverse proxy with its own
+auth if you need it from outside — never publish 3000 to the Internet.
+
+Full detail — tags, persistence, backups, updating, the socket's implications and a troubleshooting
+table — is in [`docs/07-distribution.md`](docs/07-distribution.md); the authentication model is in
+[`docs/06-auth.md`](docs/06-auth.md).
+
+### Run from source instead
+
 ```
 npm install
 npm run build      # builds the SPA into dist/
 npm start          # serves app + /api on :3000 (OPUSHUB_PORT to change)
 ```
 
-Then open the URL — it works on desktop, tablet and phone. During development:
-`npm run dev:web` (vite build --watch) in one terminal and `npm run dev` (node --watch) in another,
-or just use the built app — the node server serves it.
+During development: `npm run dev:web` (vite build --watch) in one terminal and `npm run dev`
+(node --watch) in another, or just use the built app — the node server serves it.
 
 ## What OpusHub is
 
@@ -96,7 +123,13 @@ docs/03-design-system.md    type, color, space, motion — the anti-"AI dashboar
 docs/04-discovery.md        the inventory contract: Docker decides existence, config decides appearance
 docs/05-service-intelligence.md  Phase 3: read-only depth — stats, logs, history, stack health,
                             provider health — and the read-only boundary that bounds all of it
+docs/06-auth.md             the door: account, sessions, cookies, CSRF, throttle, what is public,
+                            and the security review table
+docs/07-distribution.md     the image and GHCR tags, installing, the socket, volumes, backups,
+                            updating, troubleshooting
 Dockerfile                  multi-stage build; runtime config is a mount, never a COPY
+docker-compose.yml          the clean install (image + name + restart + volumes + socket :ro)
+.github/workflows/ghcr.yml  publishes the image on main and on v* tags, with GITHUB_TOKEN only
 scripts/opusgrid-inspect.sh read-only inspection of the metadata discovery reads, on your host
 server/                     HTTP API + discovery + providers + atomic config store
 src/                        React app (pages · shell · components · styles)
@@ -104,14 +137,21 @@ config/                     YOUR state, committed here in this repo
 data/                       runtime log + metric history (gitignored)
 ```
 
-## Running it as a container
+## The container image
 
-`docker build -t opushub .` then mount your config, data and the socket read-only — see the compose
-snippet in `docs/04-discovery.md`. The image contains code only: `.dockerignore` keeps `config/`,
-`data/`, `.env` and `dist/` out of the build context, so nothing host-specific is baked into a layer.
-The container user gets socket access through `group_add` (the Docker socket's GID) rather than
-running as root, and `OPUSHUB_HOST_ADDRESS` is the only networking hint it can be given — and it is
-optional, used solely for containers that publish a port without proxy labels.
+Three stages (deps → build → runtime), production dependencies only, running as the unprivileged
+`node` user, `SIGTERM`-aware, with a healthcheck on `/api/health`. The image contains code only:
+`.dockerignore` keeps `config/`, `data/`, `.env`, keys and `dist/` out of the build context, so
+nothing host-specific is baked into a layer — `test/docker.test.js` asserts that line by line.
+
+Published to GHCR as `ghcr.io/lucif3r-d3vil/opushub` (`:latest`, `:1.4.0`, `:sha-abc1234`), built
+for `linux/amd64` first, authenticated with `GITHUB_TOKEN` and verified (`typecheck` + tests + build)
+before anything is pushed. The container user gets socket access through `group_add` (the socket's
+GID) rather than root, and `OPUSHUB_HOST_ADDRESS` is the only networking hint it can be given — and
+it is optional, used solely for containers that publish a port without proxy labels.
+
+Build it yourself with `docker build -t opushub .`; full details in
+[`docs/07-distribution.md`](docs/07-distribution.md).
 
 ## Status & scope
 
@@ -129,21 +169,36 @@ markers; Settings → System reports provider health. All of it is strictly obse
 restart, exec, pull, deploy or write of any kind was added; see
 `docs/05-service-intelligence.md` for the boundary and the rules.
 
-Run it on the LAN or behind a VPN. It ships with no auth by design (it is your homelab's
-entrypoint, not a public service); put a reverse proxy with auth in front if you expose it.
+**Phase 4 — the door, the details, and distribution.** OpusHub now has one local administrator
+account (scrypt, never a plaintext password), server-side sessions in an HttpOnly cookie, CSRF
+defence, and a first-run wizard that must be completed before any application API answers. Discovery
+got sharper: every compose project becomes a Hub group with a generic display name, service identity
+follows a documented precedence (compose service → container name → image → overlay → humanized),
+icons resolve through the existing pipeline with a monogram as the honest fallback, and infrastructure
+containers are classified and shown on their own rail rather than hidden. The group editor, the
+"…" menus and the system charts were rebuilt on real primitives (an anchored portaled menu, an
+index-addressed name field, a measured 1:1 chart region). The image is published to GHCR with a
+compose file that installs it cleanly. Authentication is a door, not a control plane: nothing about
+the read-only boundary changed — no restart, exec, pull or deploy anywhere.
+
+Run it on the LAN or behind a VPN — see `docs/07-distribution.md` for why, and `docs/06-auth.md` for
+what the login does and does not protect against.
 
 ## Development checks
 
 ```
 npm run check               # tsc + production build
-npm test                    # 174 tests: label grammar, URL precedence, the discovery join, layout v2
+npm test                    # 240 tests: label grammar, URL precedence, the discovery join, layout v2
                             # normalisation and templates, model integration (with and without
-                            # overlays), provider, env, API boundary, the offline contract, and the
-                            # Phase 3 contract (detail/stats/logs/history/activity/stacks/security) —
-                            # all against the mock engine
-npm run test:web            # DOM interaction checks in jsdom: search hotkeys/arrows/Enter, widget
+                            # overlays), provider, env, API boundary, the offline contract, the
+                            # Phase 3 contract (detail/stats/logs/history/activity/stacks/security),
+                            # and Phase 4 (password hashing/sessions/CSRF/throttle, the API door,
+                            # generic grouping, labels and packaging) — all against the mock engine
+npm run test:web            # 26 DOM interaction checks in jsdom: search hotkeys/arrows/Enter, widget
                             # menus writing the layout, keyboard reordering, preview inertness,
-                            # shared-data request counts (needs the jsdom devDependency)
+                            # shared-data request counts, the setup/login gate, the group-name
+                            # contract (service and bookmark groups), the anchored menu's placement
+                            # and the measured chart region (needs the jsdom devDependency)
 npm run verify              # the whole API surface against a *scratch* config dir on its own port:
                             # empty config, overlay, hidden/reordered services, templates, search,
                             # detail pages, provider-unavailable paths. Safe on a live host — your

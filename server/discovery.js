@@ -78,7 +78,60 @@ export function baseName(containerName, project) {
  * `seerr` → `Seerr`, `home-assistant` → `Home Assistant`, `opustream-navidrome-2` → `Navidrome`. */
 export function deriveDisplayName(record) {
   const raw = record.composeService || baseName(record.containerName, record.composeProject);
-  return humanize(raw) || record.containerName;
+  // keepIdentityWords: a compose service called `reporting-service` is named "Reporting Service",
+  // not "Reporting" — dropping identity words can collapse two services into one display name
+  return humanize(raw, { keepIdentityWords: true }) || record.containerName;
+}
+
+/**
+ * Default grouping identity — a stack IS a group.
+ *
+ * Docker's compose project (`com.docker.compose.project=opustream`) is the group a container
+ * belongs to unless the operator overlaid something else. That is the whole automatic
+ * organisation story: `opustream` → `Opustream` above Jellyfin and Seerr, with no services.yaml
+ * entry anywhere. It is generic — arbitrary project names humanize the same way, a 3-container
+ * stack shows 3 containers, a new stack appears the moment it starts, and a project that
+ * disappears takes its group with it because the group is *derived*, never stored.
+ *
+ * Precedence (first match wins):
+ *   1. services.yaml / container-label `group`  — an explicit operator decision, handled by the
+ *      caller: this function is only reached when neither exists
+ *   2. the compose project of the container     — runtime stack identity
+ *   3. `Other`                                  — a container with no stack at all
+ *
+ * Tier 3 is deliberately one shared group rather than a group per container: `docker run` leaves
+ * no stack metadata behind, so inventing a heading per container would be organisation theatre.
+ * Standalone containers keep their own identity (the stacks view lists them separately) and stay
+ * reachable in one honest place.
+ */
+export function deriveGroup(record, fallback = 'Other') {
+  const project = record.composeProject || record.composeFallbackProject;
+  if (project) {
+    const label = humanize(project, { keepExtension: true });
+    if (label) return { group: label, groupSource: 'compose project', project };
+  }
+  return { group: fallback, groupSource: 'default', project: null };
+}
+
+/** Icon candidates for a container, most specific first. Probing *existence* of a matching icon,
+ * never a mapping table: `si:jellyfin` resolving is what makes the icon right, and when nothing
+ * resolves the client falls back to a monogram. */
+export function iconCandidates(record) {
+  const slugs = [
+    ...(record.imageSlugs || []),
+    record.composeService,
+    baseName(record.containerName, record.composeProject),
+    record.composeProject,
+  ];
+  const out = [];
+  for (const raw of slugs) {
+    const s = String(raw || '').toLowerCase().trim();
+    if (!s || s.length < 2) continue;
+    for (const candidate of [s, s.replace(/[-_.]+/g, '')]) {
+      if (candidate.length > 1 && !out.includes(candidate)) out.push(candidate);
+    }
+  }
+  return out.slice(0, 8);
 }
 
 /** `ghcr.io/immich-app/immich-server:v1.118.0` → candidate slugs, most specific first. */
@@ -214,7 +267,12 @@ export function toService(record, overlay, ctx) {
   });
   const icon = o.icon || labelOverlay.icon || null;
   const iconSource = o.icon ? 'config' : labelOverlay.icon ? 'label' : null;
-  const group = o.group || labelOverlay.group || null;
+  // Group: an explicit overlay/label group wins; otherwise the runtime stack identity does — a
+  // compose project *is* a group, so the Hub organises itself from Docker metadata.
+  const explicitGroup = o.group || labelOverlay.group || null;
+  const derived = explicitGroup ? null : deriveGroup(record, ctx.defaultGroup || 'Other');
+  const group = explicitGroup || derived.group;
+  const groupSource = explicitGroup ? (o.group ? 'config' : 'label') : derived.groupSource;
   const state = record.state;
   const status = state === 'running'
     ? (record.health === 'unhealthy' ? 'unhealthy' : 'up')
@@ -235,8 +293,10 @@ export function toService(record, overlay, ctx) {
     icon,
     iconSource,
     iconSuggestion: icon ? null : (ctx.suggestIcon?.(record) || null),
-    group: group || ctx.defaultGroup || 'Other',
-    groupSource: group ? (o.group ? 'config' : 'label') : 'default',
+    group,
+    groupSource,
+    // the raw compose project behind a derived group — used by stacks/URLs, never as a label
+    composeProject: record.composeProject || record.composeFallbackProject || null,
     keywords: o.keywords || [],
     meta: [...(labelOverlay.meta || []), ...(o.meta || [])].slice(0, 12),
     order: Number.isFinite(o.order) ? o.order : (Number.isFinite(labelOverlay.order) ? labelOverlay.order : null),
@@ -308,6 +368,19 @@ export function stackStatusOf(records) {
   return 'degraded';
 }
 
+/** Icon candidates for a compose project: the project name and its words. Same existence probe as
+ *  services — a stack only gets an icon when one really resolves, otherwise the monogram stands. */
+export function stackIconCandidates(project) {
+  const s = String(project || '').toLowerCase().trim();
+  if (!s) return [];
+  const out = [s, s.replace(/[-_.]+/g, '')];
+  const words = s.replace(/[-_.]+/g, ' ').split(' ').filter((w) => w.length > 2);
+  // `opustream-media` → also try `media`, so a stack named after its purpose can borrow its app's
+  // mark when the project name itself has none
+  if (words.length > 1) for (const w of words.slice(1)) out.push(w);
+  return [...new Set(out.filter((x) => x.length > 1))].slice(0, 6);
+}
+
 export function buildStacks(records, stacksOverlay, ctx = {}) {
   const byProject = new Map();
   const standalone = [];
@@ -324,13 +397,18 @@ export function buildStacks(records, stacksOverlay, ctx = {}) {
   for (const [project, members] of projectStacks) {
     const o = overlays.find((x) => !usedOverlay.has(x.name) && (x.project || x.name).toLowerCase() === String(project).toLowerCase());
     if (o) usedOverlay.add(o.name);
+    // An overlay icon wins; otherwise the same existence probe services use — a stack icon is
+    // resolved, never assumed, and null simply means "show the monogram".
+    const derivedIcon = o?.icon ? null : (ctx.suggestRef?.(stackIconCandidates(project)) || null);
     stacks.push({
       id: project,
       project,
-      name: o?.displayName || humanize(project) || project,
-      displayName: o?.displayName || humanize(project) || project,
+      name: o?.displayName || humanize(project, { keepExtension: true }) || project,
+      displayName: o?.displayName || humanize(project, { keepExtension: true }) || project,
       description: o?.description || null,
-      icon: o?.icon || null,
+      icon: o?.icon || derivedIcon,
+      iconSource: o?.icon ? 'config' : derivedIcon ? 'derived:project' : null,
+      iconSuggestion: derivedIcon,
       notes: o?.notes || null,
       compose: null, // host path of the compose file: deliberately never exposed (see security notes)
       source: o ? 'configured' : 'discovered',
@@ -352,7 +430,7 @@ export function buildStacks(records, stacksOverlay, ctx = {}) {
     if (projects.size === 1) {
       const [project] = [...projects];
       const existing = stacks.find((s) => s.project === project);
-      const target = existing || (() => { const s = { id: project, project, name: humanize(project) || project, displayName: humanize(project) || project, description: null, icon: null, notes: null, compose: null, source: 'configured', configured: false, members: [] }; stacks.push(s); return s; })();
+      const target = existing || (() => { const s = { id: project, project, name: humanize(project, { keepExtension: true }) || project, displayName: humanize(project, { keepExtension: true }) || project, description: null, icon: null, notes: null, compose: null, source: 'configured', configured: false, members: [] }; stacks.push(s); return s; })();
       target.name = o.displayName || target.name;
       target.displayName = o.displayName || target.displayName;
       target.description = o.description || target.description;
@@ -441,8 +519,12 @@ export function discover(raws, opts = {}) {
     hostAddressSource: opts.hostAddressSource || (opts.hostAddress ? 'configured' : 'unavailable'),
     entrypointPorts: opts.entrypointPorts || null,
     defaultGroup: opts.defaultGroup || 'Other',
-    suggestIcon: opts.suggestIcon,
+    // Icon resolution is a probe (`suggestRef`), never a table: discovery only decides WHICH
+    // identity signals to try, most specific first.
+    suggestIcon: null,
+    suggestRef: opts.suggestRef || null,
   };
+  ctx.suggestIcon = opts.suggestIcon || (ctx.suggestRef ? (rec) => ctx.suggestRef(iconCandidates(rec)) : null);
   const { byId, unmatched } = bindOverlays(records, opts.serviceOverlays || []);
   const services = [];
   for (const rec of records) {

@@ -5,6 +5,7 @@ import http from 'node:http';
 import { APP_ROOT, loadEnv, resolveConfigDir } from './env.js';
 import { handleApi, markBoot, history } from './api.js';
 import { logEvent } from './activity.js';
+import * as auth from './auth.js';
 import * as docker from './providers/docker.js';
 import { reportProvider } from './providers/health.js';
 import { DATA_DIR, CONFIG_DIR } from './configStore.js';
@@ -33,6 +34,8 @@ if (envReport.loaded.length) {
   const a = docker.availability();
   console.log(`│ discovery  : ${a.ok ? 'Docker connected' : `Docker ${a.state}`} — ${where}`);
   if (!a.ok) console.log('│              services will be listed as discovered-but-no-engine; fix in the environment or Settings → System');
+  const setupState = auth.getSetupState();
+  console.log(`│ setup      : ${setupState.complete ? 'complete — sign in required' : 'NOT COMPLETE — the first-run wizard will be shown'}`);
 }
 console.log('└──────────────────────────────────────────────────────────────');
 
@@ -91,7 +94,13 @@ const server = http.createServer(async (req, res) => {
   try {
     if (p.startsWith('/api/')) return await handleApi(req, res, url);
 
-    // user-config static assets
+    // user-config static assets — everything under /user is the operator's own material
+    // (uploaded icons, personal backgrounds, custom CSS/JS). It is not public: a session cookie
+    // is required, exactly as for the API. The browser sends it on these same-origin loads.
+    if (p.startsWith('/user/') && !auth.authenticate(req)) {
+      res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' });
+      return res.end('OpusHub: authentication required.');
+    }
     if (p.startsWith('/user/icons/')) {
       if (serveFile(res, safeJoin(path.join(CONFIG_DIR, 'icons'), p.slice('/user/icons/'.length)))) return;
     } else if (p.startsWith('/user/backgrounds/')) {
@@ -231,6 +240,7 @@ providerWatcher.unref();
 
 server.listen(PORT, HOST, () => {
   markBoot(Date.now());
+  if (!auth.getSetupState().complete) console.log('OpusHub needs its first-run setup → open the UI and create the administrator account.');
   logEvent({ source: 'system', type: 'app.boot', subject: 'opushub', message: `listening on ${HOST}:${PORT}`, meta: { port: PORT, configDir: CONFIG_DIR, dataDir: DATA_DIR, envFiles: envReport.loaded.map((f) => f.file) } });
   console.log(`OpusHub → http://${HOST}:${PORT}  (config: ${configDir})`);
 });

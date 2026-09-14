@@ -2,17 +2,25 @@
 // Calls handleApi directly with stub req/res; docker joins run against the mock engine.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { startMockEngine } from '../test/mock-engine.js';
 
 const OLD_ENV = { ...process.env };
 let ENGINE = null;
 let handleApi;
+let COOKIE = null;
+
+// scratch state: this file never touches the real config/ or data/ directories
+const CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'opushub-boundary-cfg-'));
+const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'opushub-boundary-data-'));
 
 function req(method, p, body = null) {
   const chunks = body ? [Buffer.from(JSON.stringify(body))] : [];
   return {
     method,
-    headers: {},
+    headers: COOKIE ? { cookie: COOKIE } : {},
     [Symbol.asyncIterator]() {
       let i = 0;
       return { next: async () => (i < chunks.length ? { value: chunks[i++], done: false } : { value: undefined, done: true }) };
@@ -41,14 +49,20 @@ test.before(async () => {
   ENGINE = await startMockEngine();
   process.env.OPUSHUB_DOCKER_SOCKET = ENGINE.socketPath;
   delete process.env.DOCKER_HOST;
+  process.env.OPUSHUB_CONFIG_DIR = CONFIG_DIR;
+  process.env.OPUSHUB_DATA_DIR = DATA_DIR;
   // a named host address, so the published-port tier resolves the same way on every machine
   process.env.OPUSHUB_HOST_ADDRESS = '198.51.100.20';
   ({ handleApi } = await import('./api.js'));
+  const { seedSession } = await import('../test/auth-helper.js');
+  COOKIE = await seedSession();
 });
 
 test.after(async () => {
   await ENGINE?.stop();
   process.env = OLD_ENV;
+  fs.rmSync(CONFIG_DIR, { recursive: true, force: true });
+  fs.rmSync(DATA_DIR, { recursive: true, force: true });
 });
 
 test('GET /api/health: connected engine reports version, no paths', async () => {
