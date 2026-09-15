@@ -19,15 +19,31 @@ import {
   systemSnapshot, weatherDoc,
 } from './ssr-fixtures';
 import { HubSurface } from './components/hub/HubSurface';
+import { GREETINGS } from './components/hub/HubHeader';
 import { SettingsProvider, LayoutProvider } from './lib/theme';
 
 let failures = 0;
+/** `needles` are all required (a nested array is flattened, not treated as a choice). */
 const check = (name: string, raw: string, ...needles: (string | string[])[]) => {
   const html = visibleText(raw);
   const missing = needles.flat().filter((n) => !html.includes(n));
   if (missing.length) {
     failures++;
     console.error(`✗ ${name} — missing: ${missing.map((m) => JSON.stringify(m.slice(0, 60))).join(', ')}`);
+  } else {
+    console.log(`✓ ${name}`);
+  }
+};
+
+/** At least one of `anyOf` must appear — for output that is legitimately not fixed, like the
+ *  time-of-day greeting (the suite must pass at 09:00 and at 04:00 alike). */
+const checkAny = (name: string, raw: string, anyOf: string[], ...needles: (string | string[])[]) => {
+  const html = visibleText(raw);
+  const missing = needles.flat().filter((n) => !html.includes(n));
+  const found = anyOf.some((n) => html.includes(n));
+  if (missing.length || !found) {
+    failures++;
+    console.error(`✗ ${name} — missing: ${[...missing.map((m) => JSON.stringify(m.slice(0, 60))), ...(found ? [] : [`one of ${anyOf.join(' / ')}`])].join(', ')}`);
   } else {
     console.log(`✓ ${name}`);
   }
@@ -86,8 +102,7 @@ const W = (type: string, extra: Partial<WidgetInstance> = {}): WidgetInstance =>
     W('weather'), W('news'), W('markets'), W('bookmarks'), W('activity'),
   ]);
   const html = render(<HubSurface data={hubData()} layout={layout} interactive onLayoutChange={() => undefined} />);
-  check('populated hub: greeting, counts, launcher, rail widgets', html, [
-    'Good ', // time-of-day greeting
+  checkAny('populated hub: greeting, counts, launcher, rail widgets', html, [...GREETINGS], [
     '3 services', 'running',
     'Wave', 'Photos',            // launcher entries, from the fixture inventory
     '18°',                       // weather, from the fixture reading

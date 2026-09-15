@@ -28,12 +28,19 @@ function bufferFor(ref) {
   return buffers.get(ref);
 }
 
+/**
+ * Drop buffers nobody has touched for IDLE_DROP_MS — the memory half of "a container nobody is
+ * watching costs nothing". This used to be skipped while the map held 64 entries or fewer, which
+ * meant the promise in the header only held on hosts with more than 64 containers; a homelab box
+ * with a dozen would keep every sample it had ever taken. Iterating a dozen entries per sample is
+ * free, so there is no reason to be clever about it.
+ *
+ * `readAt` is bumped by both a sample and a read (`statsHistory`, `aggregateHistory`), so a buffer
+ * is only ever dropped when nothing has looked at that container for fifteen minutes.
+ */
 function prune(now = Date.now()) {
-  if (buffers.size <= 64) return;
   for (const [ref, b] of buffers) {
-    if (now - b.readAt > IDLE_DROP_MS || (now - b.lastAt > IDLE_DROP_MS && now - (b.samples.at?.t || 0) > IDLE_DROP_MS)) {
-      buffers.delete(ref);
-    }
+    if (now - b.readAt > IDLE_DROP_MS) buffers.delete(ref);
   }
 }
 
@@ -166,4 +173,4 @@ export function resetStatsHistory() {
   inflight.clear();
 }
 
-export const _internals = { buffers, inflight, MAX_SAMPLES, MIN_INTERVAL_MS, CACHE_TTL_MS };
+export const _internals = { buffers, inflight, prune, MAX_SAMPLES, MIN_INTERVAL_MS, CACHE_TTL_MS, IDLE_DROP_MS };

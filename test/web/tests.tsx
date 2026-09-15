@@ -18,6 +18,7 @@ import StackDetail from '../../src/pages/StackDetail';
 import SystemPage from '../../src/pages/System';
 import ActivityPage from '../../src/pages/Activity';
 import { Loading } from '../../src/components/ui';
+import { GREETINGS, greetingFor } from '../../src/components/hub/HubHeader';
 import type { LayoutDoc, WidgetInstance } from '../../src/lib/types';
 import type { HubData } from '../../src/lib/hubData';
 import App from '../../src/App';
@@ -284,7 +285,8 @@ export async function runWebTests(): Promise<WebResult> {
     await h.flush(50);
     await h.waitFor(() => text().includes('Wave'), 'the launcher to fill from the API');
     expect(text().includes('Wave') && text().includes('Photos'), 'a discovered service is missing from the launcher');
-    expect(/good (morning|afternoon|evening)/i.test(text()), 'the greeting is missing');
+    // the greeting depends on the hour the suite runs at, so accept its whole vocabulary
+    expect(/still up|good (morning|afternoon|evening)/i.test(text()), `the greeting is missing: ${text().slice(0, 160)}`);
     expect(text().includes('3 services'), 'the header does not report the discovered count');
     // the tab is the install's own name (settings.yaml → app.name), set once for every page
     expect(document.title === 'OpusHub', `the document title should be the configured name (got “${document.title}”)`);
@@ -304,6 +306,21 @@ export async function runWebTests(): Promise<WebResult> {
     await h.mount(<TestApp><Hub /></TestApp>);
     await h.flush(50);
     await h.waitFor(() => document.title === 'Grid Control', 'the configured name to reach the tab');
+  });
+
+  /* 1c — Phase 5: the greeting's four windows, pinned so a 4am test run is not a coin flip */
+  await test('greeting: every hour of the day maps to exactly one lead, name trimmed', async () => {
+    const leadFor = (hour: number, name: string | null = null) => greetingFor(name, hour).lead;
+    expect(leadFor(0) === 'Still up' && leadFor(4) === 'Still up', 'the small hours lost their greeting');
+    expect(leadFor(5) === 'Good morning' && leadFor(11) === 'Good morning', 'the morning window is wrong');
+    expect(leadFor(12) === 'Good afternoon' && leadFor(17) === 'Good afternoon', 'the afternoon window is wrong');
+    expect(leadFor(18) === 'Good evening' && leadFor(23) === 'Good evening', 'the evening window is wrong');
+    // every hour is covered by exactly one of the four leads — no hour renders nothing
+    for (let h = 0; h < 24; h++) expect(GREETINGS.includes(leadFor(h) as typeof GREETINGS[number]), `hour ${h} has no greeting`);
+    // the name is optional, trimmed, and bounded
+    expect(greetingFor(null, 9).name === null && greetingFor('   ', 9).name === null, 'a blank name was rendered');
+    expect(greetingFor('  Nora  ', 9).name === 'Nora', 'the name is not trimmed');
+    expect((greetingFor('x'.repeat(80), 9).name || '').length <= 40, 'the name is not bounded');
   });
 
   /* 2 — the search surface opens from every documented trigger */

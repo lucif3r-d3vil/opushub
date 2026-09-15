@@ -206,3 +206,27 @@ test('the stack route inspects only running members, bounds concurrency and shar
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+test('a container nobody has watched for fifteen minutes stops costing memory', () => {
+  const { buffers, prune, IDLE_DROP_MS } = _internals;
+  resetStatsHistory();
+  const now = Date.now();
+  const sample = { t: now, cpu: 1, mem: 2, memLimit: 3, netRx: 4, netTx: 5, pids: 6, blockIo: null };
+  // one buffer read a moment ago, one that nothing has touched for twenty minutes
+  buffers.set('live', { samples: [sample], lastAt: now, readAt: now });
+  buffers.set('stale', { samples: [{ ...sample, t: now - 20 * 60_000 }], lastAt: now - 20 * 60_000, readAt: now - 20 * 60_000 });
+  assert.ok(IDLE_DROP_MS === 15 * 60_000, 'the idle window moved');
+
+  prune(now);
+  assert.ok(buffers.has('live'), 'an active buffer was dropped');
+  assert.ok(!buffers.has('stale'), 'a buffer untouched for twenty minutes survived — retention is not bounded');
+
+  // and a read counts as a touch: the chart that just drew it keeps its history
+  const before = aggregateHistory(['live'], { windowMs: 60_000 });
+  assert.equal(before.reporting, 1);
+  prune(now + 14 * 60_000);
+  assert.ok(buffers.has('live'), 'reading a buffer did not refresh it');
+  prune(now + 16 * 60_000);
+  assert.ok(!buffers.has('live'), 'a buffer nobody has read for over fifteen minutes was kept');
+  buffers.clear();
+});
