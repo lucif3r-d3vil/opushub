@@ -33,6 +33,9 @@ import { exportNative, exportHomepage } from './configExport.js';
 import { lintCss, lintJs, LIMITS } from './configSchema.js';
 import { makeWidget, defaultWidgets, WIDGET_TYPES } from './widgets.js';
 import { templateList, templateIds } from './templates.js';
+import { hostDocument } from './host.js';
+import { describeStorage } from './providers/storage.js';
+import { versionInfo } from './version.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -88,7 +91,10 @@ function send(res, status, obj, { etagBody } = {}) {
 }
 
 export async function handleApi(req, res, url) {
-  const p = url.pathname.replace(/\/+$/, '') || '/';
+  let p = url.pathname.replace(/\/+$/, '') || '/';
+  // /api/v1/* — the canonical versioned namespace. The unversioned routes below are permanent
+  // compatibility aliases with identical shapes; v1 exists so future versions can diverge.
+  p = rewriteV1(p);
   const method = req.method;
   const route = `${method} ${p}`;
   // Every mutating endpoint speaks JSON and only JSON. A form-encoded or text/plain body is
@@ -315,9 +321,12 @@ export async function handleApi(req, res, url) {
     }
     const env = loadEnv(CONFIG_DIR);
     const dockerProv = await dockerAvailabilityCached();
+    const ver = versionInfo();
     return send(res, 200, {
       name: appName(),
       version: '0.1.0',
+      status: 'ok', // liveness for container healthchecks; provider detail below
+      build: ver,
       node: process.version,
       platform: `${process.platform}/${process.arch}`,
       bootedAt: bootAt,
@@ -333,6 +342,7 @@ export async function handleApi(req, res, url) {
         docker: dockerProv,
         system: { ok: true, note: 'reading /proc on this host' },
       },
+      docker: { status: dockerProv.ok ? 'ok' : dockerProv.state || 'unavailable' },
     });
   }
 
@@ -627,6 +637,62 @@ export async function handleApi(req, res, url) {
       const missing = /404|no such container/i.test(String(err.message));
       return send(res, 200, { status: 'error', reason: missing ? 'No such container (it may have been removed).' : 'Could not read container logs.', lines: [] });
     }
+  }
+
+  // ---------- host & infrastructure (Phase 7 canonical inventory) ----------
+  if (route === 'GET /api/host') {
+    const inv = await model.getInventory();
+    return send(res, 200, await hostDocument({ inventory: inv }));
+  }
+  if (route === 'GET /api/docker') {
+    const [inv, infra, dockerProv] = await Promise.all([
+      model.getInventory(),
+      model.getInfra(),
+      dockerAvailabilityCached(),
+    ]);
+    return send(res, 200, {
+      at: Date.now(),
+      status: dockerProv,
+      engine: inv.engine || null,
+      counts: {
+        containers: inv.live ? inv.stats.containers : null,
+        running: inv.live ? inv.stats.running : null,
+        stopped: inv.live ? inv.stats.stopped : null,
+        images: infra.live ? infra.counts.images : null,
+        volumes: infra.live ? infra.counts.volumes : null,
+        networks: infra.live ? infra.counts.networks : null,
+      },
+      live: inv.live && infra.live,
+      statusReason: inv.live ? (infra.live ? null : infra.statusReason) : inv.statusReason,
+      lastKnown: inv.live ? null : inv.lastKnown,
+    });
+  }
+  if (route === 'GET /api/networks') {
+    const infra = await model.getInfra();
+    return send(res, 200, {
+      at: infra.at, live: infra.live, statusReason: infra.statusReason,
+      networks: infra.networks, count: infra.counts.networks, stale: infra.stale,
+    });
+  }
+  if (route === 'GET /api/volumes') {
+    const infra = await model.getInfra();
+    return send(res, 200, {
+      at: infra.at, live: infra.live, statusReason: infra.statusReason,
+      volumes: infra.volumes, count: infra.counts.volumes, stale: infra.stale,
+    });
+  }
+  if (route === 'GET /api/images') {
+    const infra = await model.getInfra();
+    return send(res, 200, {
+      at: infra.at, live: infra.live, statusReason: infra.statusReason,
+      images: infra.images, count: infra.counts.images, stale: infra.stale,
+    });
+  }
+  if (route === 'GET /api/storage') {
+    return send(res, 200, await describeStorage());
+  }
+  if (route === 'GET /api/version') {
+    return send(res, 200, versionInfo());
   }
 
   // ---------- integrations ----------
@@ -1458,3 +1524,20 @@ function summarizeSettingsPatch(patch) {
 }
 
 export function markBoot(t) { bootAt = t; }
+
+/**
+ * /api/v1/* → /api/* rewrite for the allowlisted canonical routes. Anything not listed passes
+ * through untouched (and 404s as `no route`), so v1 can never accidentally expose a route that
+ * was not deliberately versioned.
+ */
+const V1_ROUTES = new Set([
+  '/host', '/docker', '/networks', '/volumes', '/images', '/storage', '/version',
+  '/services', '/stacks', '/system', '/discovery', '/providers',
+]);
+
+export function rewriteV1(pathname) {
+  if (!pathname.startsWith('/api/v1/')) return pathname;
+  const rest = pathname.slice('/api/v1'.length);
+  if (V1_ROUTES.has(rest)) return '/api' + rest;
+  return pathname;
+}
