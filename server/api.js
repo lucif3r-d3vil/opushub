@@ -22,6 +22,7 @@ import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons
 import { logEvent, readEvents, firstEventAt } from './activity.js';
 import { ackAlert, countRecentAuthFailures, getActiveAlerts, refreshAlerts } from './alerts.js';
 import { listChannels } from './notify.js';
+import { checkForUpdates, lastUpdateCheck, REPO_URL } from './updateCheck.js';
 import { searchAll } from './search.js';
 import { loadEnv } from './env.js';
 import { DATA_DIR } from './configStore.js';
@@ -711,6 +712,20 @@ export async function handleApi(req, res, url) {
   if (route === 'GET /api/version') {
     return send(res, 200, versionInfo());
   }
+  // Update awareness: the cached answer only — this route never touches the network.
+  // A check happens solely through POST /api/updates/check (the "Check for updates" button).
+  if (route === 'GET /api/updates') {
+    return send(res, 200, { check: lastUpdateCheck(), repo: REPO_URL, install: versionInfo() });
+  }
+  if (route === 'POST /api/updates/check') {
+    const check = await checkForUpdates({ force: true });
+    logEvent({
+      source: 'system', type: 'update.checked', subject: check.latest || 'unknown',
+      message: check.reason, meta: { state: check.state, current: check.current, latest: check.latest },
+      severity: 'info', category: 'system',
+    });
+    return send(res, 200, { check, repo: REPO_URL });
+  }
   if (route === 'GET /api/resources') {
     const { resourcesDocument } = await import('./resources.js');
     const [system, storage] = await Promise.all([
@@ -818,7 +833,7 @@ export async function handleApi(req, res, url) {
 
   // ---------- search ----------
   if (route === 'GET /api/search') {
-    const q = url.searchParams.get('q') || '';
+    const q = (url.searchParams.get('q') || '').slice(0, 80);
     return send(res, 200, { query: q, results: await searchAll(q, { newsItems: lastNews.items || [] }) });
   }
 

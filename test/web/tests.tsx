@@ -90,6 +90,11 @@ const searchResults = (query: string) => ({
         { title: 'Stream', subtitle: 'Media · running', kind: 'service', href: '/services/Media/stream', icon: null, status: 'up' },
         { title: 'stream', subtitle: 'Activity · started · 2h ago', kind: 'activity', href: '/activity?service=stream' },
       ]
+      : query.includes('unhealthy')
+      ? [
+        { title: 'Wave is unhealthy', subtitle: 'Alert · warning — Its container healthcheck is failing.', kind: 'alert', href: '/services/Music/wave', status: 'degraded' },
+        { title: 'proxy', subtitle: 'Network · bridge · 2 attached', kind: 'infra', href: '/infrastructure?tab=networks' },
+      ]
       : [{ title: 'Widgets', subtitle: 'Hub Layout', kind: 'setting', href: '/settings/widgets' }],
 });
 
@@ -228,6 +233,11 @@ const alertsDoc = {
     { id: 'slack', label: 'Slack', blurb: 'Post to a channel via an incoming webhook.', status: 'coming-later', configured: false },
   ],
 };
+const updatesDoc = {
+  check: { state: 'available', current: '0.1.0', latest: '0.2.0', url: 'https://github.com/lucif3r-d3vil/opushub/releases/tag/v0.2.0', checkedAt: Date.now() - 3600_000, reason: '0.2.0 is published; this install runs 0.1.0' },
+  repo: 'https://github.com/lucif3r-d3vil/opushub',
+  install: { name: 'OpusHub', version: '0.1.0', gitSha: 'abc123', buildTime: null, imageTag: null, installationMode: 'source' },
+};
 const waveHealth = {
   service: 'wave', displayName: 'Wave',
   health: { state: 'healthy', evidence: { container: 'running', healthcheck: 'healthy', http: '200' }, stack: 'Media', startedAt: new Date(Date.now() - 86_400_000).toISOString(), url: 'http://wave.lab.internal', urlSource: 'traefik', detail: 'Healthcheck passing.' },
@@ -299,6 +309,7 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
     '/api/storage': storageDoc,
     '/api/services/Music/wave/health': waveHealth,
     '/api/alerts': alertsDoc,
+    '/api/updates': updatesDoc,
   };
 }
 
@@ -1723,6 +1734,30 @@ export async function runWebTests(): Promise<WebResult> {
     }
     expect(text().includes('Coming later'), 'the honest status is missing');
     expect(text().includes('1 active alert'), 'the active-alert count is missing');
+  });
+
+  /* 7F — the palette shows alerts and infrastructure as their own groups */
+  await test('search: alerts and infrastructure are grouped destinations', async (h) => {
+    await h.mount(<TestApp><SearchHost /></TestApp>);
+    key(window, '/');
+    await h.flush(40);
+    await type(searchInput()!, 'unhealthy');
+    await h.waitFor(() => text().includes('Wave is unhealthy'), 'results for “unhealthy”');
+    await h.flush(260);
+    expect(text().includes('Alerts'), 'the alerts group is not shown');
+    expect(text().includes('Infrastructure'), 'the infrastructure group is not shown');
+    const rows = qa('.cmdk-item').map((el) => text(el));
+    expect(rows.some((r) => r.includes('Wave is unhealthy')), 'the alert result is missing');
+    expect(rows.some((r) => r.includes('proxy')), 'the infrastructure result is missing');
+  });
+
+  /* 7F — the environment tab shows the install and the newest release, honestly */
+  await test('settings environment shows update awareness without auto-checking', async (h) => {
+    await h.mount(<TestApp entry="/settings/environment"><Hub /></TestApp>);
+    await h.waitFor(() => text().includes('Check for updates'), 'the updates block');
+    expect(text().includes('0.2.0 available'), 'the newest release is not shown');
+    expect(text().includes('never checks on its own'), 'the no-phone-home promise is missing');
+    expect(!h.calls.some((c) => c.path === '/api/updates/check'), 'the page checked without being asked');
   });
 
   for (const r of results) {

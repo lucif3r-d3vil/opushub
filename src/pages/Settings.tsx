@@ -330,6 +330,18 @@ function EnvironmentTab() {
     urlDiscovery?: { sources?: Record<string, number>; withUrl?: number; withoutUrl?: number; hostAddress?: string | null; hostAddressSource?: string | null };
   }>('/api/discovery', 30_000);
   const { data: bookmarks } = usePolled<{ groups?: { name: string; bookmarks: unknown[] }[] }>('/api/bookmarks', 0);
+  const { data: updates, refresh: refreshUpdates } = usePolled<{
+    check?: { state: string; current?: string; latest?: string | null; url?: string; checkedAt?: number; reason?: string } | null;
+    repo?: string;
+    install?: { version?: string; gitSha?: string | null; buildTime?: string | null; imageTag?: string | null; installationMode?: string };
+  }>('/api/updates', 0);
+  const [checking, setChecking] = useState(false);
+  const checkNow = async () => {
+    setChecking(true);
+    try { await post('/api/updates/check', {}); } catch { /* the refresh below shows whatever the server knows */ }
+    setChecking(false);
+    refreshUpdates();
+  };
   const overlays = discovery?.overlays;
   const inventory = discovery?.inventory;
   const urls = discovery?.urlDiscovery;
@@ -351,6 +363,42 @@ function EnvironmentTab() {
           </span>
         </Row>
         <Row label="Runtime" tight><span className="mono-meta">OpusHub {health?.version || '0.1'} · node {health?.node || '…'} · {health?.platform || ''}</span></Row>
+      </Block>
+
+      <Block
+        title="Updates"
+        aside={updates?.check?.checkedAt ? <span className="stale-note">checked {new Date(updates.check.checkedAt).toLocaleString()}</span> : <span className="stale-note">never checked</span>}
+      >
+        <p className="stale-note" style={{ marginBottom: 'var(--sp-4)' }}>
+          OpusHub never checks on its own — no boot ping, no timer, no page-load call. The button below is the only
+          thing that contacts github.com, and the answer is cached for six hours.
+        </p>
+        <Row
+          label="This install"
+          desc={updates?.install?.installationMode === 'docker' ? 'Running as a container image.' : 'Running from a source checkout.'}
+          tight
+        >
+          <span className="mono-meta">
+            {updates?.install ? `${updates.install.version || '?'}${updates.install.gitSha ? ` · ${updates.install.gitSha}` : ''}` : '…'}
+          </span>
+        </Row>
+        <Row label="Newest release" tight>
+          <span className="mono-meta">
+            {!updates ? '…' : !updates.check ? 'unknown — check once to find out'
+              : updates.check.state === 'current' ? `${updates.check.latest || updates.check.current} · you are up to date`
+              : updates.check.state === 'available' ? `${updates.check.latest} available`
+              : `unknown — ${updates.check.reason || 'the check did not answer'}`}
+          </span>
+        </Row>
+        {updates?.check?.state === 'available' && (
+          <Row label="" tight>
+            <a className="btn btn-sm" href={updates.check.url || updates.repo} target="_blank" rel="noreferrer">Read the release notes →</a>
+          </Row>
+        )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 'var(--sp-3)' }}>
+          <button className="btn btn-sm" disabled={checking} onClick={checkNow}>{checking ? 'Checking…' : 'Check for updates'}</button>
+          {updates?.repo && <a className="btn btn-quiet btn-sm" href={updates.repo} target="_blank" rel="noreferrer">Repository →</a>}
+        </div>
       </Block>
 
       <Block title="Host address for published ports" aside={<span className="stale-note">used by the URL resolver</span>}>
