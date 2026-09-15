@@ -135,3 +135,28 @@ export function writeText(name, text) {
 }
 
 export function configFile(name) { return assertName(name); }
+
+/**
+ * Phase 6 — write a presentation file byte-for-byte, whatever its format.
+ *
+ * `writeYaml`/`writeJson` re-serialise through a model, which is right for an edit and wrong for a
+ * restore: a restored version must come back exactly as it was, comments and key order included,
+ * or "restore" is a lossy approximation of itself. This writer takes the text as given and goes
+ * through the same atomic temp+rename and the same bounded backup as every other write.
+ *
+ * The caller is responsible for having validated the content (server/configHistory.js restores
+ * only snapshots it wrote itself, and server/configImport.js serialises from a validated model).
+ */
+export function writePresentationText(name, text) {
+  const file = assertName(name);
+  const body = String(text ?? '');
+  if (name.endsWith('.json')) {
+    try { JSON.parse(body); }
+    catch (err) { throw Object.assign(new Error(`${name}: refusing to write invalid JSON — ${err.message}`), { status: 400 }); }
+  }
+  if (Buffer.byteLength(body, 'utf8') > 512_000) {
+    throw Object.assign(new Error(`${name}: too large (512 KB cap)`), { status: 413 });
+  }
+  atomicWrite(file, body, name);
+  return { file, bytes: Buffer.byteLength(body, 'utf8') };
+}

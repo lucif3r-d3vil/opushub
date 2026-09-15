@@ -260,6 +260,34 @@ export function toService(record, overlay, ctx) {
     ctx,
   );
   const displayName = o.displayName || labelOverlay.displayName || deriveDisplayName(record);
+  // Phase 6 — the *detected* half of "Detected value vs User override".
+  //
+  // The service editor has to show a user what Docker/Traefik actually said alongside what they
+  // typed, or an override becomes invisible the moment it is saved (the override wins, so the
+  // detected value is nowhere on screen and looks like it was replaced). These three fields are
+  // the answer without the overlay: what this container would present as if no configuration
+  // existed. Computed only when an override is actually in play — otherwise they are the values
+  // already above, and resolving twice would be work for nothing.
+  const baseDisplayName = deriveDisplayName(record);
+  const baseGroup = deriveGroup(record, ctx.defaultGroup || 'Other').group;
+  let detectedUrl = url.url;
+  let detectedUrlSource = url.url ? url.urlSource : 'none';
+  if (manual) {
+    const withoutManual = resolveUrl(
+      {
+        name: record.containerName,
+        composeService: record.composeService,
+        composeProject: record.composeProject,
+        ports: record.ports,
+        traefik: record._traefik,
+        manualUrl: null,
+        overlay: null,
+      },
+      ctx,
+    );
+    detectedUrl = withoutManual.url;
+    detectedUrlSource = withoutManual.url ? withoutManual.urlSource : 'none';
+  }
   const kind = classify(record, {
     traefikRouted: (record._traefik?.count || 0) > 0,
     urlFound: !!url.url,
@@ -284,6 +312,11 @@ export function toService(record, overlay, ctx) {
     displayName,
     slug: slugify(record.containerName),
     id: record.containerId,
+    // what this container presents with no configuration at all (Phase 6: the "Detected" column)
+    baseDisplayName,
+    baseGroup,
+    detectedUrl,
+    detectedUrlSource,
     // presentation
     app: o.app || labelOverlay.app || null,
     description: o.description || labelOverlay.description || null,
