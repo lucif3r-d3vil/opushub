@@ -10,10 +10,11 @@ still honest about what it protects.
 | Piece | Where |
 | --- | --- |
 | The account (scrypt hash + salt) and the setup state | `data/auth.json` |
-| Live sessions | `data/sessions.json` |
+| Live sessions | `data/sessions.json` (mirrored in memory — see below) |
 | The gate in front of every API route | `server/api.js` (`PUBLIC_ROUTES`, one `auth.authenticate()` per request) |
 | Hashing, sessions, cookies, CSRF metadata, throttle | `server/auth.js` |
 | The wizard and the login screen | `src/pages/Setup.tsx`, `src/pages/Login.tsx`, gated by `src/App.tsx` |
+| Account maintenance (password, sessions) | `server/api.js` → `/api/auth/password`, `/api/auth/sessions[*]`, UI in Settings → Authentication |
 
 `data/` is *runtime state*, not configuration: it is never written to `services.yaml` or
 `settings.yaml`, never baked into an image, and it survives container recreation because it is a
@@ -45,6 +46,57 @@ volume. Deleting `data/` returns OpusHub to a fresh install and the wizard will 
   sign the first one out.
 - Nothing is stored in `localStorage`/`sessionStorage`, and no token is put anywhere JavaScript can
   read it.
+
+### Sessions in memory, sessions on disk
+
+`authenticate()` runs on every request — a Hub that polls several endpoints a second apart used to
+re-read and re-parse `data/sessions.json` for each of them. The file is now read **once per
+process** and thereafter treated as this process's own state:
+
+- **Structural changes are written synchronously.** Creating, destroying or revoking a session hits
+  the disk before the response is sent, so a restart can never resurrect a session an admin
+  revoked — the *"sessions outlive the process"* test still holds, and `data/` remains the
+  authority across container recreation.
+- **Only the idle clock is debounced** (60 s), because losing a minute of it is a nuisance, not a
+  hole.
+- OpusHub is a single process by design. Two instances sharing one `data/` directory would each
+  hold their own view; that deployment is not supported (and is not what the compose file does).
+
+## Changing the password
+
+`POST /api/auth/password { currentPassword, newPassword }` — authenticated, same-origin, and it
+requires the **current** password even though the caller already holds a session: a borrowed browser
+must not be able to lock the owner out of their own Hub.
+
+A successful change:
+
+1. rejects a new password shorter than 8 characters (or one identical to the current one) with `400`,
+   *before* anything is written;
+2. rewrites `data/auth.json` with a fresh scrypt hash and salt — plaintext is never stored, and no
+   log line ever carries either password (the activity feed records `auth.password_changed` /
+   `auth.password_failed` with the username and nothing else — pinned by tests);
+3. **revokes every session**, including the one that made the request, so a cookie stolen before the
+   change is worthless afterwards;
+4. mints a fresh session for the caller and returns it in the same `Set-Cookie` shape as sign-in
+   (rotation, not reuse — the same no-fixation rule as login).
+
+The UI lives in Settings → Authentication. A failed attempt is a `401` with one sentence and leaves
+the session intact; the form keeps what was typed so it can be corrected.
+
+## Seeing and revoking sessions
+
+| Route | Answers |
+| --- | --- |
+| `GET /api/auth/sessions` | every live session, the current one marked, plus the limits (30 d absolute, 7 d idle, 50 max) |
+| `POST /api/auth/sessions/revoke {scope:'others'}` | signs every other browser out; this one keeps working |
+| `POST /api/auth/sessions/revoke {scope:'all'}` | signs out everywhere, including this browser (cookie cleared, `signedOut: true`) |
+| `POST /api/auth/sessions/revoke {scope:'one', id}` | revokes one session by handle; if it is the caller's, that is a sign-out |
+
+**The session token is never serialized.** A session appears in the API as
+`auth.sessionHandle(token)` — the first 16 base64url characters of the token's SHA-256 — which is
+stable, collision-resistant, useless for authentication and impossible to reverse. Revocation takes
+handles only, so a token offered where a handle is expected (`{scope:'one', id:'<the-real-token>'}`)
+revokes nothing; the tests assert exactly that.
 
 ## CSRF
 
@@ -88,18 +140,20 @@ data volume in front of them.
   pre-auth. **After** setup that summary is not returned at all.
 - `POST /api/setup` creates the account and signs it in. It refuses to run twice (`409`) — the wizard
   disappears behind the gate and cannot be reached again.
-- It is a bootstrap endpoint, not a maintenance one: there is no user creation, no password change
-  and no public re-init API. A future "reconfigure" affordance is expected to be a host-level action
-  (or an authenticated route added deliberately), never a public endpoint.
+- It is a bootstrap endpoint, not a maintenance one: there is no user creation and no public
+  re-init API. The account *can* be maintained — password change, session revocation — but only
+  behind a session, never from a route an anonymous caller can reach.
 - **Forgotten password recovery:** stop the container, remove `data/auth.json` (keep the rest of
   `data/` if you like — sessions live in a different file), start it again and open the wizard. This
   is a deliberate root-equivalent operation on the host; nothing else can reset the account.
 
 ## What is public, and what is not
 
-Public: `GET /api/health` (liveness only — no paths, no provider internals, no env values),
+Public: `GET /api/health` (liveness only — no paths, no provider internals, no env values; the
+`name` field is the configured `app.name`, which is presentation, not a secret),
 `GET /api/setup/status`, `POST /api/setup`, `GET /api/auth/me`, `POST /api/auth/login`,
-`POST /api/auth/logout`. The SPA shell itself is public, because it contains no data: it renders the
+`POST /api/auth/logout`. Everything under `/api/auth/sessions*` and `/api/auth/password` is
+session-gated like any other application route. The SPA shell itself is public, because it contains no data: it renders the
 wizard, the login screen, or the app depending on what the API says.
 
 Everything else — services, stacks, system, activity, Docker status, logs, settings, layout,
@@ -135,6 +189,9 @@ Checked, with the tests that pin each one:
 | XSS / CSP | React escaping throughout, and the only `dangerouslySetInnerHTML` in the app is the icon SVG, which is `sanitizeSvg`-filtered server-side (script/foreignObject/`on*`/`javascript:` stripped) for bundled, remote and user files alike. CSP in `server/index.js`: `default-src 'self'`, `script-src 'self' 'sha256-…'` (the one pre-hydration theme script), `object-src 'none'`, `base-uri 'self'`, `form-action 'none'`, `connect-src 'self'`, plus `x-frame-options: DENY` |
 | Uploaded/user assets | `config/icons/*` and `config/backgrounds/*` are served from the config volume behind a session, through `safeJoin` (no `..` traversal, no path outside the two directories), with `x-content-type-options: nosniff` |
 | Secret leakage | `.env` values stay server-side; container env is stripped; `/api/health` reports key names only |
+| Session handles (Phase 5) | Tokens are never serialized: the session API exposes SHA-256-derived handles, revocation accepts nothing else, and a raw token passed as a handle revokes zero sessions |
+| Password change (Phase 5) | Requires the current password; rotating the session and revoking the rest; plaintext never written or logged; a failed attempt never signs the admin out |
+| Malformed sessions (Phase 5) | Empty, short, oversized, percent-broken, quoted and garbage cookies all produce `401 {code:'auth_required'}` — never a `500` |
 
 **Non-goals.** OpusHub is not an identity provider: one account, no roles, no OAuth, no audit trail
 beyond the Activity log. It is meant for a LAN or a VPN — see `docs/07-distribution.md` for why port

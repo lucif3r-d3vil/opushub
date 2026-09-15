@@ -131,17 +131,55 @@ export function groupEvents(events, { windowMs = GROUP_WINDOW_MS, min = GROUP_MI
   return out;
 }
 
-export function readEvents({ limit = 100, source = null, before = null, grouped = false } = {}) {
+/**
+ * Read the log, newest first, with optional filters.
+ *
+ * Filtering happens here (not in the browser) so that the *whole* retention window is searchable —
+ * a filter that only looked at the last 150 rows would answer a narrower question than the one the
+ * UI asks. The vocabulary is deliberately small and matches what the log actually records:
+ *   source   system | config | user | docker
+ *   type     exact or prefix: `container` matches `container.started` and `container.health`
+ *   service  a container name / service name — matched against subject and the event's own meta
+ *   stack    a compose project — matched against meta.project (including grouped bursts)
+ *   since    epoch ms; `before` remains for “load older” paging
+ *
+ * `matched` is the number of events that pass the filters (before grouping), so the page can say
+ * "showing 20 of 4317" without pretending the log is shorter than it is.
+ */
+export function readEvents({ limit = 100, source = null, before = null, grouped = false, service = null, stack = null, type = null, since = null } = {}) {
   const all = parseAll();
+  const wantService = service ? String(service).toLowerCase() : null;
+  const wantStack = stack ? String(stack).toLowerCase() : null;
+  const wantType = type ? String(type).toLowerCase() : null;
+
+  const matches = (ev) => {
+    if (source && source !== 'all' && ev.source !== source) return false;
+    if (before && ev.t >= before) return false;
+    if (since && ev.t < since) return false;
+    if (wantType && !String(ev.type || '').toLowerCase().startsWith(wantType)) return false;
+    if (wantService) {
+      const names = [ev.subject, ev.meta?.service, ev.meta?.container, ...(Array.isArray(ev.meta?.subjects) ? ev.meta.subjects : [])]
+        .filter(Boolean).map((x) => String(x).toLowerCase());
+      if (!names.some((n) => n === wantService || n.includes(wantService))) return false;
+    }
+    if (wantStack) {
+      const projects = [ev.meta?.project, ev.meta?.stack, ...(Array.isArray(ev.meta?.projects) ? ev.meta.projects : [])]
+        .filter(Boolean).map((x) => String(x).toLowerCase());
+      if (!projects.some((p) => p === wantStack || p.includes(wantStack))) return false;
+    }
+    return true;
+  };
+
   const out = [];
-  for (let i = all.length - 1; i >= 0 && out.length < Math.min(500, limit); i--) {
+  let matched = 0;
+  for (let i = all.length - 1; i >= 0; i--) {
     const ev = all[i];
-    if (source && source !== 'all' && ev.source !== source) continue;
-    if (before && ev.t >= before) continue;
-    out.push(ev);
+    if (!matches(ev)) continue;
+    matched += 1;
+    if (out.length < Math.min(500, limit)) out.push(ev);
   }
   const items = grouped ? groupEvents(out) : out;
-  return { items, total: all.length };
+  return { items, total: all.length, matched };
 }
 
 /** Test helper. */

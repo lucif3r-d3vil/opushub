@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 import { usePolled } from '../lib/api';
 import { bytes, num, pct, relTime, uptime } from '../lib/format';
 import { useSettings } from '../lib/theme';
-import type { HistoryPoint, SystemSnapshot } from '../lib/types';
+import type { HistoryPoint, ProvidersDoc, SystemSnapshot } from '../lib/types';
 import { AreaChart, MeterBar } from '../components/Charts';
 import { Freshness, PageHero, ProviderNote } from '../components/ui';
+import { StatusLine } from '../components/ui';
 
 const WINDOWS = [
   { label: '15m', ms: 15 * 60_000 },
@@ -16,14 +17,15 @@ const WINDOWS = [
 export default function SystemPage() {
   const { settings } = useSettings();
   const sys = usePolled<SystemSnapshot>('/api/system', (settings?.behavior?.refresh?.system ?? 5) * 1000);
+  const providers = usePolled<ProvidersDoc>('/api/providers', 30_000);
   const [win, setWin] = useState(1);
   const hist = usePolled<{ points: HistoryPoint[] }>(`/api/system/history?window=${WINDOWS[win].ms}`, 10_000);
   const d = sys.data;
 
   const series = useMemo(() => {
     const pts = hist.data?.points ?? [];
-    const mk = (key: 'cpu' | 'memUsedPct' | 'rx' | 'tx' | 'temp') => pts.map((p) => ({ t: p.t, v: p[key] ?? null }));
-    return { cpu: mk('cpu'), mem: mk('memUsedPct'), raw: pts };
+    const mk = (key: 'cpu' | 'memUsedPct' | 'load' | 'rx' | 'tx' | 'temp') => pts.map((p) => ({ t: p.t, v: p[key] ?? null }));
+    return { cpu: mk('cpu'), mem: mk('memUsedPct'), load: mk('load'), raw: pts };
   }, [hist.data]);
 
   if (sys.error && !d) return <ProviderNote status="error" reason={`System provider failed: ${sys.error}`} />;
@@ -57,6 +59,28 @@ export default function SystemPage() {
         }
       />
 
+      {providers.data && (
+        <section className="sys-band sys-band--providers" aria-label="Provider health">
+          <div className="prov-list">
+            <span className="micro-label" style={{ marginBottom: 2 }}>Providers behind this page</span>
+            {providers.data.providers.map((p) => (
+              <div className="prov-row" key={p.name}>
+                <StatusLine
+                  state={p.state === 'available' ? 'up' : p.state === 'degraded' ? 'unstable' : p.state === 'unavailable' ? 'down' : 'unknown'}
+                  note={p.state === 'available' ? undefined : p.state === 'idle' ? 'not used yet' : p.state}
+                />
+                <span className="prov-name">{p.name === 'markets' ? 'market data' : p.name}</span>
+                <span className="stale-note">
+                  {p.state === 'available' && p.staleMs != null
+                    ? `read ${p.staleMs < 90_000 ? `${Math.round(p.staleMs / 1000)}s ago` : relTime(Date.now() - p.staleMs)}`
+                    : p.reason || 'not called yet — nothing on this page needs it'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* CPU */}
       <section className="sys-band">
         <div className="sys-band-head"><h2>Processor</h2>{s?.cpu.model && <span className="hint">{s.cpu.model}</span>}</div>
@@ -84,6 +108,28 @@ export default function SystemPage() {
               fmt={(v) => `${v.toFixed(0)}%`}
               series={[{ points: series.cpu, label: 'CPU', color: 'var(--accent)' }]}
             />
+            {series.load.some((p) => p.v != null) && (
+              <div style={{ marginTop: 'var(--sp-6)' }}>
+                <div className="chart-cap">
+                  <span className="t">Load average (1 min) — {WINDOWS[win].label}</span>
+                  <span className="v">{s?.cpu.load1 != null ? `${num(s.cpu.load1, 2)} of ${s.cpu.cores} core${s.cpu.cores === 1 ? '' : 's'}` : ''}</span>
+                </div>
+                <AreaChart
+                  windowMs={WINDOWS[win].ms}
+                  height={92}
+                  maxHint={s?.cpu.cores}
+                  fmt={(v) => num(v, 2)}
+                  series={[{ points: series.load, label: 'Load', color: 'var(--warn)', fill: false }]}
+                />
+                <p className="stale-note">
+                  Run-queue length from the host’s own load average. {s?.cpu.load1 != null && s.cpu.cores
+                    ? (s.cpu.load1 > s.cpu.cores * 1.5
+                      ? 'Above the core count: work is queuing.'
+                      : 'At or below the core count: nothing is waiting.')
+                    : ''}
+                </p>
+              </div>
+            )}
             {!!s?.cpu.perCore?.length && (
               <div className="coregrid" style={{ marginTop: 'var(--sp-5)' }}>
                 {s.cpu.perCore.map((c) => (

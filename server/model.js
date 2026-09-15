@@ -7,6 +7,7 @@
 // System, and a quiet banner on Services) instead of being rendered as if it were installed.
 import { readYaml, readJson, writeYaml, writeJson } from './configStore.js';
 import * as docker from './providers/docker.js';
+import { statsWithHistory } from './statsHistory.js';
 import { discover } from './discovery.js';
 import { suggestRef } from './providers/icons.js';
 import { hostAddress } from './lib/hostAddress.js';
@@ -640,27 +641,106 @@ export async function getStacksDoc() {
   };
 }
 
-/** Enrich one stack's members with inspect-level detail (ports/networks/volumes/stats). */
+/** How many Docker calls a stack page may have in flight at once. A 40-container project must not
+ *  fire 40 simultaneous inspects at a daemon that is also serving the rest of the host. */
+const STACK_ENRICH_CONCURRENCY = 4;
+
+/**
+ * Enrich one stack's members with inspect-level detail (ports/networks/volumes/health/stats).
+ *
+ * Bounded on purpose — this route is polled, so its cost has to be predictable:
+ *   • only *running* members are inspected. A stopped container's state, image and id already come
+ *     from the list projection, and asking the daemon about a container that cannot be running
+ *     buys nothing;
+ *   • at most STACK_ENRICH_CONCURRENCY inspects are in flight at any moment;
+ *   • stats go through the shared sampler (`statsWithHistory`), so a container that the service
+ *     page is also watching costs one Docker call per interval for both, and both get history.
+ */
 export async function enrichStackMembers(stack) {
-  if (!docker.availability().ok) {
-    return stack.members.map((m) => ({ ...m, stats: null, ports: [], networks: [], mounts: [] }));
+  const blank = (m) => ({ ...m, stats: null, ports: [], networks: [], mounts: [] });
+  if (!docker.availability().ok) return stack.members.map(blank);
+
+  const out = new Array(stack.members.length);
+  const work = stack.members.map((m, i) => ({ m, i }));
+  let cursor = 0;
+
+  async function run() {
+    while (cursor < work.length) {
+      const { m, i } = work[cursor++];
+      if (!m.container) { out[i] = blank(m); continue; }
+      const ref = m.container.id || m.container.name;
+      const running = m.container.state === 'running';
+      try {
+        if (!running) {
+          // a stopped container: report what the engine said, claim nothing about health or stats
+          out[i] = { ...m, stats: null, ports: [], networks: [], mounts: [], health: null };
+          continue;
+        }
+        const [insp, stats] = await Promise.all([
+          docker.inspectContainer(ref),
+          statsWithHistory(ref),
+        ]);
+        out[i] = {
+          ...m,
+          stats: stats || null,
+          ports: insp.ports, networks: insp.networks, mounts: insp.mounts,
+          startedAt: insp.state.status === 'running' ? insp.state.startedAt : null,
+          restartCount: insp.state.restartCount,
+          restartPolicy: insp.restartPolicy, command: insp.command, created: insp.created,
+          health: insp.state.health,
+        };
+      } catch { out[i] = { ...m, stats: null, error: true }; }
+    }
   }
-  return Promise.all(stack.members.map(async (m) => {
-    if (!m.container) return { ...m, stats: null, ports: [], networks: [], mounts: [] };
-    try {
-      const [insp, stats] = await Promise.all([
-        docker.inspectContainer(m.container.id || m.container.name),
-        docker.containerStats(m.container.id || m.container.name).catch(() => null),
-      ]);
-      return {
-        ...m,
-        stats, ports: insp.ports, networks: insp.networks, mounts: insp.mounts,
-        startedAt: insp.state.startedAt, restartCount: insp.state.restartCount,
-        restartPolicy: insp.restartPolicy, command: insp.command, created: insp.created,
-        health: insp.state.health,
-      };
-    } catch { return { ...m, stats: null, error: true }; }
-  }));
+
+  await Promise.all(Array.from({ length: Math.min(STACK_ENRICH_CONCURRENCY, work.length) }, run));
+  return out;
+}
+
+/**
+ * The rollup the Stack page shows above the member list: counts by state, aggregate CPU/memory,
+ * lifetime network totals, and how long the stack has been up (the *oldest* running member — a
+ * stack is only as "up" as its longest-surviving container).
+ *
+ * Everything is derived from the enriched members; members that reported nothing are excluded from
+ * a total rather than counted as zero, and `reporting` says how many actually answered.
+ */
+export function stackRollup(members) {
+  const stats = members.filter((m) => m.stats);
+  const running = members.filter((m) => m.container?.state === 'running');
+  const sum = (pick) => {
+    let total = 0;
+    let seen = 0;
+    for (const m of stats) {
+      const v = pick(m);
+      if (v != null) { total += v; seen += 1; }
+    }
+    return seen ? { total, seen } : null;
+  };
+  const cpu = sum((m) => m.stats.cpu);
+  const mem = sum((m) => m.stats.memory?.used ?? null);
+  const memLimit = sum((m) => m.stats.memory?.limit ?? null);
+  const netRx = sum((m) => m.stats.net?.rx ?? null);
+  const netTx = sum((m) => m.stats.net?.tx ?? null);
+  const starts = running
+    .map((m) => m.startedAt)
+    .filter((x) => typeof x === 'string' && x && !x.startsWith('0001'))
+    .map((x) => Date.parse(x))
+    .filter((x) => Number.isFinite(x));
+  return {
+    containers: members.length,
+    running: running.length,
+    stopped: members.filter((m) => m.container?.state === 'exited').length,
+    unhealthy: members.filter((m) => (m.health ?? m.container?.health) === 'unhealthy').length,
+    reporting: stats.length,
+    cpu: cpu ? cpu.total : null,
+    memory: mem ? mem.total : null,
+    memoryLimit: memLimit && memLimit.seen === mem?.seen ? memLimit.total : null,
+    netRx: netRx ? netRx.total : null,
+    netTx: netTx ? netTx.total : null,
+    // oldest running member: the stack cannot have been up longer than its longest-lived container
+    upSince: starts.length ? Math.min(...starts) : null,
+  };
 }
 
 /** Status of a stack given its member container states (helper for tests/callers).

@@ -53,6 +53,22 @@ export function ProviderNote({
   );
 }
 
+/**
+ * A page-level loading state.
+ *
+ * Announced (`role="status"`), single-line, and it names *what* is loading — a control plane that
+ * shows a bare "Loading…" while it waits for the Docker daemon is telling the operator nothing.
+ * It never renders alongside data: callers use it only when there is nothing else to show.
+ */
+export function Loading({ what = 'data', note }: { what?: string; note?: string }) {
+  return (
+    <p className="stale-note loading-note" role="status" aria-live="polite">
+      Reading {what}…
+      {note && <span className="loading-note-sub"> {note}</span>}
+    </p>
+  );
+}
+
 export function Freshness({ at, error }: { at: number | null; error?: string | null }) {
   if (error) return <span className="stale-note" style={{ color: 'var(--warn)' }}>stale — retrying</span>;
   if (!at) return null;

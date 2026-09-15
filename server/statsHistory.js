@@ -28,12 +28,19 @@ function bufferFor(ref) {
   return buffers.get(ref);
 }
 
+/**
+ * Drop buffers nobody has touched for IDLE_DROP_MS — the memory half of "a container nobody is
+ * watching costs nothing". This used to be skipped while the map held 64 entries or fewer, which
+ * meant the promise in the header only held on hosts with more than 64 containers; a homelab box
+ * with a dozen would keep every sample it had ever taken. Iterating a dozen entries per sample is
+ * free, so there is no reason to be clever about it.
+ *
+ * `readAt` is bumped by both a sample and a read (`statsHistory`, `aggregateHistory`), so a buffer
+ * is only ever dropped when nothing has looked at that container for fifteen minutes.
+ */
 function prune(now = Date.now()) {
-  if (buffers.size <= 64) return;
   for (const [ref, b] of buffers) {
-    if (now - b.readAt > IDLE_DROP_MS || (now - b.lastAt > IDLE_DROP_MS && now - (b.samples.at?.t || 0) > IDLE_DROP_MS)) {
-      buffers.delete(ref);
-    }
+    if (now - b.readAt > IDLE_DROP_MS) buffers.delete(ref);
   }
 }
 
@@ -102,10 +109,68 @@ export function statsHistory(ref, { windowMs = 30 * 60_000 } = {}) {
   };
 }
 
+/**
+ * Aggregate series across several containers — a stack's shape over the same session window.
+ *
+ * Members are sampled in the same request (the stack detail route looks at all of them), so their
+ * timestamps cluster within a second or two. Buckets of BUCKET_MS merge those into one point per
+ * cadence. Nothing is interpolated and nothing is invented: a bucket reports how many containers
+ * actually answered (`count`), so a chart can say "3 of 5" instead of pretending the gap was zero.
+ *
+ * Only containers that already have a buffer appear — the sampler is still demand-driven, and this
+ * function makes no Docker calls of its own.
+ */
+const BUCKET_MS = 2000;
+
+export function aggregateHistory(refs, { windowMs = 30 * 60_000 } = {}) {
+  const now = Date.now();
+  const cutoff = now - windowMs;
+  const buckets = new Map();
+  let watchingSince = null;
+  let live = 0;
+
+  for (const ref of refs || []) {
+    const buf = buffers.get(ref);
+    if (!buf || !buf.samples.length) continue;
+    live += 1;
+    buf.readAt = now;
+    if (watchingSince == null || buf.samples[0].t < watchingSince) watchingSince = buf.samples[0].t;
+    for (const sample of buf.samples) {
+      if (sample.t < cutoff) continue;
+      const key = Math.round(sample.t / BUCKET_MS) * BUCKET_MS;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = { t: key, cpu: 0, cpuSeen: 0, mem: 0, memSeen: 0, limit: 0, limitSeen: 0, netRx: 0, netSeen: 0, netTx: 0, count: 0 };
+        buckets.set(key, bucket);
+      }
+      bucket.count += 1;
+      if (sample.cpu != null) { bucket.cpu += sample.cpu; bucket.cpuSeen += 1; }
+      if (sample.mem != null) { bucket.mem += sample.mem; bucket.memSeen += 1; }
+      if (sample.memLimit != null) { bucket.limit += sample.memLimit; bucket.limitSeen += 1; }
+      if (sample.netRx != null && sample.netTx != null) { bucket.netRx += sample.netRx; bucket.netTx += sample.netTx; bucket.netSeen += 1; }
+    }
+  }
+
+  const samples = [...buckets.values()]
+    .sort((a, b) => a.t - b.t)
+    .map((b) => ({
+      t: b.t,
+      // sums are only reported for what was actually seen; a missing member is never counted as 0
+      cpu: b.cpuSeen ? b.cpu : null,
+      mem: b.memSeen ? b.mem : null,
+      memLimit: b.limitSeen ? b.limit : null,
+      netRx: b.netSeen ? b.netRx : null,
+      netTx: b.netSeen ? b.netTx : null,
+      count: b.count,
+    }));
+
+  return { samples, watchingSince, containers: refs?.length ?? 0, reporting: live, capped: MAX_SAMPLES, bucketMs: BUCKET_MS };
+}
+
 /** Test helper. */
 export function resetStatsHistory() {
   buffers.clear();
   inflight.clear();
 }
 
-export const _internals = { buffers, inflight, MAX_SAMPLES, MIN_INTERVAL_MS, CACHE_TTL_MS };
+export const _internals = { buffers, inflight, prune, MAX_SAMPLES, MIN_INTERVAL_MS, CACHE_TTL_MS, IDLE_DROP_MS };

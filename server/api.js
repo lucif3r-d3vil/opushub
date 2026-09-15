@@ -17,12 +17,13 @@ import { getNews } from './providers/news.js';
 import { getWeather, cToF } from './providers/weather.js';
 import { getMarket } from './providers/market.js';
 import { checkBackgroundUrl } from './providers/background.js';
+import { URL_REASONS } from './urlResolver.js';
 import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons.js';
 import { logEvent, readEvents, firstEventAt } from './activity.js';
 import { searchAll } from './search.js';
 import { loadEnv } from './env.js';
 import { DATA_DIR } from './configStore.js';
-import { statsWithHistory, statsHistory } from './statsHistory.js';
+import { statsWithHistory, statsHistory, aggregateHistory } from './statsHistory.js';
 import { providerHealthDoc, reportProvider } from './providers/health.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
@@ -196,6 +197,70 @@ export async function handleApi(req, res, url) {
     return send(res, 200, { ok: true, authenticated: false });
   }
 
+  // ---------- account maintenance (authenticated, same-origin) ----------
+  // The audit surface: what is signed in, and the one credential change there is. Both are
+  // session-scoped — an admin can only ever see and revoke *their own* sessions, and the password
+  // route requires the current password even though a session is already held, so a borrowed
+  // browser cannot lock the owner out. Session ids here are derived handles (see auth.sessionHandle):
+  // the bearer token itself is never serialized, by any route, ever.
+  if (route === 'GET /api/auth/sessions') {
+    const rows = auth.listSessions(activeToken);
+    return send(res, 200, {
+      sessions: rows,
+      count: rows.length,
+      current: rows.find((s) => s.current) || null,
+      limits: { absoluteMs: auth.SESSION_TTL_MS, idleMs: auth.SESSION_IDLE_MS, max: 50 },
+    });
+  }
+  if (route === 'POST /api/auth/sessions/revoke') {
+    const body = await jsonBody();
+    const scope = String(body?.scope || '');
+    if (scope === 'others') {
+      if (!session) return send(res, 401, { error: 'Authentication required.', code: 'auth_required' });
+      const revoked = auth.revokeSessions({ except: activeToken });
+      logEvent({ source: 'system', type: 'auth.sessions_revoked', subject: session.username, message: `revoked ${revoked} other session(s)` });
+      return send(res, 200, { ok: true, revoked, signedOut: false });
+    }
+    if (scope === 'all') {
+      const username = session?.username ?? auth.getUser()?.username ?? 'admin';
+      const revoked = auth.revokeSessions();
+      res.setHeader('set-cookie', auth.clearedCookie());
+      logEvent({ source: 'system', type: 'auth.sessions_revoked', subject: username, message: `signed out everywhere (${revoked} session(s))` });
+      return send(res, 200, { ok: true, revoked, signedOut: true });
+    }
+    if (scope === 'one') {
+      const handle = String(body?.id || '');
+      if (!handle) return send(res, 400, { error: 'A session id is required.', code: 'session_id' });
+      const revoked = auth.revokeSessions({ handles: [handle] });
+      // revoking your own session is a sign-out, and must clear the cookie with it
+      const isCurrent = handle === auth.sessionHandle(activeToken);
+      if (isCurrent) res.setHeader('set-cookie', auth.clearedCookie());
+      logEvent({ source: 'system', type: 'auth.sessions_revoked', subject: session?.username ?? 'admin', message: `revoked 1 session` });
+      return send(res, 200, { ok: true, revoked, signedOut: isCurrent });
+    }
+    return send(res, 400, { error: 'scope must be one of: others, all, one.', code: 'scope' });
+  }
+  if (route === 'POST /api/auth/password') {
+    const body = await jsonBody();
+    if (!session) return send(res, 401, { error: 'Authentication required.', code: 'auth_required' });
+    const ip = clientIp(req);
+    const result = await auth.changePassword({
+      currentPassword: body?.currentPassword,
+      newPassword: body?.newPassword,
+      token: activeToken,
+      ip,
+    });
+    if (!result.ok) {
+      // Never log either password — only the fact that the attempt failed, and for whom.
+      logEvent({ source: 'system', type: 'auth.password_failed', subject: session.username, message: result.status === 401 ? 'current password incorrect' : 'refused by policy' });
+      return send(res, result.status, { error: result.error, code: result.status === 401 ? 'invalid_password' : 'password_policy' });
+    }
+    // Rotate the cookie exactly like a login: the presented id is retired by changePassword.
+    res.setHeader('set-cookie', auth.sessionCookie(result.token, { maxAgeMs: result.expiresAt - Date.now(), secure }));
+    logEvent({ source: 'system', type: 'auth.password_changed', subject: session.username, message: `password changed; ${result.revoked} other session(s) revoked` });
+    return send(res, 200, { ok: true, user: result.user, revoked: result.revoked, authenticated: true });
+  }
+
   // ---------- health & meta ----------
   // Public on purpose: this is what the container healthcheck calls, and what a load balancer
   // needs. Unauthenticated callers get liveness only — no paths, no provider internals.
@@ -203,7 +268,9 @@ export async function handleApi(req, res, url) {
     if (!session) {
       const setupState = auth.getSetupState();
       return send(res, 200, {
-        name: 'OpusHub', version: '0.1.0', ok: true,
+        // The configured name (settings.yaml → app.name) is presentation, not a secret: the login
+        // screen and the tab title use it, and both render before a session exists.
+        name: appName(), version: '0.1.0', ok: true,
         setup: { required: setupState.required, complete: setupState.complete },
         authenticated: false,
         note: 'Sign in for provider detail.',
@@ -212,7 +279,7 @@ export async function handleApi(req, res, url) {
     const env = loadEnv(CONFIG_DIR);
     const dockerProv = await dockerAvailabilityCached();
     return send(res, 200, {
-      name: 'OpusHub',
+      name: appName(),
       version: '0.1.0',
       node: process.version,
       platform: `${process.platform}/${process.arch}`,
@@ -413,7 +480,28 @@ export async function handleApi(req, res, url) {
     const stack = data.stacks.find((s) => String(s.id).toLowerCase() === key || s.name.toLowerCase() === key || String(s.project || '').toLowerCase() === key);
     if (!stack) return send(res, 404, { error: `stack not found: ${name}` });
     const members = await model.enrichStackMembers(stack);
-    return send(res, 200, { ...stack, members, live: data.live, statusReason: data.statusReason });
+    return send(res, 200, {
+      ...stack,
+      members,
+      // counts + aggregate CPU/memory/network + uptime, all derived from the members above
+      rollup: model.stackRollup(members),
+      live: data.live,
+      statusReason: data.statusReason,
+    });
+  }
+
+  const stHistory = p.match(/^\/api\/stacks\/([^/]+)\/history$/);
+  if (method === 'GET' && stHistory) {
+    const name = decodeURIComponent(stHistory[1]);
+    const data = await model.getStacksDoc();
+    const key = name.toLowerCase();
+    const stack = data.stacks.find((s) => String(s.id).toLowerCase() === key || s.name.toLowerCase() === key || String(s.project || '').toLowerCase() === key);
+    if (!stack) return send(res, 404, { error: `stack not found: ${name}` });
+    // No Docker calls here: this reads the shared per-container buffers, which the stack detail
+    // poll keeps warm. A member nobody has looked at simply contributes nothing.
+    const refs = stack.members.filter((m) => m.container?.state === 'running').map((m) => m.container.id || m.container.name);
+    const win = Math.min(30 * 60_000, Math.max(60_000, Number(url.searchParams.get('window')) || 30 * 60_000));
+    return send(res, 200, { stack: stack.id, ...aggregateHistory(refs, { windowMs: win }) });
   }
   if (route === 'PUT /api/stacks') {
     const patch = await jsonBody();
@@ -532,7 +620,17 @@ export async function handleApi(req, res, url) {
     const source = url.searchParams.get('source') || null;
     const before = Number(url.searchParams.get('before')) || null;
     const grouped = url.searchParams.get('grouped') === '1' || url.searchParams.get('grouped') === 'true';
-    return send(res, 200, { ...readEvents({ limit, source, before, grouped }), watchingSince: firstEventAt() });
+    // filters (service / stack / type / since) are applied server-side over the whole log
+    const service = url.searchParams.get('service');
+    const stack = url.searchParams.get('stack');
+    const type = url.searchParams.get('type');
+    const sinceRaw = Number(url.searchParams.get('since'));
+    const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : null;
+    return send(res, 200, {
+      ...readEvents({ limit, source, before, grouped, service, stack, type, since }),
+      watchingSince: firstEventAt(),
+      filters: { source: source || 'all', service: service || null, stack: stack || null, type: type || null, since },
+    });
   }
 
   // ---------- provider health ----------
@@ -600,6 +698,15 @@ export async function handleApi(req, res, url) {
   notFound();
 }
 
+/** What this install calls itself. Falls back to the product name if settings.yaml has no app.name
+ *  (or cannot be read) — never an empty string in a response. */
+function appName() {
+  try {
+    const v = model.getSettings()?.app?.name;
+    return typeof v === 'string' && v.trim() ? v.trim().slice(0, 80) : 'OpusHub';
+  } catch { return 'OpusHub'; }
+}
+
 function hashOf(body) {
   return '"' + crypto.createHash('sha1').update(body).digest('base64url').slice(0, 16) + '"';
 }
@@ -619,15 +726,43 @@ function clientIp(req) {
  */
 async function setupSummary() {
   const s = await model.getDiscoveryStatus({ refreshMs: 0 });
+  const inv = await model.getInventory();
+  // Why each container has, or has not, a browser URL — aggregated by the resolver's own reason
+  // codes (`urlResolver.URL_REASONS`). Counts only: the wizard can explain the shape of this host
+  // before an account exists without naming a single container, image or URL.
+  const byReason = new Map();
+  for (const svc of inv.services) {
+    const code = svc.urlReason || (svc.url ? svc.urlSource : 'no-route');
+    const row = byReason.get(code) || { code, count: 0, explain: URL_REASONS[code] || null, resolved: false };
+    row.count += 1;
+    row.resolved = row.resolved || !!svc.url;
+    byReason.set(code, row);
+  }
+  const reasons = [...byReason.values()].sort((a, b) => Number(b.resolved) - Number(a.resolved) || b.count - a.count);
   return {
-    docker: { ok: s.engine.ok, state: s.engine.state, version: s.engine.version },
+    docker: {
+      ok: s.engine.ok,
+      state: s.engine.state,
+      version: s.engine.version,
+      // the API version OpusHub actually speaks to the daemon (min(daemon, 1.43)) — not the product version
+      apiVersion: s.engine.api,
+      operatingSystem: s.engine.operatingSystem,
+    },
     stacks: s.inventory.stacks,
     containers: s.engine.containers,
     running: s.engine.running,
+    stopped: s.engine.stopped,
     services: s.inventory.applications,
     infrastructure: s.inventory.infrastructure,
     standalone: s.inventory.standalone,
-    urls: { detected: s.urlDiscovery.withUrl, missing: s.urlDiscovery.withoutUrl },
+    urls: {
+      detected: s.urlDiscovery.withUrl,
+      missing: s.urlDiscovery.withoutUrl,
+      // every resolver tier that answered, so the wizard can show *how* URLs were found
+      sources: s.urlDiscovery.sources,
+      // and every reason a container has none, in categories (destination, count, explanation)
+      reasons,
+    },
     // Entrypoint *names* ("web", "websecure") are Traefik vocabulary, not host data: the wizard
     // needs them to offer the port mapping when the entrypoint is not on 80/443.
     traefik: {

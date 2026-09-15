@@ -1,19 +1,30 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { usePolled } from '../lib/api';
-import { bytes, num, pct, relTime, timeOfDay } from '../lib/format';
+import { bytes, num, pct, relTime, timeOfDay, uptime } from '../lib/format';
 import { useSettings } from '../lib/theme';
 import type { ActivityEvent } from '../lib/types';
 import { Icon } from '../components/Icon';
-import { MeterBar } from '../components/Charts';
-import { PageHero, ProviderNote, SectionHead, StatusLine } from '../components/ui';
+import { AreaChart, MeterBar } from '../components/Charts';
+import { Loading, PageHero, ProviderNote, SectionHead, StatusLine } from '../components/ui';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
+
+interface StackRollup {
+  containers: number; running: number; stopped: number; unhealthy: number; reporting: number;
+  cpu: number | null; memory: number | null; memoryLimit: number | null;
+  netRx: number | null; netTx: number | null; upSince: number | null;
+}
+
+interface StackHistoryDoc {
+  stack: string; reporting: number; containers: number; watchingSince: number | null; bucketMs: number;
+  samples: { t: number; cpu: number | null; mem: number | null; memLimit: number | null; netRx: number | null; netTx: number | null; count: number }[];
+}
 
 interface StackDetailDoc {
   id: string; project: string | null; name: string; displayName: string; description: string | null; icon: string | null; notes: string | null; compose: string | null;
   status: string; statusReason: string | null; live: boolean; source: 'configured' | 'discovered'; configured: boolean;
-  containerCount: number; runningCount: number;
+  containerCount: number; runningCount: number; rollup?: StackRollup;
   unhealthyCount?: number; stoppedCount?: number; attentionCount?: number;
   members: {
     service: string; containerName: string; icon: string | null; group: string | null; url: string | null; urlSource: string; kind: string; route: string | null; configured: boolean;
@@ -36,6 +47,77 @@ const stateWord = (m: StackDetailDoc['members'][number]) => {
   return m.container.state;
 };
 
+/**
+ * The stack's resources over the session, measured.
+ *
+ * Three readings, one chart, one focal point. The series are aggregated server-side from the same
+ * per-container buffers the member rows read (no extra Docker calls at all), and the note under
+ * the chart says how many containers actually answered — an aggregate over 2 of 5 containers is
+ * still useful, but it is never presented as the whole project.
+ */
+function StackHistory({ stackId, members }: { stackId: string; members: number }) {
+  const [reading, setReading] = useState<'cpu' | 'memory' | 'network'>('cpu');
+  const { data } = usePolled<StackHistoryDoc>(`/api/stacks/${encodeURIComponent(stackId)}/history?window=1800000`, 5000);
+
+  const samples = (data?.samples || []).filter((s) => s.cpu != null || s.mem != null);
+  // every hook runs before the first return: the chart appears and disappears as samples arrive,
+  // and a conditional hook would break the component the moment it did
+  const rateSeries = useMemo(() => {
+    const out: { t: number; v: number | null }[] = [];
+    for (let i = 1; i < samples.length; i++) {
+      const a = samples[i - 1], b = samples[i];
+      const dt = (b.t - a.t) / 1000;
+      if (dt <= 0 || a.netRx == null || b.netRx == null) { out.push({ t: b.t, v: null }); continue; }
+      if (b.netRx < a.netRx) { out.push({ t: b.t, v: null }); continue; } // counter reset: skip, never guess
+      out.push({ t: b.t, v: (b.netRx - a.netRx) / dt });
+    }
+    return out;
+  }, [samples]);
+
+  if (!data || samples.length < 2) {
+    return (
+      <p className="stale-note" role="status" style={{ marginBottom: 'var(--sp-5)' }}>
+        {data ? 'Collecting samples — a stack chart appears once its containers have been read more than once.' : 'Reading the stack’s recent samples…'}
+      </p>
+    );
+  }
+
+  const cpuSeries = samples.map((s) => ({ t: s.t, v: s.cpu }));
+  const memSeries = samples.map((s) => ({ t: s.t, v: s.mem }));
+  const series = reading === 'cpu'
+    ? [{ points: cpuSeries, label: 'CPU', color: 'var(--accent)', fill: false }]
+    : reading === 'memory'
+      ? [{ points: memSeries, label: 'Memory', color: 'var(--accent)', fill: false }]
+      : [{ points: rateSeries, label: 'Network in', color: 'var(--ok)', fill: false }];
+  const fmt = reading === 'network' ? (v: number) => `${bytes(v, true)}/s` : reading === 'memory' ? (v: number) => bytes(v) : (v: number) => `${v.toFixed(0)}%`;
+  const first = samples[0].t, last = samples[samples.length - 1].t;
+  const windowMs = Math.min(30 * 60_000, Math.max(2 * 60_000, last - first));
+  const avgCount = Math.round(samples.reduce((a, s) => a + s.count, 0) / samples.length);
+  const spanMinutes = Math.max(1, Math.round((last - first) / 60_000));
+
+  return (
+    <div className="res-history">
+      <div className="res-history-head">
+        <span className="micro-label">Since you opened this page</span>
+        <span className="seg" role="group" aria-label="Stack reading">
+          {(['cpu', 'memory', 'network'] as const).map((k) => (
+            <button key={k} className="seg-btn" aria-pressed={reading === k} onClick={() => setReading(k)}>
+              {k === 'cpu' ? 'CPU' : k === 'memory' ? 'Memory' : 'Network'}
+            </button>
+          ))}
+        </span>
+      </div>
+      <AreaChart height={118} windowMs={windowMs} fmt={fmt} series={series} maxHint={reading === 'cpu' ? 100 : undefined} />
+      <p className="stale-note">
+        {samples.length} aggregated point{samples.length === 1 ? '' : 's'} over the last {spanMinutes} min — each point sums{' '}
+        {avgCount} of {members} container{members === 1 ? '' : 's'}. Members nobody has looked at contribute nothing, and the
+        aggregate exists only for the time this page has been open
+        {data.watchingSince ? ` (sampling began ${relTime(data.watchingSince)})` : ''}. Anything older was never recorded.
+      </p>
+    </div>
+  );
+}
+
 export default function StackDetailPage() {
   const { name = '' } = useParams();
   const { settings } = useSettings();
@@ -46,7 +128,7 @@ export default function StackDetailPage() {
   );
   const activity = usePolled<{ items: ActivityEvent[] }>('/api/activity?limit=80', 60_000);
 
-  if (loading && !data) return <div className="stale-note" style={{ padding: 'var(--sp-12) 0' }}>Loading stack…</div>;
+  if (loading && !data) return <div style={{ padding: 'var(--sp-12) 0' }}><Loading what="this stack" note="one container at a time, bounded" /></div>;
   if (error && !data) return <ProviderNote status="error" reason={error} fixHref="/stacks" fixLabel="All stacks →" />;
   if (!data) return <ProviderNote status="error" reason="Stack not found." fixHref="/stacks" fixLabel="All stacks →" />;
 
@@ -57,14 +139,19 @@ export default function StackDetailPage() {
     data.project || '',
   ]);
   const related = (activity.data?.items || []).filter((e) => e.subject && memberNames.has(e.subject));
-  const totals = data.members.reduce(
-    (a, m) => ({
-      cpu: m.stats?.cpu != null ? a.cpu + m.stats.cpu : a.cpu,
-      mem: m.stats?.memory.used != null ? a.mem + m.stats.memory.used : a.mem,
-      hasAny: a.hasAny || !!m.stats,
-    }),
-    { cpu: 0, mem: 0, hasAny: false },
-  );
+  // the server computes the rollup from the same enriched members, excluding containers that
+  // answered nothing; fixtures and older payloads fall back to the same arithmetic here
+  const totals = data.rollup
+    ? { cpu: data.rollup.cpu ?? 0, mem: data.rollup.memory ?? 0, hasAny: data.rollup.reporting > 0 }
+    : data.members.reduce(
+      (a, m) => ({
+        cpu: m.stats?.cpu != null ? a.cpu + m.stats.cpu : a.cpu,
+        mem: m.stats?.memory.used != null ? a.mem + m.stats.memory.used : a.mem,
+        hasAny: a.hasAny || !!m.stats,
+      }),
+      { cpu: 0, mem: 0, hasAny: false },
+    );
+  const roll = data.rollup ?? null;
 
   return (
     <>
@@ -78,6 +165,7 @@ export default function StackDetailPage() {
             <StatusLine state={data.status} note={data.statusReason} />
             <span className="stale-note">{data.members.length} member{data.members.length === 1 ? '' : 's'}</span>
             {totals.hasAny && <span className="mono-meta">{pct(totals.cpu, 0)} cpu · {bytes(totals.mem)} mem</span>}
+            {roll?.upSince != null && <span className="stale-note">up {uptime((Date.now() - roll.upSince) / 1000)}</span>}
             <button className="btn btn-quiet btn-sm" onClick={refresh}>Refresh</button>
             {fetchedAt && <span className="stale-note">{relTime(fetchedAt)}</span>}
           </div>
@@ -88,7 +176,8 @@ export default function StackDetailPage() {
             {!!data.unhealthyCount && <span className="roll-cell roll-bad"><b>{data.unhealthyCount}</b> unhealthy</span>}
             {!!data.stoppedCount && <span className="roll-cell roll-stop"><b>{data.stoppedCount}</b> stopped</span>}
             {!!data.attentionCount && <span className="roll-cell roll-warn"><b>{data.attentionCount}</b> attention</span>}
-            {totals.hasAny && <span className="roll-cell"><b>{pct(totals.cpu, 1)}</b> cpu · <b>{bytes(totals.mem)}</b> mem</span>}
+            {totals.hasAny && <span className="roll-cell"><b>{pct(totals.cpu, 1)}</b> cpu · <b>{bytes(totals.mem)}</b> mem{roll && roll.reporting < roll.running ? <span className="stale-note"> · {roll.reporting}/{roll.running} reporting</span> : null}</span>}
+            {roll?.netRx != null && <span className="roll-cell">net <b>{bytes(roll.netRx)}</b> ↓ · <b>{bytes(roll.netTx ?? 0)}</b> ↑ <span className="stale-note">lifetime</span></span>}
           </div>
         </div>
         <div className="detail-actions">
@@ -167,6 +256,7 @@ export default function StackDetailPage() {
         <div>
           <section className="detail-block">
             <SectionHead title="Resources" right={data.live && totals.hasAny ? <span className="stale-note">from the engine, every {settings?.behavior?.refresh?.services ?? 30}s</span> : undefined} />
+            {data.live && <StackHistory stackId={data.id} members={data.members.length} />}
             {data.members.some((m) => m.stats) ? (
               <div>
                 {data.members.filter((m) => m.stats).map((m) => (
@@ -187,7 +277,7 @@ export default function StackDetailPage() {
                 ))}
               </div>
             ) : (
-              <ProviderNote compact status={data.live ? 'unavailable' : 'unconfigured'} reason={data.live ? 'The engine here does not expose container stats.' : 'Connect Docker to see live resource use.'} fixHref={data.live ? undefined : '/settings/system'} fixLabel="Configure Docker →" />
+              <ProviderNote compact status={data.live ? 'unavailable' : 'unconfigured'} reason={data.live ? 'The engine here does not expose container stats.' : 'Connect Docker to see live resource use.'} fixHref={data.live ? undefined : '/settings/environment'} fixLabel="Configure Docker →" />
             )}
           </section>
 
@@ -208,7 +298,7 @@ export default function StackDetailPage() {
 
         <div>
           <section className="detail-block">
-            <SectionHead title="Configuration" />
+            <SectionHead title="Configuration" right={<span className="stale-note">presentation</span>} />
             <dl className="kv">
               <div><dt>Existence</dt><dd className="mono-meta">Docker · {data.project ? `compose project “${data.project}”` : 'containers matched by the overlay'}</dd></div>
               <div><dt>Appearance</dt><dd className="mono-meta">{data.configured ? 'stacks.yaml overlay' : 'no overlay — defaults from discovery'}</dd></div>
@@ -216,6 +306,15 @@ export default function StackDetailPage() {
               <div><dt>Status source</dt><dd>{data.live ? 'Docker engine' : 'configuration only'}</dd></div>
               <div><dt>Checked</dt><dd className="mono-meta">{fetchedAt ? timeOfDay(fetchedAt) + ' · ' + num(data.members.filter((m) => m.container).length, 0) + ' linked' : '—'}</dd></div>
             </dl>
+            <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>
+              A Compose project is infrastructure; a presentation group is a label. This page is the
+              project the engine reports — its members are the containers that carry
+              {' '}<span className="mono-meta">com.docker.compose.project={data.project || data.id}</span>.
+              Renaming it in <span className="mono-meta">stacks.yaml</span> changes the heading, the
+              icon and the description, never the containers or their project id. A service whose
+              group was renamed in <span className="mono-meta">services.yaml</span> still belongs to
+              this project.
+            </p>
           </section>
         </div>
       </div>

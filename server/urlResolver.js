@@ -12,6 +12,11 @@
 // The host address used by tier 3 is resolved once, from real signals (explicit setting → a
 // published bind address → the machine's routable outbound address). If none can be established,
 // tier 3 refuses to invent a URL and reports `none` with a note explaining what to set.
+//
+// Every answer carries a machine-readable `urlReason` next to the human `urlNote`. The note is for
+// a person looking at one service; the code is for counting — the first-run wizard says *how many*
+// services have no URL and *why*, in categories, without naming a single container before there is
+// an account. Codes are stable: `URL_REASONS` below is the whole vocabulary.
 import { str } from './providers/dockerLabels.js';
 
 const WEB_PORTS = new Set([80, 443, 3000, 4443, 5000, 5001, 8000, 8080, 8081, 8090, 8443, 9000, 9090, 9443]);
@@ -19,6 +24,30 @@ const TLS_PORTS = new Set([443, 4443, 8443, 9443]);
 // Ports that are almost never an HTTP UI. Used only to *rank* published-port candidates —
 // never to drop a container (a user may well serve something real on 3306).
 const NON_WEB_PORTS = new Set([22, 25, 53, 110, 111, 135, 137, 139, 143, 161, 389, 445, 465, 514, 587, 636, 993, 995, 873, 1080, 1433, 1521, 1883, 2049, 3128, 3306, 3389, 5060, 5222, 5432, 5672, 5900, 6379, 8883, 9001, 11211, 25565, 27017]);
+
+/**
+ * The complete vocabulary of `urlReason` codes, with the one-line explanation the UI shows.
+ *   manual              the operator said so (services.yaml `url:`, or an `opushub.url` label)
+ *   traefik             built from the container's own proxy labels
+ *   published-port      built from a real published binding + a host address we can name
+ *   no-route            nothing routes to it and nothing is published — an honest absence
+ *   host-address-unknown  it publishes a port, but the host has no name OpusHub can trust
+ *   loopback-only       published, but only on 127.0.0.1 — unreachable from another machine
+ *   override-invalid    a manual override exists but is not a usable http(s) URL (so it is refused)
+ *   proxy-disabled      `traefik.enable=false` (or an enable=false router) suppresses label URLs
+ *   proxy-incomplete    a router exists, but no hostname can be built from it (regexp/SNI-only…)
+ */
+export const URL_REASONS = {
+  manual: 'an explicit override in services.yaml or on the container',
+  traefik: 'built from the container’s own Traefik labels',
+  'published-port': 'built from a published port and this host’s address',
+  'no-route': 'no proxy route and no published port',
+  'host-address-unknown': 'a port is published, but OpusHub cannot name this host',
+  'loopback-only': 'published only on loopback — unreachable from another machine',
+  'override-invalid': 'the configured override is not a usable http(s) URL',
+  'proxy-disabled': 'proxy routing is explicitly disabled for this container',
+  'proxy-incomplete': 'a proxy router exists, but it names no host to visit',
+};
 
 const isLoopback = (ip) => !ip || ip.startsWith('127.') || ip === '::1' || ip.startsWith('fe80:');
 const isWildcard = (ip) => !ip || ip === '0.0.0.0' || ip === '::';
@@ -191,10 +220,10 @@ export function pickHostAddress({ configured, bindAddress, detected, interfaces 
  */
 export function resolveUrl(container, ctx = {}) {
   const manual = normalizeHostUrl(container.manualUrl ?? container.overlay?.url ?? null);
-  if (manual) return { url: manual, urlSource: 'manual', urlNote: container.overlay?.url ? `explicit override (${container.overlay.urlSource || 'config'})` : 'explicit override' };
+  if (manual) return { url: manual, urlSource: 'manual', urlReason: 'manual', urlNote: container.overlay?.url ? `explicit override (${container.overlay.urlSource || 'config'})` : 'explicit override' };
   if (container.manualUrl) {
     // an override that was refused (bad scheme/host) must not silently resolve from something else
-    return { url: null, urlSource: 'none', urlNote: `manual override “${String(container.manualUrl).slice(0, 60)}” is not a usable http(s) URL` };
+    return { url: null, urlSource: 'none', urlReason: 'override-invalid', urlNote: `manual override “${String(container.manualUrl).slice(0, 60)}” is not a usable http(s) URL` };
   }
 
   const router = pickRouter(container.traefik, [container.name, container.composeService, container.composeProject]);
@@ -204,16 +233,25 @@ export function resolveUrl(container, ctx = {}) {
       const hosts = router.hosts || [];
       const via = `Traefik router “${router.name}” · ${router.entrypoints?.length ? `entrypoint ${router.entrypoints.join('/')}` : 'no entrypoint label'} · ${router.tls ? 'TLS' : 'plain'}`;
       return {
-        url: built.url, urlSource: 'traefik',
+        url: built.url, urlSource: 'traefik', urlReason: 'traefik',
         urlNote: hosts.length > 1 ? `${via} · ${hosts.length - 1} alternate host${hosts.length - 1 === 1 ? '' : 's'}` : via,
         urlHosts: hosts.length > 1 ? hosts : undefined,
       };
     }
+    // a router was found but produced no address: say which of the two reasons it is
+    const disabled = container.traefik?.enabled === false;
+    return {
+      url: null, urlSource: 'none',
+      urlReason: disabled ? 'proxy-disabled' : 'proxy-incomplete',
+      urlNote: disabled
+        ? 'Traefik routing is disabled for this container (traefik.enable=false)'
+        : 'a Traefik router matches this container, but its rule names no hostname to visit',
+    };
   }
 
   const pick = pickPublishedPort(container.ports);
   if (pick?.loopbackOnly) {
-    return { url: null, urlSource: 'none', urlNote: `only ${pick.public} on loopback is published — not reachable from another machine` };
+    return { url: null, urlSource: 'none', urlReason: 'loopback-only', urlNote: `only ${pick.public} on loopback is published — not reachable from another machine` };
   }
   if (pick && ctx.hostAddress) {
     const scheme = TLS_PORTS.has(pick.public) || TLS_PORTS.has(pick.private) ? 'https' : 'http';
@@ -221,12 +259,15 @@ export function resolveUrl(container, ctx = {}) {
     // 80/443 are the scheme defaults — spelling them out only adds noise to the URL
     const explicit = pick.public === 80 ? scheme !== 'http' : pick.public !== 443;
     const note = `published ${isWildcard(pick.ip) ? 'all interfaces' : pick.ip}:${pick.public} → ${pick.private}${pick.others > 0 ? ` (+${pick.others} more)` : ''}`;
-    return { url: `${scheme}://${host}${explicit ? `:${pick.public}` : ''}`, urlSource: 'published-port', urlNote: note };
+    return { url: `${scheme}://${host}${explicit ? `:${pick.public}` : ''}`, urlSource: 'published-port', urlReason: 'published-port', urlNote: note };
   }
   if (pick && !ctx.hostAddress) {
-    return { url: null, urlSource: 'none', urlNote: `published port ${pick.public} found, but OpusHub cannot name this host — set a host address in Settings → System (or OPUSHUB_HOST_ADDRESS)` };
+    return { url: null, urlSource: 'none', urlReason: 'host-address-unknown', urlNote: `published port ${pick.public} found, but OpusHub cannot name this host — set a host address in Settings → Environment (or OPUSHUB_HOST_ADDRESS)` };
   }
-  return { url: null, urlSource: 'none', urlNote: container.traefik?.count === 0 && !container.ports?.length ? 'no proxy route, no published port' : null };
+  return {
+    url: null, urlSource: 'none', urlReason: 'no-route',
+    urlNote: container.traefik?.count === 0 && !container.ports?.length ? 'no proxy route, no published port' : null,
+  };
 }
 
 /** Manual overrides accept a full URL (preferred) or a bare host / host:port. */

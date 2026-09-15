@@ -10,8 +10,8 @@ import { bytes, pct, relTime, uptime } from '../lib/format';
 import { useSettings } from '../lib/theme';
 import type { ActivityEvent, ContainerStats, ImageInfo, Service, ServiceHistoryDoc, Stack, StatsSample, SystemSnapshot } from '../lib/types';
 import { Icon } from '../components/Icon';
-import { MeterBar, Sparkline } from '../components/Charts';
-import { Freshness, OpenLink, ProviderNote, SectionHead, StatusLine } from '../components/ui';
+import { AreaChart, MeterBar, Sparkline } from '../components/Charts';
+import { Freshness, Loading, OpenLink, ProviderNote, SectionHead, StatusLine } from '../components/ui';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
 
@@ -80,7 +80,7 @@ export default function ServiceDetail() {
   const activity = usePolled<{ items: ActivityEvent[] }>(`/api/activity?limit=40`, 60_000);
   const sys = usePolled<SystemSnapshot>('/api/system', 10_000);
 
-  if (loading && !data) return <div className="stale-note" style={{ padding: 'var(--sp-12) 0' }}>Loading service…</div>;
+  if (loading && !data) return <div style={{ padding: 'var(--sp-12) 0' }}><Loading what="this service" note="from the engine and the presentation overlay" /></div>;
   if (error && !data) return <ProviderNote status="error" reason={error} fixHref="/services" fixLabel="Back to Services →" />;
   if (!data) return <ProviderNote status="error" reason="Service not found." fixHref="/services" fixLabel="Back to Services →" />;
 
@@ -203,7 +203,10 @@ export default function ServiceDetail() {
             ) : !running ? (
               <ProviderNote compact status="unavailable" reason={c ? `Stats are only reported while the container is running — this one is ${words.stateWord.toLowerCase()}.` : 'Connect Docker to see live resource use.'} />
             ) : (
-              <ResourceGrid stats={st} samples={samples} />
+              <>
+                <ResourceGrid stats={st} samples={samples} />
+                <SessionHistory samples={samples} watchingSince={statsHist.data?.watchingSince ?? null} />
+              </>
             )}
           </section>
 
@@ -269,14 +272,14 @@ export default function ServiceDetail() {
 
                 {c.mounts.length > 0 && (
                   <div style={{ gridColumn: '1 / -1' }}>
-                    <dt>Mounts</dt>
+                    <dt>Volumes &amp; mounts</dt>
                     <dd>
                       {c.mounts.map((m, i) => (
                         <div className="port-row" key={i}>
                           <span className="mono-meta" style={{ wordBreak: 'break-all' }}>{m.source}</span>
                           <span className="port-arrow">→</span>
                           <span className="mono-meta">{m.target}{!m.rw ? ' (ro)' : ''}</span>
-                          <span className="stale-note" style={{ fontSize: 11 }}>{m.type}</span>
+                          <span className="stale-note" style={{ fontSize: 11 }}>{m.type === 'volume' ? 'named volume' : m.type === 'bind' ? 'bind mount' : m.type}</span>
                         </div>
                       ))}
                     </dd>
@@ -332,6 +335,19 @@ export default function ServiceDetail() {
             )}
           </section>
 
+          {/* ── labels: the allow-listed ones, which are the whole reason this service looks
+                 like anything at all. The raw label map stays on the server — people put
+                 tokens in labels, and OpusHub has no reason to ship them to a browser. ───── */}
+          <section className="detail-block">
+            <SectionHead title="Labels" right={<span className="stale-note">allow-listed</span>} />
+            <LabelList s={s} />
+            <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>
+              Only labels OpusHub understands are read: Docker Compose’s project/service labels,
+              Traefik’s routing labels, and the <code>opushub.*</code> overlay. Anything else on the
+              container — including values that look like credentials — is never parsed, stored or sent.
+            </p>
+          </section>
+
           {/* ── image ──────────────────────────────────────────────────────── */}
           <section className="detail-block">
             <SectionHead title="Image" />
@@ -383,13 +399,98 @@ export default function ServiceDetail() {
   );
 }
 
+/* ---------------- labels ---------------- */
+
+/** The three label families OpusHub actually reads, each shown with where it came from.
+ *  A missing family is stated as missing — never rendered as an empty table. */
+function LabelList({ s }: { s: Service }) {
+  const c = s.container;
+  const compose = c.labels?.compose ?? null;
+  const proxy = c.labels?.proxy ?? [];
+  const overlay = c.labels?.overlay ?? null;
+  const meta = s.meta ?? [];
+  const hasAny = !!compose || proxy.length > 0 || !!overlay || meta.length > 0;
+
+  if (!hasAny) {
+    return (
+      <div className="stale-note">
+        No labels OpusHub recognises on this container — its name, group and icon were derived from
+        the image and the container name instead.
+      </div>
+    );
+  }
+  return (
+    <dl className="kv">
+      {compose && (
+        <>
+          <dt>Compose</dt>
+          <dd className="mono-meta">
+            {[
+              compose.project && `project ${compose.project}`,
+              compose.service && `service ${compose.service}`,
+              (compose as { version?: string | null }).version && `version ${(compose as { version?: string | null }).version}`,
+            ].filter(Boolean).join(' · ') || 'Compose labels present but empty'}
+          </dd>
+        </>
+      )}
+      {proxy.length > 0 && (
+        <>
+          <dt>Traefik</dt>
+          <dd>
+            {proxy.map((r) => (
+              <div key={r.router} className="label-row">
+                <span className="mono-meta">{r.router}</span>
+                <span className="port-arrow">·</span>
+                <span>{r.hosts.join(', ') || 'no host rule'}</span>
+                <span className="stale-note">
+                  {r.entrypoints.join('/') || 'no entrypoint'}{r.tls ? ' · tls' : ''}{r.servicePort ? ` · port ${r.servicePort}` : ''}{r.path ? ` · path ${r.path}` : ''}
+                </span>
+              </div>
+            ))}
+          </dd>
+        </>
+      )}
+      {overlay && (
+        <>
+          <dt>Presentation</dt>
+          <dd>
+            <div className="label-row">
+              {([['Display name', overlay.displayName], ['Icon', overlay.icon], ['Group', overlay.group],
+                 ['URL override', overlay.url], ['Description', overlay.description]] as const)
+                .filter(([, v]) => !!v)
+                .map(([k, v]) => (
+                  <span className="label-pair" key={k}>
+                    <span className="micro-label">{k}</span>
+                    <span className="mono-meta">{v}</span>
+                  </span>
+                ))}
+            </div>
+            <span className="stale-note">from <code>opushub.*</code> container labels — presentation only; the container is still whatever Docker says it is.</span>
+          </dd>
+        </>
+      )}
+      {meta.length > 0 && (
+        <>
+          <dt>Facts</dt>
+          <dd>
+            {meta.map((m) => (
+              <div className="label-row" key={m.label}>
+                <span className="stale-note">{m.label}</span>
+                <span>{m.value}</span>
+              </div>
+            ))}
+          </dd>
+        </>
+      )}
+    </dl>
+  );
+}
+
 /* ---------------- resources: values + compact sparklines ---------------- */
 
 function ResourceGrid({ stats, samples }: { stats: ContainerStats | null; samples: StatsSample[] }) {
   const memUsed = stats?.memory.used ?? null;
   const memLimit = stats?.memory.limit ?? null;
-  const cpuSeries = samples.map((s) => s.cpu).filter((v): v is number => v != null);
-  const memSeries = samples.map((s) => (s.mem != null && s.memLimit ? 100 * s.mem / s.memLimit : s.mem)).filter((v): v is number => v != null);
   // net rx/tx are cumulative counters — rates come from consecutive real samples, never guessed
   const netRates = useMemo(() => {
     const out: { rx: number; tx: number }[] = [];
@@ -413,7 +514,6 @@ function ResourceGrid({ stats, samples }: { stats: ContainerStats | null; sample
         <div className="stat-k">CPU</div>
         <div className="stat-v">{stats.cpu != null ? pct(stats.cpu, 1) : 'Not available'}</div>
         <MeterBar value={stats.cpu ?? null} />
-        {cpuSeries.length >= 2 && <Sparkline values={cpuSeries.slice(-60)} width={120} height={22} />}
       </div>
       <div className="stat">
         <div className="stat-k">Memory</div>
@@ -422,7 +522,6 @@ function ResourceGrid({ stats, samples }: { stats: ContainerStats | null; sample
           {memLimit ? <small>of {bytes(memLimit)}</small> : null}
         </div>
         {memLimit && memUsed != null ? <MeterBar value={100 * (memUsed / memLimit)} /> : null}
-        {memSeries.length >= 2 && <Sparkline values={memSeries.slice(-60)} width={120} height={22} />}
       </div>
       <div className="stat">
         <div className="stat-k">Network</div>
@@ -437,6 +536,60 @@ function ResourceGrid({ stats, samples }: { stats: ContainerStats | null; sample
         <div className="stat-v" style={{ fontSize: 15 }}>{stats.blockIo != null ? bytes(stats.blockIo) : 'Not available'}</div>
         <div className="stat-sub">{stats.pids != null ? `${stats.pids} processes` : 'processes not reported'}</div>
       </div>
+    </div>
+  );
+}
+
+/* ---------------- resource history: what we actually watched ---------------- */
+
+/**
+ * The container's resource history, and nothing more.
+ *
+ * Two rules keep this honest and cheap:
+ *  · it can only ever show the stretch during which a page was *watching* — OpusHub samples
+ *    container stats on demand, so the window is the session, never a backfilled hour;
+ *  · it is drawn by the measured chart component, so the graph owns a fixed box and can never
+ *    paint under the labels beneath it.
+ */
+function SessionHistory({ samples, watchingSince }: { samples: StatsSample[]; watchingSince: number | null }) {
+  const cpu = samples.filter((s) => s.cpu != null).map((s) => ({ t: s.t, v: s.cpu as number }));
+  const mem = samples
+    .filter((s) => s.mem != null && s.memLimit)
+    .map((s) => ({ t: s.t, v: (100 * (s.mem as number)) / (s.memLimit as number) }));
+  if (cpu.length < 2 && mem.length < 2) return null;
+
+  const first = Math.min(...[...cpu, ...mem].map((p) => p.t));
+  const last = Math.max(...[...cpu, ...mem].map((p) => p.t));
+  // the axis spans the session we witnessed (clamped to a sane floor/ceiling), not a fixed hour
+  const windowMs = Math.min(30 * 60_000, Math.max(2 * 60_000, last - first));
+  const latestCpu = cpu.length ? cpu[cpu.length - 1].v : null;
+  const latestMem = mem.length ? mem[mem.length - 1].v : null;
+  const spanMinutes = Math.max(1, Math.round((last - first) / 60_000));
+
+  return (
+    <div className="res-history">
+      <div className="res-history-head">
+        <span className="micro-label">Since you opened this page</span>
+        <span className="res-legend">
+          <span className="res-key"><i style={{ background: 'var(--accent)' }} />CPU{latestCpu != null ? ` ${pct(latestCpu, 1)}` : ''}</span>
+          <span className="res-key"><i style={{ background: 'var(--ok)' }} />Memory{latestMem != null ? ` ${latestMem.toFixed(0)}%` : ''}</span>
+        </span>
+      </div>
+      <AreaChart
+        height={118}
+        windowMs={windowMs}
+        maxHint={100}
+        fmt={(v) => `${v.toFixed(0)}%`}
+        series={[
+          { points: cpu, label: 'CPU', color: 'var(--accent)', fill: false },
+          { points: mem, label: 'Memory', color: 'var(--ok)', fill: false },
+        ]}
+      />
+      <p className="stale-note">
+        {samples.length} sample{samples.length === 1 ? '' : 's'} over the last {spanMinutes} min — container stats are
+        collected only while a page is watching, so anything earlier was never recorded
+        {watchingSince ? ` (sampling began ${relTime(watchingSince)})` : ''}.
+      </p>
     </div>
   );
 }

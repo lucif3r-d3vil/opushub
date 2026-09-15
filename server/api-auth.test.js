@@ -97,6 +97,11 @@ test('every application endpoint refuses an anonymous caller', async () => {
     ['GET', '/api/bookmarks'], ['GET', '/api/assets'], ['GET', '/api/icons'], ['GET', '/api/discovery'],
     ['GET', '/api/providers'], ['GET', '/api/inventory'], ['GET', '/api/urls'],
     ['PUT', '/api/settings'], ['PUT', '/api/layout'], ['PUT', '/api/overlays'], ['POST', '/api/icons/search'],
+    // Phase 5 additions: search (which indexes services, stacks and activity), per-service and
+    // per-stack history, the session inventory, and the password endpoint.
+    ['GET', '/api/search?q=stream'], ['GET', '/api/services/Music/wave/stats/history'],
+    ['GET', '/api/services/Music/wave/history'], ['GET', '/api/stacks/media/history'],
+    ['GET', '/api/auth/sessions'], ['POST', '/api/auth/password'], ['POST', '/api/auth/sessions/revoke'],
   ];
   for (const [method, p] of routes) {
     const r = await call(method, p, { auth: false, body: method === 'GET' ? undefined : {} });
@@ -104,6 +109,21 @@ test('every application endpoint refuses an anonymous caller', async () => {
     assert.match(r.json?.error || '', /authentication required/i);
     assert.ok(!r.text.includes('fixture'), 'a refused response must not carry data');
   }
+});
+
+test('a deep link is the shell and nothing else — no data behind a URL', async () => {
+  // The SPA routes are public *files*; every byte of data behind them is not. An unauthenticated
+  // deep link must return the app shell (which then shows the sign-in screen) and nothing more.
+  for (const path of ['/activity?service=wave', '/settings/authentication', '/services/Media/wave', '/system']) {
+    const r = await get(path, { auth: false });
+    assert.ok(r.status === 200 || r.status === 404, `${path} → ${r.status}`);
+    assert.ok(!r.text.includes('fixture'), `${path} served fixture data to an anonymous caller`);
+    assert.ok(!/container\.started|auth\.login|jellyfin/.test(r.text), `${path} served activity or inventory data`);
+  }
+  // and the search index — which is a live view of the inventory — is served to nobody but a session
+  const anonSearch = await get('/api/search?q=stream', { auth: false });
+  assert.equal(anonSearch.status, 401);
+  assert.ok(!anonSearch.text.includes('jellyfin'));
 });
 
 test('an unknown API path is refused too — no route enumeration without a session', async () => {
@@ -267,4 +287,177 @@ test('sessions outlive the process that created them (the data volume, not memor
   const file = path.join(DATA_DIR, 'sessions.json');
   assert.ok(fs.existsSync(file));
   assert.ok(JSON.parse(fs.readFileSync(file, 'utf8')).sessions.some((s) => cookie.endsWith(s.id)), 'the session is persisted, not held in memory');
+});
+
+// ── Phase 5: account maintenance over HTTP (sessions, password, audit) ───────
+//
+// These run last on purpose: they revoke sessions and change the password. Every test starts by
+// establishing the session it needs, so a failure here cannot cascade into an unrelated one.
+
+/** Sign in and make the returned cookie the caller's. */
+async function loginAs(password = PASSWORD) {
+  const r = await send('POST')('/api/auth/login', { username: 'admin', password }, { auth: false });
+  assert.equal(r.status, 200, `login as admin failed: ${r.text.slice(0, 120)}`);
+  cookie = r.setCookie.join('; ').split(';')[0];
+  return cookie;
+}
+
+/** Start from a known state: exactly one session, the browser running the assertions. */
+async function freshSingleSession() {
+  await loginAs();
+  const cleared = await send('POST')('/api/auth/sessions/revoke', { scope: 'all' });
+  assert.equal(cleared.status, 200, 'a signed-in admin can revoke every session');
+  return loginAs();
+}
+
+test('the session inventory is authenticated, counts correctly and never carries a token', async () => {
+  const anon = await get('/api/auth/sessions', { auth: false });
+  assert.equal(anon.status, 401, 'who is signed in is not public information');
+
+  // a clean slate, then exactly one session — earlier tests in this file left several behind
+  const token = (await freshSingleSession()).split('=')[1];
+
+  const listed = await get('/api/auth/sessions');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.json.count, 1, 'one browser is signed in');
+  assert.equal(listed.json.sessions[0].current, true);
+  assert.equal(listed.json.current.id, listed.json.sessions[0].id);
+  assert.match(listed.json.sessions[0].id, /^[A-Za-z0-9_-]{16}$/);
+  assert.equal(listed.json.limits.absoluteMs, 30 * 24 * 3600_000);
+  assert.equal(listed.json.limits.idleMs, 7 * 24 * 3600_000);
+  assert.equal(listed.json.sessions[0].ip, '127.0.0.1', 'the client address is recorded, not secret');
+  // the bearer token is the one thing that must never appear here
+  assert.ok(!listed.text.includes(token), 'the session token is not in the response');
+  assert.ok(!listed.text.includes('scrypt$') && !listed.text.includes('passwordHash'));
+});
+
+test('a second device is listed, and revoking it by handle signs only it out', async () => {
+  await freshSingleSession();
+  const second = await send('POST')('/api/auth/login', { username: 'admin', password: PASSWORD }, { auth: false });
+  const phone = second.setCookie.join('; ').split(';')[0];
+  assert.notEqual(phone, cookie, 'a different browser earns a different session');
+
+  const both = await get('/api/auth/sessions');
+  assert.equal(both.json.count, 2);
+  const other = both.json.sessions.find((s) => !s.current);
+  assert.ok(other, 'the other session is visible');
+
+  const revoked = await send('POST')('/api/auth/sessions/revoke', { scope: 'one', id: other.id });
+  assert.equal(revoked.status, 200);
+  assert.equal(revoked.json.revoked, 1);
+  assert.equal(revoked.json.signedOut, false, 'revoking somebody else is not a sign-out');
+
+  const phoneCall = await fetch(`${BASE}/api/services`, { headers: { cookie: phone } });
+  assert.equal(phoneCall.status, 401, 'the revoked device is signed out server-side');
+  assert.equal((await get('/api/services')).status, 200, 'this browser is untouched');
+  assert.equal((await get('/api/auth/sessions')).json.count, 1);
+
+  // an unknown handle revokes nothing, and never somebody else's session by accident
+  const bogus = await send('POST')('/api/auth/sessions/revoke', { scope: 'one', id: 'ZZZZZZZZZZZZZZZZ' });
+  assert.equal(bogus.status, 200);
+  assert.equal(bogus.json.revoked, 0);
+  assert.equal((await get('/api/services')).status, 200);
+  assert.equal((await send('POST')('/api/auth/sessions/revoke', { scope: 'nonsense' })).status, 400);
+});
+
+test('revoking every session clears the cookie and signs the admin out everywhere', async () => {
+  await loginAs();
+  const second = await send('POST')('/api/auth/login', { username: 'admin', password: PASSWORD }, { auth: false });
+  const device = second.setCookie.join('; ').split(';')[0];
+  const r = await send('POST')('/api/auth/sessions/revoke', { scope: 'all' });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.signedOut, true);
+  assert.match(r.setCookie.join('; '), /Max-Age=0/);
+  assert.equal((await get('/api/services')).status, 401);
+  const deviceCall = await fetch(`${BASE}/api/services`, { headers: { cookie: device } });
+  assert.equal(deviceCall.status, 401, 'every other device is out too');
+});
+
+test('malformed, oversized and truncated session cookies are a clean 401 — never a 500', async () => {
+  await loginAs();
+  const bad = [
+    'opushub_session=', 'opushub_session=short', 'opushub_session=' + 'x'.repeat(4000),
+    'opushub_session=%E0%A4%A', 'opushub_session=' + encodeURIComponent('../../etc/passwd'),
+    'garbage', 'opushub_session="quoted"', 'opushub_session=' + 'A'.repeat(64),
+    'opushub_session=; other=1',
+  ];
+  for (const c of bad) {
+    const r = await fetch(`${BASE}/api/services`, { headers: { cookie: c } });
+    assert.equal(r.status, 401, `cookie ${c.slice(0, 40)} must be refused, not crash`);
+    const body = await r.json();
+    assert.equal(body.code, 'auth_required');
+  }
+  // and the server is still healthy afterwards
+  assert.equal((await get('/api/services')).status, 200);
+});
+
+test('the password route refuses the wrong current password, and a cross-origin attempt', async () => {
+  await loginAs();
+  const cross = await call('POST', '/api/auth/password', {
+    body: { currentPassword: PASSWORD, newPassword: 'hijacked-passphrase-1' },
+    origin: 'https://evil.example',
+  });
+  assert.equal(cross.status, 403, 'a cross-site write cannot change the password');
+  assert.equal((await send('POST')('/api/auth/login', { username: 'admin', password: PASSWORD }, { auth: false })).status, 200, 'the password is unchanged');
+
+  const wrong = await send('POST')('/api/auth/password', { currentPassword: 'not-the-password', newPassword: 'brand-new-passphrase-9' });
+  assert.equal(wrong.status, 401);
+  assert.match(wrong.json.error, /current password is incorrect/i);
+  assert.equal((await get('/api/services')).status, 200, 'a failed change does not sign the admin out');
+
+  const weak = await send('POST')('/api/auth/password', { currentPassword: PASSWORD, newPassword: 'short' });
+  assert.equal(weak.status, 400, 'policy is enforced on the new password');
+
+  const anonymous = await call('POST', '/api/auth/password', { body: { currentPassword: PASSWORD, newPassword: 'without-a-session-1' }, auth: false });
+  assert.equal(anonymous.status, 401, 'changing a password needs a session, not just the old password');
+});
+
+test('a successful password change rotates the cookie and signs the other devices out', async () => {
+  const NEW_PASSWORD = 'phase-five-passphrase';
+  await freshSingleSession();
+  const phone = await send('POST')('/api/auth/login', { username: 'admin', password: PASSWORD }, { auth: false });
+  const phoneCookie = phone.setCookie.join('; ').split(';')[0];
+
+  const changed = await send('POST')('/api/auth/password', { currentPassword: PASSWORD, newPassword: NEW_PASSWORD });
+  assert.equal(changed.status, 200);
+  assert.equal(changed.json.revoked, 1, 'the other browser is revoked');
+  const rotated = changed.setCookie.join('; ').split(';')[0];
+  assert.notEqual(rotated, cookie, 'the session id is rotated, not reused');
+  cookie = rotated;
+
+  assert.equal((await get('/api/services')).status, 200, 'the new cookie works');
+  const phoneCall = await fetch(`${BASE}/api/services`, { headers: { cookie: phoneCookie } });
+  assert.equal(phoneCall.status, 401, 'the pre-change session does not survive');
+  assert.equal((await get('/api/auth/sessions')).json.count, 1);
+
+  const oldPassword = await send('POST')('/api/auth/login', { username: 'admin', password: PASSWORD }, { auth: false });
+  assert.equal(oldPassword.status, 401);
+  const newPassword = await send('POST')('/api/auth/login', { username: 'admin', password: NEW_PASSWORD }, { auth: false });
+  assert.equal(newPassword.status, 200, 'the new password signs in');
+  cookie = newPassword.setCookie.join('; ').split(';')[0];
+});
+
+test('credentials never travel in a URL, and a query-string password is ignored', async () => {
+  const inQuery = await call('POST', `/api/auth/login?username=admin&password=${encodeURIComponent('irrelevant')}`, {
+    body: { username: 'admin', password: 'phase-five-passphrase' },
+    auth: false,
+  });
+  assert.equal(inQuery.status, 200, 'the body is the only place credentials are read from');
+  const bogus = await call('POST', `/api/auth/login?password=phase-five-passphrase`, { body: {}, auth: false });
+  assert.equal(bogus.status, 401, 'a password in the query string authenticates nothing');
+});
+
+test('the activity log records auth events without ever recording a credential', async () => {
+  await loginAs('phase-five-passphrase');
+  const activity = await get('/api/activity?limit=200');
+  assert.equal(activity.status, 200);
+  const types = activity.json.items.map((e) => e.type);
+  assert.ok(types.includes('auth.password_changed'), 'the change is a logged fact');
+  assert.ok(types.includes('auth.password_failed'), 'the refusal is a logged fact');
+  assert.ok(types.includes('auth.sessions_revoked'));
+  const text = activity.text;
+  for (const secret of ['phase-five-passphrase', PASSWORD, 'brand-new-passphrase-9', 'hijacked-passphrase-1']) {
+    assert.ok(!text.includes(secret), `the activity feed must not contain "${secret}"`);
+  }
+  assert.ok(!text.includes('scrypt$'), 'no hash in the activity feed either');
 });

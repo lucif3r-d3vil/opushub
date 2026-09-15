@@ -1,21 +1,31 @@
-// First-run setup — the five steps between `docker compose up -d` and a working OpusHub.
+// First-run setup — the six steps between `docker compose up -d` and a working OpusHub.
+//
+// Welcome → Administrator → Environment → Discovery → Review → Finish
 //
 // The wizard asks for exactly one thing it cannot discover (the administrator's credentials), plus
 // the two optional infrastructure knobs it cannot read off Docker (the host address used for
 // published-port URLs, and a Traefik entrypoint→port mapping when the entrypoint is not 80/443).
-// Everything else on these screens is *read* from the engine: stacks, containers, routes.
+// Everything else on these screens is *read* from the engine: the API version it answers on,
+// stacks, containers, routes, and the reason every service does or does not have a URL.
 //
-// The account is created in the final step, in one request, together with the environment values —
-// so an abandoned wizard leaves an uninitialised install rather than a half-made one.
+// Two rules that shape the code below:
+//   · nothing but counts and reason *categories* may exist before an account does — no container
+//     name, image, domain or URL crosses the wire pre-auth (see `setupSummary()` in server/api.js);
+//   · a URL is never required to finish. A service with no proxy route and no published port
+//     honestly has no URL, and the wizard says so in words instead of blocking on it.
+//
+// The account is created when the Review step is confirmed, and the Finish screen is then shown
+// *before* the Hub takes over — so the last thing the wizard does is explain what was created,
+// rather than throwing the user straight into a dashboard.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth, type SetupDiscovery } from '../lib/auth';
 import { LogoMark } from '../components/Logo';
 
-const STEPS = ['Welcome', 'Administrator', 'Environment', 'Discovery', 'Finish'] as const;
+const STEPS = ['Welcome', 'Administrator', 'Environment', 'Discovery', 'Review', 'Finish'] as const;
 
 export default function SetupPage() {
-  const { setup, completeSetup } = useAuth();
+  const { setup, completeSetup, enter } = useAuth();
   const [step, setStep] = useState(0);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -25,6 +35,7 @@ export default function SetupPage() {
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [discovery, setDiscovery] = useState<SetupDiscovery | null>(setup?.discovery ?? null);
+  const [created, setCreated] = useState<{ username: string; revoked: number } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
 
   // the wizard is the one screen that may talk to the discovery summary before an account exists
@@ -58,6 +69,7 @@ export default function SetupPage() {
     next();
   };
 
+  /** The one mutation in the whole wizard: create the account, together with the infra knobs. */
   const finish = async () => {
     const p = accountProblem();
     if (p) { setProblem(p); setStep(1); return; }
@@ -69,12 +81,18 @@ export default function SetupPage() {
     if (Object.keys(ports).length) infra.entrypointPorts = ports;
     try {
       await completeSetup({ username: username.trim(), password, ...(Object.keys(infra).length ? { infrastructure: infra } : {}) });
-      // the AuthProvider re-reads the state and the Hub takes over from here
+      setCreated({ username: username.trim(), revoked: 0 });
+      setStep(5);
+      setBusy(false);
     } catch (err) {
       setProblem(err instanceof Error ? err.message : 'Setup could not be completed.');
       setBusy(false);
     }
   };
+
+  const urlReasons = discovery?.urls.reasons ?? [];
+  const resolvedReasons = urlReasons.filter((r) => r.resolved);
+  const missingReasons = urlReasons.filter((r) => !r.resolved);
 
   return (
     <div className="auth auth--wide">
@@ -109,6 +127,7 @@ export default function SetupPage() {
                 <li><b>One local account.</b> Passwords are hashed with scrypt; sessions are server-side cookies.</li>
                 <li><b>Your configuration stays yours.</b> Presentation lives in <code>config/</code>, state in <code>data/</code>.</li>
               </ul>
+              <p className="hint">Six short steps. The only thing you have to decide is the account; everything else is what the engine already answered.</p>
             </>
           )}
 
@@ -131,14 +150,46 @@ export default function SetupPage() {
                 <input id="setup-pass2" className="input" type="password" value={confirm} autoComplete="new-password"
                   onChange={(e) => setConfirm(e.target.value)} />
               </div>
+              <p className="hint">The account is created at the end of the wizard, in one request — an abandoned setup leaves an uninitialized install, never a half-made one.</p>
             </>
           )}
 
           {step === 2 && (
             <>
               <p className="lede">
-                These two are what Docker cannot tell OpusHub. Leave them as they are if you publish no
-                ports or if Traefik is on 80/443 — that is the common case.
+                First, the engine. This is what Docker answered — nothing here was configured, and
+                nothing here can be changed from this screen.
+              </p>
+              <dl className="setup-kv">
+                <dt>Docker engine</dt>
+                <dd>
+                  {discovery?.docker.ok
+                    ? <>Connected{discovery.docker.version ? <> — engine <span className="mono-meta">{discovery.docker.version}</span></> : null}</>
+                    : <span className="stale-note">Not connected ({discovery?.docker.state || 'unknown'})</span>}
+                </dd>
+                <dt>Docker API</dt>
+                <dd>
+                  {discovery?.docker.apiVersion
+                    ? <span className="mono-meta">v{discovery.docker.apiVersion}</span>
+                    : <span className="stale-note">Not negotiated yet — OpusHub adopts the daemon’s own version on the first call</span>}
+                </dd>
+                <dt>Endpoint</dt>
+                <dd className="stale-note">
+                  set with <code>OPUSHUB_DOCKER_SOCKET</code> (or <code>DOCKER_HOST</code>) and the socket mount; read once at start-up
+                </dd>
+                {discovery?.docker.operatingSystem && <><dt>Host OS</dt><dd className="mono-meta">{discovery.docker.operatingSystem}</dd></>}
+              </dl>
+              {!discovery?.docker.ok && (
+                <p className="setup-attention" role="status">
+                  OpusHub runs fine without Docker — it just has nothing to show. Mount
+                  <code> /var/run/docker.sock</code> read-only, add the socket’s group, and restart the
+                  container; this page will say “Connected”.
+                </p>
+              )}
+
+              <p className="lede" style={{ marginTop: 'var(--sp-8)' }}>
+                Two things Docker cannot tell OpusHub. Leave them as they are if you publish no ports
+                or if Traefik is on 80/443 — that is the common case.
               </p>
               <div className="field">
                 <label htmlFor="setup-host">Host address for published ports</label>
@@ -147,7 +198,7 @@ export default function SetupPage() {
                 <span className="hint">
                   {detectedHost
                     ? <>Detected automatically ({describeSource(discovery?.hostAddressSource)}). Used only when a container has a published port and no proxy route.</>
-                    : <>No address could be detected — set one and containers with published ports get a usable URL.</>}
+                    : <>No address could be detected — set one and containers with published ports get a usable URL. Without it, OpusHub shows a name instead of inventing a link.</>}
                 </span>
               </div>
               {entrypoints.length > 0 && (
@@ -169,15 +220,6 @@ export default function SetupPage() {
                   </div>
                 </div>
               )}
-              <dl className="setup-kv">
-                <dt>Docker endpoint</dt>
-                <dd>
-                  {discovery?.docker.ok
-                    ? `Connected — engine ${discovery.docker.version || 'unknown'}`
-                    : `Not connected (${discovery?.docker.state || 'unknown'})`}
-                  <span className="hint"> — set with OPUSHUB_DOCKER_SOCKET and the socket mount; read at start-up.</span>
-                </dd>
-              </dl>
             </>
           )}
 
@@ -185,32 +227,48 @@ export default function SetupPage() {
             <>
               <p className="lede">This is what the engine answered while you were reading. Nothing here was configured.</p>
               <div className="setup-grid">
-                <Stat label="Docker" value={discovery?.docker.ok ? 'Connected' : 'Not connected'} tone={discovery?.docker.ok ? 'ok' : 'warn'}
-                  note={discovery?.docker.version ? `engine ${discovery.docker.version}` : undefined} />
+                <Stat label="Containers" value={discovery?.containers ?? 0} note={discovery ? `${discovery.running} running${discovery.stopped ? ` · ${discovery.stopped} stopped` : ''}` : undefined} />
                 <Stat label="Stacks" value={discovery?.stacks ?? 0} note="compose projects" />
-                <Stat label="Containers" value={discovery?.containers ?? 0} note={`${discovery?.running ?? 0} running`} />
                 <Stat label="Applications" value={discovery?.services ?? 0} note="the services you use" />
-                <Stat label="Infrastructure" value={discovery?.infrastructure ?? 0} note="Traefik, Tailscale, … — listed, never hidden" />
-                <Stat label="URLs" value={discovery?.urls.detected ?? 0} note="resolved from proxy metadata or published ports" />
-                <Stat label="Traefik routes" value={discovery?.traefik.routes ?? 0} note={discovery?.traefik.tlsRoutes ? `${discovery.traefik.tlsRoutes} with TLS` : undefined} />
+                <Stat label="Infrastructure" value={discovery?.infrastructure ?? 0} note="Traefik, databases, exporters — listed, never hidden" />
+                <Stat label="Standalone" value={discovery?.standalone ?? 0} note="not part of a compose project" />
+                <Stat label="Traefik routers" value={discovery?.traefik.routes ?? 0} note={discovery?.traefik.tlsRoutes ? `${discovery.traefik.tlsRoutes} with TLS` : 'none published'} />
+                <Stat label="URLs resolved" value={discovery?.urls.detected ?? 0} note={`of ${discovery?.containers ?? 0} containers`} tone={(discovery?.urls.detected ?? 0) > 0 ? 'ok' : undefined} />
+                <Stat label="No URL" value={discovery?.urls.missing ?? 0} note="honest absences, not errors" />
               </div>
-              {(discovery?.urls.missing ?? 0) > 0 && (
-                <p className="setup-attention" role="status">
-                  <b>{discovery?.urls.missing}</b> container{discovery?.urls.missing === 1 ? '' : 's'} have no browser URL.
-                  That is not a problem to fix now: a service with no proxy route and no published port honestly has no
-                  URL, and you can set one later on its service page. Nothing is blocked by it.
+
+              <div className="setup-explain">
+                <h3 className="setup-explain-title">Why a service has a URL</h3>
+                {resolvedReasons.length === 0 && <p className="hint">No URL could be resolved yet.</p>}
+                <ul className="setup-reasons">
+                  {resolvedReasons.map((r) => (
+                    <li key={r.code}>
+                      <span className="count">{r.count}</span>
+                      <span className="why">{r.explain || r.code}</span>
+                    </li>
+                  ))}
+                </ul>
+                <h3 className="setup-explain-title">Why a service has no URL</h3>
+                {missingReasons.length === 0 && <p className="hint">Every container has a usable browser URL.</p>}
+                <ul className="setup-reasons">
+                  {missingReasons.map((r) => (
+                    <li key={r.code}>
+                      <span className="count">{r.count}</span>
+                      <span className="why">{r.explain || r.code}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="hint">
+                  Nothing is blocked by a missing URL. OpusHub prefers an honest absence to a link that
+                  would not load, and you can add an override later on the service’s own page — or in{' '}
+                  <code>services.yaml</code>. A container that appears tomorrow shows up on its own.
                 </p>
-              )}
+              </div>
+
               <p className="hint">
-                Infrastructure containers are kept and separated rather than filtered: you will find them on their own
-                rail in Services, next to {(discovery?.standalone ?? 0) > 0
-                  ? <>the {discovery?.standalone} container{discovery?.standalone === 1 ? '' : 's'} that are not part of a compose project.</>
-                  : <>the applications.</>}
-              </p>
-              <p className="hint">
-                Containers are grouped by their compose project: the project name becomes the group heading, with
-                its containers underneath. Rename, re-file or re-icon anything afterwards — the grouping never has
-                to be written by hand, and a container that appears tomorrow shows up on its own.
+                Containers are grouped by their compose project: the project name becomes the group
+                heading, with its containers underneath. Infrastructure keeps its own rail rather than
+                being filtered out — you will find it next to the applications.
               </p>
             </>
           )}
@@ -218,14 +276,64 @@ export default function SetupPage() {
           {step === 4 && (
             <>
               <p className="lede">
-                Your OpusHub is ready. Creating the account closes setup for good — the wizard cannot be run again,
-                and every API is locked behind a session from this moment on.
+                One last look before anything is written. Creating the account closes setup for good:
+                the wizard cannot be run again, and every API locks behind a session.
+              </p>
+              <dl className="setup-kv">
+                <dt>Administrator</dt>
+                <dd className="mono-meta">{username.trim() || '—'}</dd>
+                <dt>Docker engine</dt>
+                <dd>
+                  {discovery?.docker.ok
+                    ? <>Connected{discovery.docker.apiVersion ? <> · API v{discovery.docker.apiVersion}</> : null}</>
+                    : <span className="stale-note">Not connected — OpusHub will list nothing until it is</span>}
+                </dd>
+                <dt>Inventory</dt>
+                <dd className="mono-meta">
+                  {discovery?.containers ?? 0} containers · {discovery?.stacks ?? 0} stacks · {discovery?.services ?? 0} applications
+                </dd>
+                <dt>URLs</dt>
+                <dd className="mono-meta">
+                  {discovery?.urls.detected ?? 0} reachable · {discovery?.urls.missing ?? 0} without a link
+                </dd>
+                <dt>Host address</dt>
+                <dd className="mono-meta">
+                  {hostAddress.trim() || detectedHost || <span className="stale-note">none — published ports will not become links</span>}
+                  {hostAddress.trim() && hostAddress.trim() !== detectedHost && <span className="stale-note"> · set by you</span>}
+                </dd>
+                {entrypoints.length > 0 && (
+                  <>
+                    <dt>Entrypoint ports</dt>
+                    <dd className="mono-meta">
+                      {Object.entries(entrypointPorts).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(', ') || <span className="stale-note">defaults (80/443)</span>}
+                    </dd>
+                  </>
+                )}
+                <dt>Files</dt>
+                <dd className="mono-meta">account → <code>data/auth.json</code> · presentation → <code>config/</code></dd>
+              </dl>
+              <p className="hint">
+                Nothing is installed, started, stopped or pulled — including by this button. It writes
+                one account and, if you changed them, the two infrastructure values above.
+              </p>
+            </>
+          )}
+
+          {step === 5 && (
+            <>
+              <p className="lede">
+                OpusHub is ready. You are signed in as <b>{created?.username || username}</b>, and the
+                inventory below is already live — it was read from the engine, not typed in.
               </p>
               <ul className="setup-points">
-                <li>Signing in as <b>{username || '—'}</b></li>
                 <li>{discovery?.stacks ?? 0} stack{(discovery?.stacks ?? 0) === 1 ? '' : 's'} will appear on the Hub, grouped by project</li>
                 <li>{discovery?.urls.detected ?? 0} service URL{(discovery?.urls.detected ?? 0) === 1 ? '' : 's'} resolved from real metadata</li>
+                <li>Change the password, review sessions, or sign other browsers out any time in <b>Settings → Account &amp; sessions</b></li>
               </ul>
+              <p className="hint">
+                This screen is the last step of setup only — it will not come back. A reload now goes
+                straight to the Hub.
+              </p>
             </>
           )}
         </div>
@@ -233,16 +341,20 @@ export default function SetupPage() {
         {problem && <p className="auth-error" role="alert">{problem}</p>}
 
         <footer className="setup-foot">
-          <button className="btn btn-quiet" onClick={back} disabled={step === 0 || busy}>Back</button>
-          <span className="setup-step-note">Step {step + 1} of {STEPS.length}</span>
-          {step < STEPS.length - 1 ? (
+          <button className="btn btn-quiet" onClick={back} disabled={step === 0 || step >= 5 || busy}>Back</button>
+          <span className="setup-step-note">Step {Math.min(step + 1, STEPS.length)} of {STEPS.length}</span>
+          {step < 4 && (
             <button className="btn btn-primary" onClick={step === 1 ? advanceFromAccount : next}>
               {step === 0 ? 'Begin' : 'Continue'}
             </button>
-          ) : (
+          )}
+          {step === 4 && (
             <button className="btn btn-primary" onClick={finish} disabled={busy}>
-              {busy ? 'Creating account…' : 'Create account & enter OpusHub'}
+              {busy ? 'Creating account…' : 'Create account'}
             </button>
+          )}
+          {step === 5 && (
+            <button className="btn btn-primary" onClick={() => enter()}>Enter OpusHub</button>
           )}
         </footer>
       </main>

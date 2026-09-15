@@ -37,7 +37,7 @@ export default function SetupBanner({ sys, services }: { sys: SystemSnapshot | n
   const wx = !!(settings.integrations.weather.location || (settings.integrations.weather.latitude != null && settings.integrations.weather.longitude != null));
   const news = (settings.integrations.news.feeds || []).length > 0;
   const markets = (settings.integrations.markets.symbols || []).length > 0;
-  const configureHref = !dockerKnown || !dockerOn ? '/settings/system' : serviceCount === 0 ? '/settings/services' : '/settings/integrations';
+  const configureHref = !dockerKnown || !dockerOn ? '/settings/environment' : serviceCount === 0 ? '/settings/services' : '/settings/integrations';
 
   return (
     <section className="setup-banner" aria-label="Finish setting up OpusHub">

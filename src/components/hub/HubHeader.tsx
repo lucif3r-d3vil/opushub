@@ -7,7 +7,16 @@ import { Icon } from '../Icon';
 import { plural } from '../../lib/format';
 import { searchShortcutLabel } from '../SearchOverlay';
 
-function greetingFor(name: string | null, hour: number): { lead: string; name: string | null } {
+/**
+ * The greeting's whole vocabulary, in one place.
+ *
+ * Exported so it can be pinned by a test: the rendered greeting depends on the *hour the process
+ * happens to be running at*, which made any assertion on the Hub's headline a coin flip at 4am.
+ * The four windows below are the contract; the smoke check accepts any of them.
+ */
+export const GREETINGS = ['Still up', 'Good morning', 'Good afternoon', 'Good evening'] as const;
+
+export function greetingFor(name: string | null, hour: number): { lead: string; name: string | null } {
   const part = hour < 5 ? 'Still up' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const clean = name?.trim();
   return { lead: part, name: clean ? clean.slice(0, 40) : null };

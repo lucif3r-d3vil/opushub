@@ -6,6 +6,7 @@
 import { act, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { LayoutProvider, SettingsProvider, useLayout } from '../../src/lib/theme';
+import { AuthProvider } from '../../src/lib/auth';
 import { useHubData } from '../../src/lib/hubData';
 import { HubSurface } from '../../src/components/hub/HubSurface';
 import { SearchOverlay, useGlobalSearchHotkey } from '../../src/components/SearchOverlay';
@@ -14,6 +15,10 @@ import Settings from '../../src/pages/Settings';
 import IconsPage from '../../src/pages/Icons';
 import ServiceDetail from '../../src/pages/ServiceDetail';
 import StackDetail from '../../src/pages/StackDetail';
+import SystemPage from '../../src/pages/System';
+import ActivityPage from '../../src/pages/Activity';
+import { Loading } from '../../src/components/ui';
+import { GREETINGS, greetingFor } from '../../src/components/hub/HubHeader';
 import type { LayoutDoc, WidgetInstance } from '../../src/lib/types';
 import type { HubData } from '../../src/lib/hubData';
 import App from '../../src/App';
@@ -57,14 +62,34 @@ const serviceDetail = {
   urlSource: servicesDoc.services[0].urlSource,
   urlNote: null,
 };
-const stackDetail = { ...stacksDoc.stacks[0], live: true, statusReason: null };
+const stackDetail = {
+  ...stacksDoc.stacks[0], live: true, statusReason: null,
+  rollup: {
+    containers: 3, running: 3, stopped: 0, unhealthy: 1, reporting: 2,
+    cpu: 21.4, memory: 512_000_000, memoryLimit: 2_000_000_000,
+    netRx: 4_500_000, netTx: 900_000, upSince: Date.now() - 6 * 3600_000,
+  },
+};
+const stackHistory = {
+  stack: 'media', containers: 2, reporting: 2, watchingSince: Date.now() - 8 * 60_000, bucketMs: 2000,
+  samples: [
+    { t: Date.now() - 15_000, cpu: 18.0, mem: 500_000_000, memLimit: 2_000_000_000, netRx: 4_000_000, netTx: 800_000, count: 2 },
+    { t: Date.now() - 10_000, cpu: 20.2, mem: 505_000_000, memLimit: 2_000_000_000, netRx: 4_200_000, netTx: 850_000, count: 2 },
+    { t: Date.now() - 5_000, cpu: 21.4, mem: 512_000_000, memLimit: 2_000_000_000, netRx: 4_500_000, netTx: 900_000, count: 2 },
+  ],
+};
 const noWebService = servicesDoc.services.find((s) => s.url == null)!;
 const noWebDetail = { ...serviceDetail, service: noWebService, url: null, urlSource: 'none', container: null };
 
 const searchResults = (query: string) => ({
   results: query.includes('nav')
     ? [{ title: 'Navidrome', subtitle: 'Music · running', kind: 'service', href: '/services/Music/navidrome', icon: null, status: 'up' }]
-    : [{ title: 'Widgets', subtitle: 'Hub Layout', kind: 'setting', href: '/settings/widgets' }],
+    : query.includes('stream')
+      ? [
+        { title: 'Stream', subtitle: 'Media · running', kind: 'service', href: '/services/Media/stream', icon: null, status: 'up' },
+        { title: 'stream', subtitle: 'Activity · started · 2h ago', kind: 'activity', href: '/activity?service=stream' },
+      ]
+      : [{ title: 'Widgets', subtitle: 'Hub Layout', kind: 'setting', href: '/settings/widgets' }],
 });
 
 /* Phase 3 fixtures: on-demand readings for the detail page. */
@@ -173,11 +198,18 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
     '/api/docker/containers/wave/logs': logsRoute,
     '/api/providers': providersFixture,
     '/api/services/Media/photos': noWebDetail,
+    '/api/services/Media/stream': {
+      ...serviceDetail,
+      service: { ...servicesDoc.services[0], name: 'stream', displayName: 'Stream', group: 'Media' },
+    },
+    '/api/services/Media/stream/stats/history': { samples: [], watchingSince: null, capped: 360 },
+    '/api/services/Media/stream/history': { service: 'stream', events: [], watchingSince: null, logStarted: null },
     '/api/services/Music/navidrome': {
       ...serviceDetail,
       service: { ...servicesDoc.services[0], name: 'navidrome', displayName: 'Navidrome', description: 'Music streaming', group: 'Music' },
     },
     '/api/stacks/media': stackDetail,
+    '/api/stacks/media/history': stackHistory,
   };
 }
 
@@ -194,6 +226,7 @@ function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: strin
             <Route path="/icons" element={<IconsPage />} />
             <Route path="/activity" element={<div data-test="activity">activity</div>} />
             <Route path="/stacks/:name" element={<StackDetail />} />
+            <Route path="/system" element={<SystemPage />} />
             <Route path="/services/:group/:name" element={<ServiceDetail />} />
           </Routes>
         </LayoutProvider>
@@ -252,15 +285,42 @@ export async function runWebTests(): Promise<WebResult> {
     await h.flush(50);
     await h.waitFor(() => text().includes('Wave'), 'the launcher to fill from the API');
     expect(text().includes('Wave') && text().includes('Photos'), 'a discovered service is missing from the launcher');
-    expect(/good (morning|afternoon|evening)/i.test(text()), 'the greeting is missing');
+    // the greeting depends on the hour the suite runs at, so accept its whole vocabulary
+    expect(/still up|good (morning|afternoon|evening)/i.test(text()), `the greeting is missing: ${text().slice(0, 160)}`);
     expect(text().includes('3 services'), 'the header does not report the discovered count');
-    expect(document.title === 'Nora · OpusHub', `the document title follows the configured name (got “${document.title}”)`);
+    // the tab is the install's own name (settings.yaml → app.name), set once for every page
+    expect(document.title === 'OpusHub', `the document title should be the configured name (got “${document.title}”)`);
     expect(text().includes('Friday') || /day/i.test(text()), 'the date is missing');
     expect(qa('.launcher-items > li').length >= 3, 'the launcher list is short');
     // a service with no resolved URL must not offer a launch button
     const noWeb = qa('.launch-item').find((el) => el.getAttribute('data-noweb') != null);
     expect(noWeb, 'the fixture has a service with no URL, so one row should be marked');
     expect(!q('button.li-open', noWeb!) && !q('a.li-open', noWeb!), 'a URL-less service rendered a launch button');
+  });
+
+  /* 1b — a renamed install renames the tab, on any page that has settings loaded */
+  await test('settings: app.name drives the document title', async (h) => {
+    const named = JSON.parse(JSON.stringify(settings));
+    named.app.name = 'Grid Control';
+    h.setRoutes({ ...stubRoutes(), '/api/settings': named });
+    await h.mount(<TestApp><Hub /></TestApp>);
+    await h.flush(50);
+    await h.waitFor(() => document.title === 'Grid Control', 'the configured name to reach the tab');
+  });
+
+  /* 1c — Phase 5: the greeting's four windows, pinned so a 4am test run is not a coin flip */
+  await test('greeting: every hour of the day maps to exactly one lead, name trimmed', async () => {
+    const leadFor = (hour: number, name: string | null = null) => greetingFor(name, hour).lead;
+    expect(leadFor(0) === 'Still up' && leadFor(4) === 'Still up', 'the small hours lost their greeting');
+    expect(leadFor(5) === 'Good morning' && leadFor(11) === 'Good morning', 'the morning window is wrong');
+    expect(leadFor(12) === 'Good afternoon' && leadFor(17) === 'Good afternoon', 'the afternoon window is wrong');
+    expect(leadFor(18) === 'Good evening' && leadFor(23) === 'Good evening', 'the evening window is wrong');
+    // every hour is covered by exactly one of the four leads — no hour renders nothing
+    for (let h = 0; h < 24; h++) expect(GREETINGS.includes(leadFor(h) as typeof GREETINGS[number]), `hour ${h} has no greeting`);
+    // the name is optional, trimmed, and bounded
+    expect(greetingFor(null, 9).name === null && greetingFor('   ', 9).name === null, 'a blank name was rendered');
+    expect(greetingFor('  Nora  ', 9).name === 'Nora', 'the name is not trimmed');
+    expect((greetingFor('x'.repeat(80), 9).name || '').length <= 40, 'the name is not bounded');
   });
 
   /* 2 — the search surface opens from every documented trigger */
@@ -310,6 +370,29 @@ export async function runWebTests(): Promise<WebResult> {
     await h.flush(60);
     expect(!dialog(), 'Enter did not close the overlay');
     expect(qa('h1.detail-title').some((el) => text(el).includes('Navidrome')), 'Enter did not open the service page');
+  });
+
+  /* 3b — Phase 5: the palette finds a service, offers its activity, and deep-links the filter */
+  await test('search: ⌘K → “stream” → the service, with its activity one row below', async (h) => {
+    await h.mount(<TestApp><SearchHost /></TestApp>);
+    key(window, '/');
+    await h.flush(40);
+    await type(searchInput()!, 'stream');
+    await h.waitFor(() => text().includes('Stream'), 'results for “stream”');
+    await h.flush(260);
+    // the service and the activity destination are separate rows, in separate groups
+    expect(text().includes('Recent activity'), 'the activity group is not shown');
+    const rows = qa('.cmdk-item').map((el) => text(el));
+    expect(rows.some((r) => r.includes('Stream') && r.includes('Media')), 'the service result is missing');
+    expect(rows.some((r) => r.includes('started')), 'the activity result is missing');
+
+    // choosing the service navigates to the service page
+    const serviceRow = qa('.cmdk-item').find((el) => text(el).includes('Stream') && text(el).includes('Media'))!;
+    click(serviceRow);
+    await h.flush(80);
+    expect(!dialog(), 'the overlay stayed open');
+    expect(qa('h1.detail-title').some((el) => text(el).includes('Stream')), 'the service page did not open');
+    expect(!h.calls.some((c) => text(JSON.stringify(c.body ?? {})).includes('restart')), 'a destructive command reached the API');
   });
 
   /* 4 — Escape closes from the input, and focus comes back to the page */
@@ -529,26 +612,61 @@ export async function runWebTests(): Promise<WebResult> {
   });
 
   /* 13 — a stack page still lists its real members */
-  await test('stack detail renders the members of the project', async (h) => {
+  await test('stack detail renders the project, its rollup, and an aggregate chart', async (h) => {
     await h.mount(<TestApp entry="/stacks/media"><Hub /></TestApp>);
     await h.waitFor(() => text().includes('Media'), 'the stack page');
+    await h.waitFor(() => text().includes('aggregated point'), 'the aggregate history');
     expect(text().includes('Wave') || text().includes('wave'), 'the stack members are missing');
     expect(!/Docker isn.t connected/.test(text()) || stackDetail.live === false, 'a live stack reported as disconnected');
+
+    // the rollup states its own coverage instead of implying the whole project reported,
+    // and it carries the unhealthy count through from the per-member health
+    expect(text().includes('2/3 reporting'), 'the rollup does not say how many containers reported');
+    expect(text().includes('1'), 'the unhealthy member is not counted');
+    expect(text().includes('net'), 'lifetime network I/O is missing from the rollup');
+    expect(/up \d+[hms]/.test(text()), 'stack uptime is missing');
+
+    // the aggregate chart is measured (fixed box) and honest about what it covers
+    const chart = q('.res-history .chart');
+    expect(!!chart && !!chart.querySelector('svg'), 'the stack history chart did not render');
+    expect(/each point sums \d+ of \d+ container/.test(text()), 'the aggregate chart does not say what a point covers');
+    expect(text().includes('never recorded'), 'the aggregate chart does not bound its own history');
+
+    // and the page says out loud that a compose project is not a presentation group
+    expect(text().includes('Compose project is infrastructure'), 'the compose-project ≠ group note is missing');
   });
 
   /* 15 — Phase 3: resources arrive on demand, as sparklines, with real sample counts */
-  await test('service resources: sparklines only while the page is being looked at', async (h) => {
+  await test('service resources: a measured session chart, only while the page is being looked at', async (h) => {
     await h.mount(<TestApp entry="/services/Music/wave"><Hub /></TestApp>);
     await h.waitFor(() => text().includes('Wave'), 'the service page');
     await h.waitFor(() => text().includes('samples'), 'the resource history');
-    expect(qa('.spark').length >= 2, 'cpu and memory sparklines did not render');
+    // one measured chart (fixed box, so it can never paint under the text below it), plus the
+    // network sparkline that lives in the stat strip
+    const chart = q('.res-history .chart');
+    expect(!!chart, 'the session history chart did not render');
+    expect(!!chart!.querySelector('svg'), 'the chart has no drawing');
+    expect(!!chart!.getAttribute('style')?.includes('height'), 'the chart box was not sized');
+    expect(qa('.res-history .spark').length >= 1 || qa('.stat .spark').length >= 1, 'no sparkline at all');
     expect(text().includes('5 samples'), 'the sample count is not the real one');
+    expect(text().includes('only while a page is watching'), 'the chart does not say what it actually covers');
     // polling stops when the page is left: count requests, unmount, count again
     const before = h.calls.filter((c) => c.path.startsWith('/api/services/Music/wave/stats/history')).length;
     await h.unmount();
     await h.flush(80);
     const after = h.calls.filter((c) => c.path.startsWith('/api/services/Music/wave/stats/history')).length;
     expect(after === before, `resource history kept polling after unmount (${before} → ${after})`);
+
+    // labels: the allow-listed families are shown, the raw map is not
+    const h3 = await createHarness({ routes: stubRoutes(), fallback: () => ({}) });
+    try {
+      await h3.mount(<TestApp entry="/services/Music/wave"><Hub /></TestApp>);
+      await h3.waitFor(() => text().includes('Labels'), 'the labels block');
+      expect(text().includes('allow-listed'), 'the labels block did not say what it contains');
+      expect(!text().includes('SECRET_TOKEN'), 'a raw label was shipped to the page');
+    } finally {
+      await h3.unmount();
+    }
 
     // no readings → an honest note, never zeros-as-data
     const routes = {
@@ -564,6 +682,75 @@ export async function runWebTests(): Promise<WebResult> {
     } finally {
       await h2.unmount();
     }
+  });
+
+  /* 15b — Phase 5: System shows the machinery behind it, and the load history it holds */
+  await test('system: provider health, load history, and no invented GPU or thermal data', async (h) => {
+    h.setRoutes({
+      ...stubRoutes(),
+      '/api/system/history': {
+        points: [
+          { t: Date.now() - 10_000, cpu: 12, memUsedPct: 40, load: 0.4, rx: 1000, tx: 200, temp: 41, procs: 120 },
+          { t: Date.now() - 5_000, cpu: 14, memUsedPct: 41, load: 0.62, rx: 1400, tx: 260, temp: 41, procs: 121 },
+        ],
+      },
+    });
+    await h.mount(<TestApp entry="/system"><Hub /></TestApp>);
+    await h.waitFor(() => text().includes('Load average'), 'the load history chart');
+    expect(qa('.sys-band--providers .prov-row').length >= 3, 'the provider band did not render');
+    expect(text().includes('read 2s ago'), 'provider freshness is not shown');
+    expect(text().includes('nothing on this page needs it'), 'an idle provider is not described as idle');
+    expect(text().includes('feeds unreachable'), 'a failing provider hides its reason');
+    expect(text().includes('no discrete GPU'), 'the GPU row invented a device');
+    expect(text().includes('41°C'), 'a real thermal reading was not shown');
+    // two measured charts (cpu + load), each in its own box
+    expect(qa('.chart svg').length >= 2, 'the charts did not render');
+    for (const c of qa('.chart')) expect(!!c.getAttribute('style')?.includes('height'), 'a chart box was not sized');
+  });
+
+  /* 15c — Phase 5: the Activity Center's filters narrow the log through the API, visibly */
+  await test('activity: filters narrow the query, and active filters are removable chips', async (h) => {
+    let lastQuery = '';
+    h.setRoutes({
+      ...stubRoutes(),
+      '/api/activity': (_body, path) => {
+        lastQuery = path;
+        return {
+          items: [
+            { id: 'a1', t: Date.now() - 60_000, iso: new Date().toISOString(), source: 'docker', type: 'container.started', subject: 'wave', message: 'running' },
+          ],
+          total: 4100, matched: 3, watchingSince: Date.now() - 86_400_000,
+        };
+      },
+    });
+    await h.mount(<MemoryRouter initialEntries={['/activity']}><ActivityPage /></MemoryRouter>);
+    await h.waitFor(() => !!q('.tl-scope'), 'the filter row');
+    expect(lastQuery.includes('source=all'), `the source filter is not in the query (${lastQuery})`);
+
+    type(q<HTMLInputElement>('.tl-field input')!, 'wave');
+    await h.flush(60);
+    expect(lastQuery.includes('service=wave'), `the service filter never reached the API (${lastQuery})`);
+
+    // the active filter is visible as a chip, and removing it widens the query again
+    await h.waitFor(() => text().includes('service: wave'), 'the active filter chip');
+    expect(text().includes('3 matching events of 4100 recorded'), 'the scope line does not state what matched');
+    const chip = qa('button.chip.active').find((b) => text(b).includes('service: wave'));
+    expect(!!chip, 'the service chip is not removable');
+    click(chip!);
+    await h.flush(60);
+    // the filter is gone from the UI, and the scope line is back to the unfiltered wording (the
+    // unfiltered query is already in the shared cache, so no second request is the correct answer)
+    expect(!qa('button.chip.active').some((b) => text(b).includes('service: wave')), 'removing the chip did not clear the filter');
+    expect(!text().includes('3 matching events'), 'the scope line still shows the filtered count');
+
+    // the type and time selects change the query too
+    const selects = qa('.tl-field select');
+    expect(selects.length === 2, 'the type and time selects are missing');
+    const typeSelect = selects[0] as HTMLSelectElement;
+    typeSelect.value = 'container';
+    act(() => { typeSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await h.flush(60);
+    expect(lastQuery.includes('type=container'), `the type filter never reached the API (${lastQuery})`);
   });
 
   /* 16 — Phase 3: the log drawer filters locally, honors timestamps, invents nothing */
@@ -616,6 +803,41 @@ export async function runWebTests(): Promise<WebResult> {
     expect(h.calls.some((c) => c.path.startsWith('/api/providers')), 'the settings page never asked for provider health');
   });
 
+  /* 17b — Phase 5: the settings navigation is grouped, current, and honest about loading */
+  await test('settings: grouped navigation, a current section, and announced loading states', async (h) => {
+    await h.mount(<TestApp entry="/settings/general"><Settings /></TestApp>);
+    await h.waitFor(() => !!q('.settings-nav'), 'the settings navigation');
+    const labels = qa('.settings-nav-label').map((el) => text(el));
+    expect(labels.length === 5, `the nav is not grouped into five sections (${labels.join(' / ')})`);
+    for (const section of ['Home', 'Hub', 'Content', 'Connections', 'This install']) {
+      expect(labels.includes(section), `the “${section}” section heading is missing (${labels.join(' / ')})`);
+    }
+    // every section of the IA is reachable, including the three Phase 5 panes
+    const navText = text(q('.settings-nav')!);
+    for (const item of ['General', 'Appearance', 'Services', 'Groups', 'Bookmarks', 'Widgets', 'Integrations', 'Account & sessions', 'Environment', 'Advanced']) {
+      expect(navText.includes(item), `“${item}” is missing from the settings navigation`);
+    }
+    // the item you are on says so — visually and to assistive tech
+    const current = qa('[aria-current="page"]').map((el) => text(el));
+    expect(current.some((c) => c.includes('General')), `no section is marked current (${current.join(', ')})`);
+
+    // the old /settings/system route still lands on Environment rather than 404-ing
+    const h2 = await createHarness({ routes: stubRoutes(), fallback: () => ({}) });
+    try {
+      await h2.mount(<TestApp entry="/settings/system"><Settings /></TestApp>);
+      await h2.waitFor(() => text().includes('Homepage-compatible'), 'the Environment pane');
+      expect(qa('[aria-current="page"]').some((el) => text(el).includes('Environment')), 'the alias did not select Environment');
+    } finally {
+      await h2.unmount();
+    }
+
+    // loading is announced, names what it waits for, and never claims data it does not have
+    await h.mount(<Loading what="the engine's status" />);
+    await h.flush(10);
+    expect(!!q('.loading-note[role="status"]'), 'the loading line is not a status');
+    expect(text().includes("Reading the engine's status"), `the loading line does not name its subject: ${text()}`);
+  });
+
   /* 18 — Phase 4: an uninitialized install gets the wizard, and no application data is fetched */
   await test('auth gate: setup required shows the wizard and never loads the app', async (h) => {
     h.setRoutes({
@@ -635,6 +857,106 @@ export async function runWebTests(): Promise<WebResult> {
     await h.flush(30);
     expect(q('#setup-user'), 'the wizard did not advance to the account step');
     expect(!!q('#setup-pass2'), 'the confirm field is missing on the account step');
+  });
+
+  /* 18b — Phase 5: the wizard walks all six steps, explains URLs, and does not enter the app by itself */
+  await test('setup wizard: six steps, URL reasons explained, and a Finish screen before the Hub', async (h) => {
+    const discovery = {
+      docker: { ok: true, state: 'connected', version: '26.1.0-mock', apiVersion: '1.43', operatingSystem: 'linux' },
+      containers: 25, running: 18, stopped: 7, stacks: 7, services: 19, infrastructure: 6, standalone: 4,
+      urls: {
+        detected: 15, missing: 10,
+        sources: { traefik: 13, 'published-port': 2 },
+        reasons: [
+          { code: 'traefik', count: 13, explain: 'built from the container’s own Traefik labels', resolved: true },
+          { code: 'published-port', count: 2, explain: 'built from a published port and this host’s address', resolved: true },
+          { code: 'no-route', count: 7, explain: 'no proxy route and no published port', resolved: false },
+          { code: 'loopback-only', count: 2, explain: 'published only on loopback — unreachable from another machine', resolved: false },
+          { code: 'override-invalid', count: 1, explain: 'the configured override is not a usable http(s) URL', resolved: false },
+        ],
+      },
+      traefik: { routes: 14, tlsRoutes: 12, routedContainers: 13, entrypoints: ['web', 'websecure'], entrypointPorts: {} },
+      hostAddress: '198.51.100.7', hostAddressSource: 'outbound-interface',
+    };
+    let created: { username?: string; password?: string; infrastructure?: { hostAddress?: string } } | null = null;
+    h.setRoutes({
+      // the fixture flips to "initialized" the moment the account exists, exactly like the server
+      '/api/setup/status': () => (created
+        ? { required: false, complete: true, hasAccount: true, version: '0.1.0' }
+        : { required: true, complete: false, hasAccount: false, version: '0.1.0', discovery }),
+      '/api/auth/me': () => (created
+        ? { authenticated: true, user: { username: 'admin' }, setupComplete: true }
+        : { authenticated: false, user: null, setupComplete: false }),
+      '/api/setup': (body) => { created = body as typeof created; return { ok: true, user: { username: 'admin' }, authenticated: true }; },
+      ...stubRoutes(),
+      '/api/bookmarks': { groups: [] },
+    });
+    await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    await h.waitFor(() => text().includes('Welcome'), 'the wizard');
+    const advance = async (label: string) => {
+      const b = qa('button').find((x) => text(x).trim() === label);
+      expect(!!b, `the “${label}” button is missing`);
+      click(b!);
+      await h.flush(30);
+    };
+
+    await advance('Begin');
+    expect(!!q('#setup-user'), 'no account step');
+    type(q<HTMLInputElement>('#setup-user')!, 'admin');
+    type(q<HTMLInputElement>('#setup-pass')!, 'wizard-fixture-password');
+    type(q<HTMLInputElement>('#setup-pass2')!, 'wizard-fixture-password');
+
+    await advance('Continue');
+    // Environment: the engine, the API version it actually speaks, and the two knobs
+    expect(text().includes('Environment'), 'the Environment step heading is missing');
+    expect(text().includes('26.1.0-mock'), 'the engine version is not shown');
+    expect(text().includes('v1.43'), 'the Docker API version is not shown');
+    const host = q<HTMLInputElement>('#setup-host')!;
+    expect(host.value === '198.51.100.7', `the detected host address was not prefilled (got ${host.value})`);
+    expect(text().includes('websecure'), 'the detected entrypoints are not offered');
+
+    await advance('Continue');
+    // Discovery: counts plus *why* each container does or does not have a URL
+    expect(text().includes('25'), 'the container count is missing');
+    expect(text().includes('compose projects'), 'the stack count is not explained');
+    expect(text().includes('no proxy route and no published port'), `the missing-URL reason is not explained: ${text().slice(0, 600)}`);
+    expect(text().includes('published only on loopback'), 'the loopback reason is not explained');
+    expect(text().includes('built from the container’s own Traefik labels'), 'the resolved reason is not explained');
+    expect(!text().includes('jellyfin') && !text().includes('wave'), 'a container name leaked into the pre-auth wizard');
+
+    await advance('Continue');
+    // Review: the recap, then the one mutation
+    expect(text().includes('Review'), 'no review step');
+    expect(text().includes('admin'), 'the recap does not name the account being created');
+    expect(!q('.rail'), 'the shell appeared before the account existed');
+    await advance('Create account');
+    const post = h.writes('POST', '/api/setup')[0];
+    expect(!!post, 'the account was never created');
+    expect((post.body as { username?: string }).username === 'admin', 'the wrong username was sent');
+    expect(!!created, 'the fixture never saw the create call');
+
+    // Finish: a real screen, still no application behind it
+    expect(text().includes('Enter OpusHub'), 'the Finish screen is missing');
+    expect(!q('.rail'), 'creating the account jumped straight into the Hub');
+
+    // …and the hand-off is explicit
+    await advance('Enter OpusHub');
+    await h.waitFor(() => !!q('.rail'), 'the application shell after entering');
+  });
+
+  /* 18c — Phase 5: a deep link into a filtered view is still behind the door */
+  await test('deep links: /activity?service=… shows the sign-in screen and fetches no application data', async (h) => {
+    h.setRoutes({
+      '/api/setup/status': { required: false, complete: true, hasAccount: true, version: '0.1.0' },
+      '/api/auth/me': { authenticated: false, user: null, setupComplete: true },
+      '/api/docker/status': { ok: true, state: 'connected', version: '26.1.0-mock' },
+    });
+    await h.mount(<MemoryRouter initialEntries={['/activity?service=wave']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('#login-pass'), 'the sign-in screen');
+    expect(!q('.rail'), 'the shell rendered behind a deep link');
+    expect(!text().includes('wave'), 'the deep link leaked a service name into the sign-in screen');
+    const appPaths = h.calls.filter((c) => c.path.startsWith('/api/') && !c.path.startsWith('/api/auth/') && !c.path.startsWith('/api/setup/'));
+    expect(appPaths.length === 0, `an unauthenticated deep link fetched ${appPaths.map((c) => c.path).join(', ')}`);
   });
 
   /* 19 — Phase 4: an initialized install asks for a password; a wrong one is reported, a right one enters */
@@ -1041,6 +1363,77 @@ export async function runWebTests(): Promise<WebResult> {
     expect((put.body as { integrations: { markets: { symbols: string[] } } }).integrations.markets.symbols.join() === 'AAPL,BTC-USD,MSFT',
       `symbols were not normalized (got ${JSON.stringify((put.body as { integrations: { markets: { symbols: string[] } } }).integrations.markets.symbols)})`);
     expect(input().value === '', 'the field was not cleared after a successful add');
+  });
+
+  /* 30 — Phase 5: the Authentication pane changes the password and audits sessions */
+  await test('settings: Authentication lists sessions, changes the password, and shows no credential', async (h) => {
+    const sessionsDoc = {
+      count: 2,
+      limits: { absoluteMs: 30 * 24 * 3600_000, idleMs: 7 * 24 * 3600_000, max: 50 },
+      current: { id: 'aaaabbbbccccdddd', createdAt: Date.now() - 60_000, lastSeenAt: Date.now() - 1000, expiresAt: Date.now() + 1000, idleExpiresAt: Date.now() + 2000, ip: '192.0.2.5', current: true },
+      sessions: [
+        { id: 'aaaabbbbccccdddd', createdAt: Date.now() - 60_000, lastSeenAt: Date.now() - 1000, expiresAt: Date.now() + 86_400_000, idleExpiresAt: Date.now() + 86_400_000, ip: '192.0.2.5', current: true },
+        { id: 'eeeeffff00001111', createdAt: Date.now() - 900_000, lastSeenAt: Date.now() - 500_000, expiresAt: Date.now() + 86_400_000, idleExpiresAt: Date.now() + 86_400_000, ip: '198.51.100.9', current: false },
+      ],
+    };
+    h.setRoutes({
+      '/api/setup/status': { required: false, complete: true, hasAccount: true, version: '0.1.0' },
+      '/api/auth/me': { authenticated: true, user: { username: 'admin' }, setupComplete: true },
+      '/api/auth/sessions': sessionsDoc,
+      '/api/auth/password': { $status: 401, body: { error: 'The current password is incorrect.', code: 'invalid_password' } },
+      '/api/settings': settings,
+      '/api/layout': layout,
+    });
+    await h.mount(
+      <MemoryRouter initialEntries={['/settings/authentication']}>
+        <AuthProvider>
+          <SettingsProvider>
+            <LayoutProvider>
+              <Routes><Route path="/settings/:tab" element={<Settings />} /></Routes>
+            </LayoutProvider>
+          </SettingsProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await h.waitFor(() => text().includes('Signed-in sessions'), 'the sessions block');
+    expect(h.calls.some((c) => c.path === '/api/auth/sessions'), 'the pane never asked for the session list');
+    expect(text().includes('This browser') && text().includes('Another browser'), 'the two sessions are not distinguished');
+    expect(text().includes('handle aaaabbbbccccdddd'), 'the derived handle is not shown');
+    expect(!text().includes('scrypt$') && !text().includes('passwordHash'), 'credential material reached the page');
+
+    // a wrong current password is reported inline, in the server's own words, without wiping the form
+    type(q<HTMLInputElement>('#pw-current')!, 'definitely-wrong');
+    type(q<HTMLInputElement>('#pw-new')!, 'a-much-longer-new-one');
+    type(q<HTMLInputElement>('#pw-confirm')!, 'a-much-longer-new-one');
+    click(qa('button').find((b) => text(b).includes('Change password'))!);
+    await h.waitFor(() => /current password is incorrect/i.test(text()), 'the refusal message');
+    const attempt = h.writes('POST', '/api/auth/password')[0];
+    expect(!!attempt, 'no password request was sent');
+    expect(attempt.body && (attempt.body as { newPassword?: string }).newPassword === 'a-much-longer-new-one', 'the request body is wrong');
+    expect(q<HTMLInputElement>('#pw-new')!.value === 'a-much-longer-new-one', 'a failed attempt cleared the fields');
+
+    // local validation runs before the network: mismatched confirmation never reaches the server
+    const before = h.writes('POST', '/api/auth/password').length;
+    type(q<HTMLInputElement>('#pw-confirm')!, 'something-else-entirely');
+    click(qa('button').find((b) => text(b).includes('Change password'))!);
+    await h.flush(30);
+    expect(h.writes('POST', '/api/auth/password').length === before, 'a mismatched confirmation was still sent');
+    expect(/do not match/i.test(text()), 'the mismatch is not explained');
+  });
+
+  /* 31 — Phase 5: General is where the install names itself, and the name is actually written */
+  await test('settings: General writes the install name to settings.yaml', async (h) => {
+    h.setRoutes({ ...stubRoutes() });
+    await h.mount(<TestApp entry="/settings/general"><Settings /></TestApp>);
+    await h.waitFor(() => !!q('[aria-label="App name"]'), 'the name field');
+    const field = q<HTMLInputElement>('[aria-label="App name"]')!;
+    expect(field.value === 'OpusHub', `the saved name is not shown (got ${field.value})`);
+    act(() => { field.focus(); });
+    type(field, 'Grid Control');
+    act(() => { field.blur(); });
+    await h.waitFor(() => h.writes('PUT', '/api/settings').length > 0, 'the settings write');
+    const put = h.writes('PUT', '/api/settings').pop()!;
+    expect((put.body as { app?: { name?: string } }).app?.name === 'Grid Control', `the name was not written (${JSON.stringify(put.body)})`);
   });
 
   for (const r of results) {

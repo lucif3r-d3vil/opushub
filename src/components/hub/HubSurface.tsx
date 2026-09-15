@@ -88,7 +88,7 @@ function HubWelcome() {
       <div className="hub-welcome-actions">
         <Link className="btn" to="/settings/templates">Choose a template</Link>
         <Link className="btn" to="/settings/widgets">Add widgets</Link>
-        <Link className="btn btn-quiet" to="/settings/system">Discovery status</Link>
+        <Link className="btn btn-quiet" to="/settings/environment">Discovery status</Link>
       </div>
     </section>
   );

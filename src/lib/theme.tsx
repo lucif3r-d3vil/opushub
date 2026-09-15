@@ -42,6 +42,10 @@ export function applyTheme(s: SettingsDoc | null, media: MediaQueryList | null) 
   el.setAttribute('data-transparency', s?.appearance?.transparency ? 'on' : 'off');
   el.style.setProperty('--font-scale', String(s?.appearance?.fontScale ?? 1));
   el.style.setProperty('--page-bg', 'transparent');
+  // The configured name is what the tab says — one place, every page, so a rename is visible
+  // everywhere at once instead of only on the Hub.
+  const appName = String(s?.app?.name || '').trim() || 'OpusHub';
+  if (typeof document !== 'undefined' && document.title !== appName) document.title = appName;
   const themeMeta = document.querySelector('meta[name="theme-color"]');
   themeMeta?.setAttribute('content', resolved === 'dark' ? '#0b0c0e' : '#f7f7f5');
   try { localStorage.setItem('opushub.theme', want === 'system' ? '' : resolved); } catch { /* private mode */ }

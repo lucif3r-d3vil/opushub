@@ -21,7 +21,7 @@ export function useDockerStatus(refreshMs = 60_000) {
 }
 
 /** The honest "Docker is off" surface: a sentence, a fix, and the raw reason tucked away. */
-export function DockerOffNote({ reason, extra, fixHref = '/settings/system' }: { reason?: string | null; extra?: ReactNode; fixHref?: string }) {
+export function DockerOffNote({ reason, extra, fixHref = '/settings/environment' }: { reason?: string | null; extra?: ReactNode; fixHref?: string }) {
   return (
     <div className="unavailable" role="status">
       <span className="why">Docker isn't connected.</span>

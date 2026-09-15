@@ -4,6 +4,7 @@
 // something that is. (Bookmarks and pages are OpusHub's own surfaces, not infrastructure.)
 // A lightweight scoring pass — the client adds its own instant fuzzy layer on top.
 import { readBookmarks, getInventory } from './model.js';
+import { readEvents } from './activity.js';
 
 const PAGES = [
   { title: 'Hub', href: '/', hint: 'Your digital home', kind: 'page', keywords: ['home', 'start', 'dashboard'] },
@@ -26,7 +27,9 @@ const SETTINGS = [
   { title: 'Groups', href: '/settings/groups', hint: 'Create, rename, reorder and hide groups', keywords: ['grouping', 'categories', 'folders'] },
   { title: 'Bookmarks', href: '/settings/bookmarks', hint: 'Flat links, no status', keywords: ['links', 'shortcuts'] },
   { title: 'Integrations', href: '/settings/integrations', hint: 'News feeds, weather location, watchlist', keywords: ['rss', 'feed', 'weather', 'stocks', 'markets', 'symbols'] },
-  { title: 'System & discovery', href: '/settings/system', hint: 'Engine status, URL sources, unmatched overlays', keywords: ['docker', 'engine', 'socket', 'discovery', 'unmatched', 'env', 'paths'] },
+  { title: 'General', href: '/settings/general', hint: 'Name, greeting, this install', keywords: ['identity', 'title', 'name', 'greeting', 'app', 'about'] },
+  { title: 'Environment', href: '/settings/environment', hint: 'Engine status, URL sources, Homepage-compatible files', keywords: ['docker', 'engine', 'socket', 'discovery', 'unmatched', 'env', 'paths', 'homepage', 'overlay'] },
+  { title: 'Account & sessions', href: '/settings/authentication', hint: 'Password, signed-in browsers, revocation', keywords: ['password', 'change password', 'sessions', 'sign out', 'security', 'login', 'revoke'] },
   { title: 'Advanced', href: '/settings/advanced', hint: 'Custom CSS & JS, refresh intervals, launch logging', keywords: ['custom css', 'custom js', 'theme.css', 'app.js', 'advanced', 'refresh', 'poll', 'launch log'] },
 ];
 
@@ -65,7 +68,10 @@ export function scoreMatch(needle, ...fields) {
 const score = scoreMatch;
 
 /** Category weights — services and stacks rank highest: they are the point of the index. */
-const KIND_WEIGHT = { service: 1, stack: 1, page: 0.92, setting: 0.88, bookmark: 0.85, news: 0.75 };
+const KIND_WEIGHT = { service: 1, stack: 1, page: 0.92, setting: 0.88, activity: 0.8, bookmark: 0.85, news: 0.75 };
+
+/** Docker subjects whose events are worth offering as destinations — the same names the pages use. */
+const ACTIVITY_WINDOW_MS = 7 * 24 * 3600_000;
 
 export async function searchAll(q, { newsItems = [] } = {}) {
   const needle = String(q || '').toLowerCase().trim();
@@ -99,6 +105,41 @@ export async function searchAll(q, { newsItems = [] } = {}) {
     }
   }
 
+  /**
+   * Recent activity, as *destinations*: "wave — container started · 2h ago" opens the Activity
+   * Center already filtered to that service. Only events with a subject qualify (an event without
+   * one cannot be filtered to), only the last week, and each subject appears once — the palette is
+   * for finding things, not for re-reading the log.
+   */
+  try {
+    const { items } = readEvents({ limit: 200, since: Date.now() - ACTIVITY_WINDOW_MS });
+    const seen = new Set();
+    for (const e of items) {
+      if (e.grouped) {
+        for (const sub of (e.subjects || []).slice(0, 3)) {
+          if (!sub || seen.has(sub)) continue;
+          seen.add(sub);
+          add({
+            title: sub,
+            subtitle: `Activity · ${e.count} events · ${describeEventType(e.type)}`,
+            href: `/activity?service=${encodeURIComponent(sub)}`,
+            kind: 'activity',
+          }, score(needle, sub, e.type, describeEventType(e.type)), KIND_WEIGHT.activity);
+        }
+        continue;
+      }
+      const subject = e.subject;
+      if (!subject || seen.has(subject)) continue;
+      seen.add(subject);
+      add({
+        title: subject,
+        subtitle: `Activity · ${describeEventType(e.type)}${e.message ? ` · ${String(e.message).slice(0, 60)}` : ''}`,
+        href: `/activity?service=${encodeURIComponent(subject)}`,
+        kind: 'activity',
+      }, score(needle, subject, e.type, describeEventType(e.type), e.message), KIND_WEIGHT.activity);
+    }
+  } catch { /* the log is optional — search still answers without it */ }
+
   try {
     const { flat } = readBookmarks();
     for (const b of flat) {
@@ -111,4 +152,30 @@ export async function searchAll(q, { newsItems = [] } = {}) {
   }
 
   return out.sort((a, b) => b._s - a._s).slice(0, 24).map(({ _s, ...item }) => item);
+}
+
+/** A type code said in words, for the palette's subtitle. Unknown codes pass through unchanged. */
+function describeEventType(type) {
+  const map = {
+    'container.started': 'started',
+    'container.exited': 'stopped',
+    'container.health': 'health changed',
+    'container.state': 'state changed',
+    'stack.appeared': 'stack appeared',
+    'stack.removed': 'stack removed',
+    'provider.unavailable': 'provider down',
+    'provider.recovered': 'provider recovered',
+    'settings.updated': 'settings changed',
+    'layout.updated': 'layout changed',
+    'services.updated': 'services changed',
+    'bookmarks.updated': 'bookmarks changed',
+    'custom.updated': 'custom assets changed',
+    'service.launch': 'opened',
+    'app.boot': 'OpusHub started',
+    'auth.login': 'signed in',
+    'auth.logout': 'signed out',
+    'auth.password_changed': 'password changed',
+    'auth.sessions_revoked': 'sessions revoked',
+  };
+  return map[type] || String(type || 'event');
 }
