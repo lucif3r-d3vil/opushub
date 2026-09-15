@@ -11,7 +11,7 @@ export const STATUS_WORDS: Record<string, string> = {
   operational: 'Operational', degraded: 'Degraded', attention: 'Needs attention', unlinked: 'Unlinked',
   stopped: 'Stopped', unknown: 'Unknown',
   ok: 'Available', error: 'Error', partial: 'Partial', unconfigured: 'Not configured', idle: 'Idle',
-  available: 'Available',
+  available: 'Available', healthy: 'Healthy', unreachable: 'Unreachable', starting: 'Starting',
 };
 
 export function StatusDot({ state, title }: { state: string; title?: string }) {
@@ -66,6 +66,20 @@ export function Loading({ what = 'data', note }: { what?: string; note?: string 
       Reading {what}…
       {note && <span className="loading-note-sub"> {note}</span>}
     </p>
+  );
+}
+
+/**
+ * Degraded-mode banner: Docker is gone, but something was seen before it left. Counts are
+ * labelled as last-known with their timestamp — never presented as live — plus a way back.
+ */
+export function LastKnownNote({ at, lines, onRetry }: { at: number | null; lines: string[]; onRetry: () => void }) {
+  return (
+    <div className="unavailable" role="status" style={{ marginBottom: 'var(--sp-6)' }}>
+      <span className="why">Last known state{at ? ` — ${relTime(at)}` : ''}.</span>
+      {lines.map((l, i) => <span key={i} className="reason">{l}</span>)}
+      <button className="btn btn-sm" onClick={onRetry} style={{ alignSelf: 'flex-start' }}>Retry</button>
+    </div>
   );
 }
 

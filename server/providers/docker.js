@@ -473,6 +473,70 @@ export const _internals = {
 };
 
 // ---------------------------------------------------------------------------
+// Infrastructure inventory — networks, volumes, images (all GET-only projections)
+// ---------------------------------------------------------------------------
+
+/**
+ * Docker networks, projected safe: identity + topology signals only. No IPAM configs with
+ * gateway/subnet internals beyond names — the UI needs membership, not addressing plans.
+ * Container attachments come from the inspect-side `Containers` map when the daemon includes it.
+ */
+export async function listNetworks() {
+  const list = await requestJson('/networks');
+  return (Array.isArray(list) ? list : []).slice(0, 200).map((n) => {
+    const attached = n.Containers && typeof n.Containers === 'object' ? Object.values(n.Containers) : [];
+    return {
+      id: typeof n.Id === 'string' ? n.Id.slice(0, 12) : null,
+      name: n.Name ?? null,
+      driver: n.Driver ?? null,
+      scope: n.Scope ?? null,
+      internal: n.Internal === true,
+      attachable: n.Attachable === true,
+      ingress: n.Ingress === true,
+      created: n.Created ?? null,
+      containerCount: attached.length,
+      // Names only — MAC/IPv4/IPv6 address details stay server-side (topology needs membership).
+      containers: attached.slice(0, 100).map((c) => ({ name: c.Name ?? null })).filter((c) => c.name),
+    };
+  });
+}
+
+/**
+ * Docker volumes, projected safe: names + usage only. Mountpoints are host paths and are
+ * deliberately NOT projected (see the read-only boundary: no arbitrary filesystem locations).
+ */
+export async function listVolumes() {
+  const doc = await requestJson('/volumes');
+  const vols = Array.isArray(doc?.Volumes) ? doc.Volumes : [];
+  return vols.slice(0, 500).map((v) => ({
+    name: v.Name ?? null,
+    driver: v.Driver ?? null,
+    scope: v.Scope ?? null,
+    createdAt: v.CreatedAt ?? null,
+    // Usage counts come from the `UsageData` the daemon reports (RefCount, Size).
+    refCount: Number.isFinite(v.UsageData?.RefCount) ? v.UsageData.RefCount : null,
+    size: Number.isFinite(v.UsageData?.Size) && v.UsageData.Size >= 0 ? v.UsageData.Size : null,
+  }));
+}
+
+/**
+ * Docker images, projected safe: tags + size + usage. Config/labels are never fetched here
+ * (people put tokens in both); per-image detail stays behind `imageInfo()` which also omits them.
+ */
+export async function listImages() {
+  const list = await requestJson('/images/json');
+  return (Array.isArray(list) ? list : []).slice(0, 400).map((i) => ({
+    id: typeof i.Id === 'string' && i.Id.startsWith('sha256:') ? i.Id.slice(7, 19) : null,
+    tags: Array.isArray(i.RepoTags) ? i.RepoTags.filter((t) => t !== '<none>:<none>').slice(0, 8) : [],
+    digests: Array.isArray(i.RepoDigests) ? i.RepoDigests.slice(0, 4) : [],
+    created: Number.isFinite(i.Created) ? i.Created : null,
+    size: Number.isFinite(i.Size) ? i.Size : null,
+    virtualSize: Number.isFinite(i.VirtualSize) ? i.VirtualSize : null,
+    containers: Number.isFinite(i.Containers) ? i.Containers : null,
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Stack discovery — compose projects vs standalone containers
 // ---------------------------------------------------------------------------
 

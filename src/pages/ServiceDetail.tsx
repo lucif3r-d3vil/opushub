@@ -8,7 +8,7 @@ import { Link, useParams } from 'react-router-dom';
 import { api, usePolled } from '../lib/api';
 import { bytes, pct, relTime, uptime } from '../lib/format';
 import { useSettings } from '../lib/theme';
-import type { ActivityEvent, ContainerStats, ImageInfo, Service, ServiceHistoryDoc, Stack, StatsSample, SystemSnapshot } from '../lib/types';
+import type { ActivityEvent, ContainerStats, ImageInfo, Service, ServiceHealthDoc, ServiceHistoryDoc, Stack, StatsSample, SystemSnapshot } from '../lib/types';
 import { Icon } from '../components/Icon';
 import { AreaChart, MeterBar, Sparkline } from '../components/Charts';
 import { Freshness, Loading, OpenLink, ProviderNote, SectionHead, StatusLine } from '../components/ui';
@@ -76,6 +76,7 @@ export default function ServiceDetail() {
   const { data, error, loading, refresh, fetchedAt } = usePolled<Detail>(basePath, (settings?.behavior?.refresh?.system ?? 5) * 2000);
   // stats + history poll ONLY while this page is mounted — unmounting stops both (§29)
   const statsHist = usePolled<{ samples: StatsSample[]; watchingSince: number | null }>(data?.container ? `${basePath}/stats/history` : null, 5000);
+  const health = usePolled<ServiceHealthDoc>(data?.service ? `${basePath}/health` : null, 60_000);
   const history = usePolled<ServiceHistoryDoc>(data?.service ? `${basePath}/history?limit=12` : null, 60_000);
   const activity = usePolled<{ items: ActivityEvent[] }>(`/api/activity?limit=40`, 60_000);
   const sys = usePolled<SystemSnapshot>('/api/system', 10_000);
@@ -176,6 +177,13 @@ export default function ServiceDetail() {
                       </div>
                     </div>
                   </div>
+                  {health.data && (
+                    <HealthStrip
+                      doc={health.data}
+                      uptime={running && startedMs ? uptime((now - startedMs) / 1000) : null}
+                      onRefresh={health.refresh}
+                    />
+                  )}
                   <dl className="kv" style={{ marginTop: 'var(--sp-4)' }}>
                     <Pair k="Started" v={startedMs ? new Date(startedMs).toLocaleString() : 'Not available'} />
                     <Pair k="Created" v={createdMs ? new Date(createdMs).toLocaleString() : 'Not available'} />
@@ -396,6 +404,41 @@ export default function ServiceDetail() {
       </div>
       {showLogs && c && <LogsDrawer container={c.name} onClose={() => setShowLogs(false)} />}
     </>
+  );
+}
+
+/* ---------------- unified health: every evidence source, one verdict ---------------- */
+
+/**
+ * The unified verdict (§4): container state + healthcheck + HTTP probe, each labelled.
+ * \"Healthy\" is only ever shown with the evidence that earned it; anything less says what is
+ * missing instead of rounding up.
+ */
+function HealthStrip({ doc, uptime: up, onRefresh }: { doc: ServiceHealthDoc; uptime: string | null; onRefresh: () => void }) {
+  const h = doc.health;
+  const p = doc.probe;
+  const http = !h.url
+    ? 'No URL'
+    : !p.checked
+      ? 'Not checked'
+      : p.reachable
+        ? `HTTP ${p.statusCode}${p.latencyMs != null ? ` · ${p.latencyMs} ms` : ''}`
+        : `Unreachable (${p.errorType || 'no response'})`;
+  return (
+    <div className="health-strip" role="status" aria-label={`Service health: ${h.state}. ${h.detail}`}>
+      <div className="health-head">
+        <StatusLine state={h.state} />
+        <span className="health-detail">{h.detail}</span>
+        <button className="btn btn-quiet btn-sm" onClick={onRefresh} style={{ marginLeft: 'auto' }}>Re-check</button>
+      </div>
+      <dl className="kv" style={{ marginTop: 'var(--sp-3)' }}>
+        <Pair k="Container" v={<span className="mono-meta">{h.evidence.container}</span>} />
+        <Pair k="Health" v={h.evidence.healthcheck === 'none' ? 'No healthcheck' : h.evidence.healthcheck} />
+        <Pair k="HTTP" v={http} />
+        {up && <Pair k="Uptime" v={up} />}
+        {h.stack && <Pair k="Stack" v={h.stack} />}
+      </dl>
+    </div>
   );
 }
 

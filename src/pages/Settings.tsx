@@ -5,7 +5,7 @@ import { relTime } from '../lib/format';
 import { useLayout, useSettings, type DeepPartial } from '../lib/theme';
 import { useAuth } from '../lib/auth';
 import type {
-  CustomDoc, DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
+  AlertsDoc, CustomDoc, DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
   TemplatesDoc, WidgetCatalogueEntry, WidgetDoc, WidgetInstance, WidgetZone,
 } from '../lib/types';
 import { Icon } from '../components/Icon';
@@ -52,6 +52,7 @@ const TABS = [
   { id: 'groups', label: 'Groups', section: 'Content' },
   { id: 'bookmarks', label: 'Bookmarks', section: 'Content' },
   { id: 'integrations', label: 'Integrations', section: 'Connections' },
+  { id: 'notifications', label: 'Notifications', section: 'Connections' },
   { id: 'import', label: 'Import & migration', section: 'Configuration' },
   { id: 'history', label: 'History', section: 'Configuration' },
   { id: 'export', label: 'Export', section: 'Configuration' },
@@ -121,6 +122,7 @@ export default function SettingsPage() {
           {tab === 'groups' && <GroupsTab />}
           {tab === 'bookmarks' && <BookmarksTab />}
           {tab === 'integrations' && <IntegrationsTab />}
+          {tab === 'notifications' && <NotificationsTab />}
           {tab === 'authentication' && <AuthenticationTab />}
           {tab === 'environment' && <EnvironmentTab />}
           {tab === 'advanced' && <AdvancedTab />}
@@ -328,6 +330,18 @@ function EnvironmentTab() {
     urlDiscovery?: { sources?: Record<string, number>; withUrl?: number; withoutUrl?: number; hostAddress?: string | null; hostAddressSource?: string | null };
   }>('/api/discovery', 30_000);
   const { data: bookmarks } = usePolled<{ groups?: { name: string; bookmarks: unknown[] }[] }>('/api/bookmarks', 0);
+  const { data: updates, refresh: refreshUpdates } = usePolled<{
+    check?: { state: string; current?: string; latest?: string | null; url?: string; checkedAt?: number; reason?: string } | null;
+    repo?: string;
+    install?: { version?: string; gitSha?: string | null; buildTime?: string | null; imageTag?: string | null; installationMode?: string };
+  }>('/api/updates', 0);
+  const [checking, setChecking] = useState(false);
+  const checkNow = async () => {
+    setChecking(true);
+    try { await post('/api/updates/check', {}); } catch { /* the refresh below shows whatever the server knows */ }
+    setChecking(false);
+    refreshUpdates();
+  };
   const overlays = discovery?.overlays;
   const inventory = discovery?.inventory;
   const urls = discovery?.urlDiscovery;
@@ -349,6 +363,42 @@ function EnvironmentTab() {
           </span>
         </Row>
         <Row label="Runtime" tight><span className="mono-meta">OpusHub {health?.version || '0.1'} · node {health?.node || '…'} · {health?.platform || ''}</span></Row>
+      </Block>
+
+      <Block
+        title="Updates"
+        aside={updates?.check?.checkedAt ? <span className="stale-note">checked {new Date(updates.check.checkedAt).toLocaleString()}</span> : <span className="stale-note">never checked</span>}
+      >
+        <p className="stale-note" style={{ marginBottom: 'var(--sp-4)' }}>
+          OpusHub never checks on its own — no boot ping, no timer, no page-load call. The button below is the only
+          thing that contacts github.com, and the answer is cached for six hours.
+        </p>
+        <Row
+          label="This install"
+          desc={updates?.install?.installationMode === 'docker' ? 'Running as a container image.' : 'Running from a source checkout.'}
+          tight
+        >
+          <span className="mono-meta">
+            {updates?.install ? `${updates.install.version || '?'}${updates.install.gitSha ? ` · ${updates.install.gitSha}` : ''}` : '…'}
+          </span>
+        </Row>
+        <Row label="Newest release" tight>
+          <span className="mono-meta">
+            {!updates ? '…' : !updates.check ? 'unknown — check once to find out'
+              : updates.check.state === 'current' ? `${updates.check.latest || updates.check.current} · you are up to date`
+              : updates.check.state === 'available' ? `${updates.check.latest} available`
+              : `unknown — ${updates.check.reason || 'the check did not answer'}`}
+          </span>
+        </Row>
+        {updates?.check?.state === 'available' && (
+          <Row label="" tight>
+            <a className="btn btn-sm" href={updates.check.url || updates.repo} target="_blank" rel="noreferrer">Read the release notes →</a>
+          </Row>
+        )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 'var(--sp-3)' }}>
+          <button className="btn btn-sm" disabled={checking} onClick={checkNow}>{checking ? 'Checking…' : 'Check for updates'}</button>
+          {updates?.repo && <a className="btn btn-quiet btn-sm" href={updates.repo} target="_blank" rel="noreferrer">Repository →</a>}
+        </div>
       </Block>
 
       <Block title="Host address for published ports" aside={<span className="stale-note">used by the URL resolver</span>}>
@@ -1597,6 +1647,42 @@ function normalizeSymbolInput(raw: string): { symbol: string | null; reason: str
   if (!symbol) return { symbol: null, reason: 'empty' };
   if (!SYMBOL_RE.test(symbol)) return { symbol: null, reason: 'symbols are letters/digits with . ^ - = only (e.g. AAPL, ^GSPC, BTC-USD)' };
   return { symbol, reason: null };
+}
+
+function NotificationsTab() {
+  const { data } = usePolled<AlertsDoc>('/api/alerts', 30_000);
+  const channels = data?.channels || [];
+  return (
+    <>
+      <p className="lede">
+        When something needs your attention — an unhealthy service, a degraded stack, a full disk — OpusHub raises an
+        alert on the <Link className="section-link" to="/activity">Activity page</Link>. Delivery channels will forward
+        those alerts elsewhere; the registry below is the plan, and every entry says plainly what exists today.
+      </p>
+      <Block title="Channels" aside={data ? <span className="stale-note">{data.alerts.length} active alert{data.alerts.length === 1 ? '' : 's'}</span> : undefined}>
+        {!data && <Loading what="notification channels" />}
+        <div className="editor-list">
+          {channels.map((c) => (
+            <div className="editor-item" key={c.id}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <b style={{ fontWeight: 560 }}>{c.label}</b>
+                <div className="stale-note">{c.blurb}</div>
+              </span>
+              <span className="chip">{c.configured ? 'Configured' : c.status === 'ready' ? 'Not configured' : 'Coming later'}</span>
+            </div>
+          ))}
+        </div>
+      </Block>
+      <Block title="How alerting works">
+        <Row label="Evaluation" desc="Alert conditions run over data OpusHub already holds — no extra polling of your engine, no external calls.">
+          <span className="stale-note">on each Activity visit</span>
+        </Row>
+        <Row label="Record" desc="Every firing and every recovery is written to the activity log, so the history survives restarts.">
+          <Link className="section-link" to="/activity">open the log →</Link>
+        </Row>
+      </Block>
+    </>
+  );
 }
 
 function IntegrationsTab() {

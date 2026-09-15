@@ -778,6 +778,11 @@ export { describeLayoutPatch };
 let dockerCache = { at: 0, containers: null, reason: null, engine: null };
 let invCache = { at: 0, value: null };
 let lastDiscoveryAt = null;
+// Last-known-good summaries (Phase 7 degraded mode). Updated only on live passes, so a dead
+// engine can never overwrite them with emptiness. Served labelled as `lastKnown`, never as live.
+let lastGoodSummary = null;
+let lastGoodInfra = null;
+let infraCache = { at: 0, value: null };
 
 /** Raw (label-bearing) container list, cached. `containers === null` means "engine not there",
  * which is different from "no containers". Only public-safe reasons ever cross the API boundary. */
@@ -852,11 +857,22 @@ export async function getInventory({ refreshMs = 15000, force = false } = {}) {
     ...(built.unmatchedStackOverlays || [])
       .map((s) => ({ kind: 'stack', name: s.name, container: s.project || null, reason: 'no compose project or container matches this stack overlay — it is not shown as a live stack' })),
   ];
+  if (live) {
+    lastGoodSummary = {
+      at: Date.now(),
+      containers: built.stats.containers, running: built.stats.running, stopped: built.stats.stopped,
+      applications: built.stats.applications, infrastructure: built.stats.infrastructure,
+      stacks: built.stats.stacks, withUrl: built.stats.withUrl,
+      engine: engine ? { version: engine.version || null, apiVersion: engine.apiVersion || null } : null,
+    };
+  }
   const value = {
     ...built,
     at,
     live,
     statusReason: live ? null : reason,
+    // Degraded mode: when the engine is gone, say what was last seen and when — labelled.
+    lastKnown: live ? null : lastGoodSummary,
     skipped,
     stackSkipped: stacksDoc.skipped || [],
     overlayServiceCount: overlays.length + skipped.length, // entries in the file, bound or not
@@ -940,6 +956,80 @@ export async function getDiscoveryStatus({ refreshMs = 15000 } = {}) {
 export function invalidateDiscovery() {
   invCache = { at: 0, value: null };
   dockerCache = { at: 0, containers: null, reason: null, engine: null };
+  infraCache = { at: 0, value: null };
+}
+
+/**
+ * Canonical infrastructure inventory: networks, volumes, images — one cached document.
+ *
+ * Joins are proven, never inferred: an image lists the containers whose `image` reference
+ * matches one of its tags; networks carry the daemon's own attachment map. Volume-to-container
+ * mapping would need an inspect per container, so volumes report the daemon's RefCount instead
+ * of a membership list we cannot prove cheaply.
+ *
+ * Degraded mode: when the engine is unreachable the last good document is served as `stale`
+ * (explicitly labelled with its timestamp), alongside the live failure reason.
+ */
+export async function getInfra({ refreshMs = 30000, force = false } = {}) {
+  if (!force && infraCache.value && Date.now() - infraCache.at < refreshMs) return infraCache.value;
+  const at = Date.now();
+  const avail = docker.availability();
+  if (!avail.ok) {
+    const value = {
+      at, live: false, statusReason: avail.public,
+      networks: [], volumes: [], images: [],
+      counts: { networks: null, volumes: null, images: null },
+      stale: lastGoodInfra, // null until one live pass has succeeded
+    };
+    infraCache = { at, value };
+    return value;
+  }
+  try {
+    const [networks, volumes, images, inv] = await Promise.all([
+      docker.listNetworks(),
+      docker.listVolumes(),
+      docker.listImages(),
+      getInventory({ refreshMs }).catch(() => null),
+    ]);
+    // Proven image usage: container.image (e.g. `jellyfin/jellyfin:10.9.7`) against RepoTags.
+    const byTag = new Map();
+    for (const img of images) for (const t of img.tags || []) byTag.set(t, img);
+    const usedBy = new Map(); // image id → container names
+    for (const s of inv?.services || []) {
+      const img = s.container?.image ? byTag.get(s.container.image) : null;
+      const key = img?.id || null;
+      if (key) {
+        if (!usedBy.has(key)) usedBy.set(key, []);
+        usedBy.get(key).push(s.name);
+      }
+    }
+    for (const img of images) img.usedBy = usedBy.get(img.id) || [];
+    const value = {
+      at, live: true, statusReason: null, networks, volumes, images,
+      counts: { networks: networks.length, volumes: volumes.length, images: images.length },
+      stale: null,
+    };
+    lastGoodInfra = { ...value, staleAt: at, stale: null };
+    infraCache = { at, value };
+    return value;
+  } catch (err) {
+    if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] infra error: ${err.message}`);
+    const value = {
+      at, live: false, statusReason: 'Docker engine answered with an error. Check the daemon and try again.',
+      networks: [], volumes: [], images: [],
+      counts: { networks: null, volumes: null, images: null },
+      stale: lastGoodInfra,
+    };
+    infraCache = { at, value };
+    return value;
+  }
+}
+
+/** Test helper — last-known state is process-global. */
+export function _resetLastKnown() {
+  lastGoodSummary = null;
+  lastGoodInfra = null;
+  infraCache = { at: 0, value: null };
 }
 
 export function serviceStatus(service, containers) {
@@ -979,6 +1069,7 @@ export async function getServicesView() {
     live: inv.live,
     statusSource: inv.live ? 'docker' : 'unavailable',
     statusReason: inv.statusReason,
+    lastKnown: inv.live ? null : inv.lastKnown,
     discoveredAt: inv.at,
     stats: inv.stats,
   };

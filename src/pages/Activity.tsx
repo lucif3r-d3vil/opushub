@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { usePolled } from '../lib/api';
+import { post, usePolled } from '../lib/api';
 import { dayLabel, relTime, timeOfDay } from '../lib/format';
-import type { ActivityEvent, ActivityGroup } from '../lib/types';
+import type { ActivityEvent, ActivityGroup, AlertItem, AlertsDoc, EventCategory, EventSeverity } from '../lib/types';
 import { PageHero, ProviderNote } from '../components/ui';
 import { humanEvent, humanGroup } from '../lib/events';
 
@@ -20,6 +20,25 @@ const TYPES = [
   { value: 'settings', label: 'Settings' },
   { value: 'layout', label: 'Layout' },
 ];
+
+const CATEGORIES: { value: '' | EventCategory; label: string }[] = [
+  { value: '', label: 'All areas' },
+  { value: 'service', label: 'Services' },
+  { value: 'stack', label: 'Stacks' },
+  { value: 'docker', label: 'Docker' },
+  { value: 'system', label: 'System' },
+  { value: 'security', label: 'Security' },
+  { value: 'config', label: 'Configuration' },
+];
+
+const SEVERITIES: { value: '' | EventSeverity; label: string }[] = [
+  { value: '', label: 'Any severity' },
+  { value: 'notice', label: 'Notice and above' },
+  { value: 'warning', label: 'Warnings' },
+  { value: 'critical', label: 'Critical only' },
+];
+
+const SEV_DOT: Record<string, string> = { notice: 'sev-notice', warning: 'sev-warning', critical: 'sev-critical' };
 
 const WINDOWS = [
   { label: 'Any time', ms: 0 },
@@ -61,6 +80,8 @@ export default function ActivityPage() {
   const [service, setService] = useState(() => params.get('service') || '');
   const [stack, setStack] = useState(() => params.get('stack') || '');
   const [type, setType] = useState(() => params.get('type') || '');
+  const [category, setCategory] = useState(() => params.get('category') || '');
+  const [severity, setSeverity] = useState(() => params.get('severity') || '');
   const [windowMs, setWindowMs] = useState(() => Number(params.get('since')) || 0);
   const [open, setOpen] = useState<Set<string>>(new Set());
 
@@ -74,15 +95,19 @@ export default function ActivityPage() {
     if (service.trim()) q.set('service', service.trim());
     if (stack.trim()) q.set('stack', stack.trim());
     if (type) q.set('type', type);
+    if (category) q.set('category', category);
+    if (severity) q.set('severity', severity);
     if (since) q.set('since', String(since));
     return `/api/activity?${q.toString()}`;
-  }, [source, service, stack, type, since]);
+  }, [source, service, stack, type, category, severity, since]);
   const { data, error } = usePolled<ActivityDoc>(query, 30_000);
   const items = data?.items ?? [];
   const active = [
     service.trim() && { key: 'service', label: `service: ${service.trim()}`, clear: () => setService('') },
     stack.trim() && { key: 'stack', label: `stack: ${stack.trim()}`, clear: () => setStack('') },
     type && { key: 'type', label: `type: ${TYPES.find((t) => t.value === type)?.label || type}`, clear: () => setType('') },
+    category && { key: 'category', label: CATEGORIES.find((t) => t.value === category)?.label || category, clear: () => setCategory('') },
+    severity && { key: 'severity', label: SEVERITIES.find((t) => t.value === severity)?.label || severity, clear: () => setSeverity('') },
     windowMs && { key: 'time', label: WINDOWS.find((w) => w.ms === windowMs)?.label || 'window', clear: () => setWindowMs(0) },
   ].filter(Boolean) as { key: string; label: string; clear: () => void }[];
   const filtered = active.length > 0 || source !== 'all';
@@ -92,12 +117,14 @@ export default function ActivityPage() {
     if (service.trim()) next.set('service', service.trim());
     if (stack.trim()) next.set('stack', stack.trim());
     if (type) next.set('type', type);
+    if (category) next.set('category', category);
+    if (severity) next.set('severity', severity);
     if (windowMs) next.set('since', String(windowMs));
     const current = params.toString();
     const wanted = next.toString();
     // replace, not push: filtering is not navigation, and Back should leave the page
     if (current !== wanted) setParams(next, { replace: true });
-  }, [service, stack, type, windowMs, params, setParams]);
+  }, [service, stack, type, category, severity, windowMs, params, setParams]);
 
   const days = useMemo(() => {
     const out: [string, Row[]][] = [];
@@ -128,6 +155,7 @@ export default function ActivityPage() {
           </span>
         ) : undefined}
       />
+      <AlertsStrip />
       <div className="tl-filters" role="tablist" aria-label="Filter by source">
         {SOURCES.map((s) => (
           <button key={s} role="tab" aria-selected={source === s} className={source === s ? 'chip active' : 'chip'} onClick={() => setSource(s)}>
@@ -153,6 +181,18 @@ export default function ActivityPage() {
           </select>
         </label>
         <label className="tl-field">
+          <span className="micro-label">Area</span>
+          <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
+            {CATEGORIES.map((t) => <option key={t.label} value={t.value}>{t.label}</option>)}
+          </select>
+        </label>
+        <label className="tl-field">
+          <span className="micro-label">Severity</span>
+          <select className="input" value={severity} onChange={(e) => setSeverity(e.target.value)}>
+            {SEVERITIES.map((t) => <option key={t.label} value={t.value}>{t.label}</option>)}
+          </select>
+        </label>
+        <label className="tl-field">
           <span className="micro-label">Time</span>
           <select className="input" value={String(windowMs)} onChange={(e) => setWindowMs(Number(e.target.value))}>
             {WINDOWS.map((w) => <option key={w.label} value={String(w.ms)}>{w.label}</option>)}
@@ -175,7 +215,7 @@ export default function ActivityPage() {
               source: {source} <span aria-hidden="true">×</span>
             </button>
           )}
-          {active.length > 0 && <button className="chip" onClick={() => { setService(''); setStack(''); setType(''); setWindowMs(0); }}>Clear</button>}
+          {active.length > 0 && <button className="chip" onClick={() => { setService(''); setStack(''); setType(''); setCategory(''); setSeverity(''); setWindowMs(0); }}>Clear</button>}
         </div>
       )}
 
@@ -204,6 +244,9 @@ export default function ActivityPage() {
                   </span>
                   <div className="tl-main">
                     <button className="tl-group-toggle" aria-expanded={open.has(e.id)} onClick={() => toggle(e.id)}>
+                      {e.severity && e.severity !== 'info' && (
+                        <span className={`sev-dot ${SEV_DOT[e.severity] || ''}`} title={`Severity: ${e.severity}`} aria-label={`Severity ${e.severity}`} />
+                      )}
                       <span className="tl-type">{humanGroup(e).title}</span>
                       <span className="chip tl-src">{e.count} events</span>
                       <span className="tl-when" title={new Date(e.t).toLocaleString()}>
@@ -232,6 +275,9 @@ export default function ActivityPage() {
                     </svg>
                   </span>
                   <div className="tl-main">
+                    {e.severity && e.severity !== 'info' && (
+                      <span className={`sev-dot ${SEV_DOT[e.severity] || ''}`} title={`Severity: ${e.severity}`} aria-label={`Severity ${e.severity}`} />
+                    )}
                     <span className="tl-type">{humanEvent(e)}</span>
                     {e.subject && e.source !== 'user' && <span className="tl-subject">{e.subject}</span>}
                     {e.source !== 'system' && <span className="chip tl-src">{e.source}</span>}
@@ -247,5 +293,43 @@ export default function ActivityPage() {
         </div>
       </div>
     </>
+  );
+}
+
+/** Active alerts above the log: the conditions OpusHub is sure about right now. */
+function AlertsStrip() {
+  const { data, refresh } = usePolled<AlertsDoc>('/api/alerts', 30_000);
+  const [acking, setAcking] = useState<string | null>(null);
+  if (!data || !data.alerts.length) return null;
+  const ack = async (a: AlertItem) => {
+    setAcking(a.id);
+    try { await post('/api/alerts/ack', { id: a.id }); } catch { /* anonymous viewers cannot ack; the alert simply stays */ }
+    setAcking(null);
+    refresh();
+  };
+  return (
+    <section className="alerts-strip" aria-label="Active alerts">
+      {data.alerts.map((a) => (
+        <div key={a.id} className={`alert-card sev-${a.severity}${a.acknowledged ? ' acked' : ''}`}>
+          <span className={`sev-dot ${SEV_DOT[a.severity] || ''}`} aria-hidden="true" />
+          <div className="alert-main">
+            <div className="alert-title">{a.title}</div>
+            <div className="alert-detail">{a.detail}</div>
+            <div className="alert-meta">
+              <span>firing since {new Date(a.firedAt).toLocaleString()}</span>
+              {a.acknowledged && <span> · acknowledged</span>}
+              {(a.links || []).map((l) => (
+                <a key={l.href} className="alert-link" href={l.href}>{l.label} →</a>
+              ))}
+            </div>
+          </div>
+          {!a.acknowledged && (
+            <button className="btn btn-quiet btn-sm" disabled={acking === a.id} onClick={() => ack(a)}>
+              {acking === a.id ? 'Acking…' : 'Acknowledge'}
+            </button>
+          )}
+        </div>
+      ))}
+    </section>
   );
 }

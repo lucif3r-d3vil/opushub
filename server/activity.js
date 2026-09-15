@@ -9,6 +9,9 @@
 //   • grouping — `readEvents({ grouped: true })` folds bursts of the same docker event type
 //     (≥ GROUP_MIN events within GROUP_WINDOW_MS, typically one compose deployment) into one
 //     summary item that still carries its underlying events. No information is lost.
+// Phase 7E: every event carries `severity` (info|notice|warning|critical) and `category`
+// (service|stack|docker|system|security|config), derived from the event type so old log lines
+// normalize to the same vocabulary on read. Callers may override both explicitly.
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './configStore.js';
@@ -24,7 +27,35 @@ const listeners = new Set();
 /** signature → last accepted timestamp (bounded below) */
 const recentSignatures = new Map();
 
-export function logEvent({ source, type, subject = null, message = null, meta = null, signature = null, dedupeWindowMs = DEDUPE_WINDOW_MS }) {
+export const SEVERITIES = ['info', 'notice', 'warning', 'critical'];
+export const CATEGORIES = ['service', 'stack', 'docker', 'system', 'security', 'config'];
+
+const CATEGORY_BY_TYPE = new Map(Object.entries({
+  container: 'docker', provider: 'docker', stack: 'stack', service: 'service', alert: 'system',
+  auth: 'security', settings: 'config', layout: 'config', services: 'config', stacks: 'config',
+  groups: 'config', bookmarks: 'config', custom: 'config', icons: 'config', app: 'system',
+}));
+
+/** Classify an event for filtering and display. Pure — also applied to pre-7E log lines on read. */
+export function classifyEvent({ source = null, type = null, meta = null } = {}) {
+  const t = String(type || '');
+  const prefix = t.includes('.') ? t.slice(0, t.indexOf('.')) : t;
+  let category = CATEGORY_BY_TYPE.get(prefix) || null;
+  if (!category) {
+    category = source === 'docker' ? 'docker' : source === 'user' || source === 'config' ? 'config'
+      : source === 'system' ? 'system' : source === 'auth' ? 'security' : 'system';
+  }
+  let severity = 'info';
+  if (t === 'provider.unavailable' || t === 'container.oom' || t === 'alert.fired') severity = 'warning';
+  else if (t === 'auth.login_failed') severity = 'warning';
+  else if (t === 'container.exited' && meta && Number(meta.exitCode) !== 0) severity = 'warning';
+  else if (t === 'container.health' && meta && meta.to === 'unhealthy') severity = 'warning';
+  else if (t === 'container.died_unhealthy') severity = 'warning';
+  else if (t === 'app.boot' || t === 'provider.recovered' || t === 'alert.resolved') severity = 'notice';
+  return { severity, category };
+}
+
+export function logEvent({ source, type, subject = null, message = null, meta = null, signature = null, dedupeWindowMs = DEDUPE_WINDOW_MS, severity = null, category = null }) {
   if (signature) {
     const now = Date.now();
     const last = recentSignatures.get(signature);
@@ -35,7 +66,10 @@ export function logEvent({ source, type, subject = null, message = null, meta = 
       recentSignatures.delete(oldestKey);
     }
   }
-  const ev = { id: `${Date.now().toString(36)}-${(seq++).toString(36)}`, t: Date.now(), iso: new Date().toISOString(), source, type, subject, message, meta };
+  const derived = classifyEvent({ source, type, meta });
+  const sev = SEVERITIES.includes(severity) ? severity : derived.severity;
+  const cat = CATEGORIES.includes(category) ? category : derived.category;
+  const ev = { id: `${Date.now().toString(36)}-${(seq++).toString(36)}`, t: Date.now(), iso: new Date().toISOString(), source, type, subject, message, meta, severity: sev, category: cat };
   try {
     fs.appendFileSync(FILE, JSON.stringify(ev) + '\n');
     const size = fs.statSync(FILE).size;
@@ -56,7 +90,16 @@ function parseAll() {
   try { lines = fs.readFileSync(FILE, 'utf8').trim().split('\n'); } catch { return []; }
   const out = [];
   for (const line of lines) {
-    try { out.push(JSON.parse(line)); } catch { /* skip torn lines */ }
+    try {
+      const ev = JSON.parse(line);
+      // Pre-7E lines lack severity/category — derive them so filters treat old and new alike.
+      if (!SEVERITIES.includes(ev.severity) || !CATEGORIES.includes(ev.category)) {
+        const derived = classifyEvent(ev);
+        if (!SEVERITIES.includes(ev.severity)) ev.severity = derived.severity;
+        if (!CATEGORIES.includes(ev.category)) ev.category = derived.category;
+      }
+      out.push(ev);
+    } catch { /* skip torn lines */ }
   }
   return out;
 }
@@ -111,6 +154,10 @@ export function groupEvents(events, { windowMs = GROUP_WINDOW_MS, min = GROUP_MI
       subject: projects.length === 1 ? projects[0] : (subjects[0] || null),
       project: projects.length === 1 ? projects[0] : null,
       count: g.events.length,
+      severity: g.events.some((e) => e.severity === 'critical') ? 'critical'
+        : g.events.some((e) => e.severity === 'warning') ? 'warning'
+        : g.events.some((e) => e.severity === 'notice') ? 'notice' : 'info',
+      category: g.events[0]?.category || 'docker',
       subjects,
       message: null,
       meta: { projects },
@@ -146,17 +193,21 @@ export function groupEvents(events, { windowMs = GROUP_WINDOW_MS, min = GROUP_MI
  * `matched` is the number of events that pass the filters (before grouping), so the page can say
  * "showing 20 of 4317" without pretending the log is shorter than it is.
  */
-export function readEvents({ limit = 100, source = null, before = null, grouped = false, service = null, stack = null, type = null, since = null } = {}) {
+export function readEvents({ limit = 100, source = null, before = null, grouped = false, service = null, stack = null, type = null, since = null, category = null, minSeverity = null } = {}) {
   const all = parseAll();
   const wantService = service ? String(service).toLowerCase() : null;
   const wantStack = stack ? String(stack).toLowerCase() : null;
   const wantType = type ? String(type).toLowerCase() : null;
+  const wantCategory = category && category !== 'all' ? String(category).toLowerCase() : null;
+  const minSevIdx = minSeverity ? SEVERITIES.indexOf(String(minSeverity).toLowerCase()) : -1;
 
   const matches = (ev) => {
     if (source && source !== 'all' && ev.source !== source) return false;
     if (before && ev.t >= before) return false;
     if (since && ev.t < since) return false;
     if (wantType && !String(ev.type || '').toLowerCase().startsWith(wantType)) return false;
+    if (wantCategory && String(ev.category || '').toLowerCase() !== wantCategory) return false;
+    if (minSevIdx >= 0 && SEVERITIES.indexOf(ev.severity) < minSevIdx) return false;
     if (wantService) {
       const names = [ev.subject, ev.meta?.service, ev.meta?.container, ...(Array.isArray(ev.meta?.subjects) ? ev.meta.subjects : [])]
         .filter(Boolean).map((x) => String(x).toLowerCase());

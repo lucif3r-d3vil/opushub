@@ -97,6 +97,7 @@ export interface ServicesDoc {
   live: boolean;
   statusSource: string;
   statusReason: string | null;
+  lastKnown?: LastKnownSummary | null;
   discoveredAt?: number | null;
   stats?: DiscoveryStats;
 }
@@ -167,6 +168,7 @@ export interface StacksDoc {
   stacks: Stack[];
   live: boolean;
   statusReason: string | null;
+  lastKnown?: LastKnownSummary | null;
   standalone: StandaloneContainer[];
   unmatched?: UnmatchedOverlay[];
 }
@@ -217,6 +219,8 @@ export interface SystemSnapshot {
 
 export interface HistoryPoint { t: number; cpu: number | null; memUsedPct: number | null; load: number | null; rx: number | null; tx: number | null; temp: number | null; procs: number | null }
 
+export type EventSeverity = 'info' | 'notice' | 'warning' | 'critical';
+export type EventCategory = 'service' | 'stack' | 'docker' | 'system' | 'security' | 'config';
 export interface ActivityEvent {
   id: string; t: number; iso: string;
   source: 'system' | 'config' | 'user' | 'docker' | string;
@@ -224,6 +228,8 @@ export interface ActivityEvent {
   subject: string | null;
   message: string | null;
   meta?: Record<string, unknown> | null;
+  severity?: EventSeverity;
+  category?: EventCategory;
 }
 
 /** A burst of same-type docker events folded into one row (see server/activity.js groupEvents).
@@ -238,6 +244,8 @@ export interface ActivityGroup {
   subjects: string[];
   message: string | null;
   meta?: Record<string, unknown> | null;
+  severity?: EventSeverity;
+  category?: EventCategory;
   events: ActivityEvent[];
 }
 
@@ -620,4 +628,88 @@ export interface CustomDoc {
   css: string; js: string;
   cssModified: string | null; jsModified: string | null;
   jsPresent: boolean;
+}
+
+/* Phase 7 — host, infrastructure, resources, unified health ------------------ */
+
+export interface LastKnownSummary {
+  at: number; containers: number; running: number; stopped: number;
+  applications: number; infrastructure: number; stacks: number; withUrl: number;
+  engine: { version: string | null; apiVersion: string | null } | null;
+}
+
+export interface HostDoc {
+  at: number;
+  host: { hostname: string | null; os: string | null; kernel: string | null; arch: string | null; model: string | null; uptimeSec: number | null; bootAt: string | null };
+  cpu: { model: string | null; cores: number | null; threads: number | null; mhz: number | null };
+  memory: { total: number | null };
+  docker: {
+    status: string; available: boolean; version: string | null; apiVersion: string | null;
+    os: string | null; arch: string | null; driver: string | null;
+    containers: number | null; running: number | null; stopped: number | null; paused: number | null;
+  };
+  address: { configured: string | null; detected: string | null; effective: string | null; source: string };
+  traefik: {
+    detected: boolean; source: string; routedContainers: number; routers: number; tlsRouters: number;
+    entrypoints: string[]; container: { name: string; state: string | null } | null;
+  };
+  opushub: { name: string; version: string; gitSha: string | null; buildTime: string | null; imageTag: string | null; installationMode: string };
+}
+
+export interface DockerDoc {
+  at: number;
+  status: { ok: boolean; state: string; version?: string | null; api?: string | null; reason?: string };
+  engine: { version: string | null; apiVersion: string | null; os: string | null; arch: string | null; driver: string | null } | null;
+  counts: { containers: number | null; running: number | null; stopped: number | null; images: number | null; volumes: number | null; networks: number | null };
+  live: boolean; statusReason: string | null; code: string | null;
+  lastKnown: LastKnownSummary | null;
+}
+
+export interface InfraNetwork { id: string | null; name: string | null; driver: string | null; scope: string | null; internal: boolean; attachable: boolean; created: string | null; containerCount: number; containers: { name: string }[] }
+export interface InfraVolume { name: string | null; driver: string | null; scope: string | null; createdAt: string | null; refCount: number | null; size: number | null }
+export interface InfraImage { id: string | null; tags: string[]; digests: string[]; created: number | null; size: number | null; containers: number | null; usedBy: string[] }
+
+export interface InfraSlice<T> { at: number; live: boolean; statusReason: string | null; code: string | null; count: number | null; stale: { at: number; staleAt: number; networks: InfraNetwork[]; volumes: InfraVolume[]; images: InfraImage[] } | null }
+export interface NetworksDoc extends InfraSlice<InfraNetwork> { networks: InfraNetwork[] }
+export interface VolumesDoc extends InfraSlice<InfraVolume> { volumes: InfraVolume[] }
+export interface ImagesDoc extends InfraSlice<InfraImage> { images: InfraImage[] }
+
+export interface StorageDoc {
+  at: number;
+  providers: { id: string; label: string; available: boolean | 'not-implemented'; reason: string | null; mounts?: { mount: string; device: string; fs: string; total: number; used: number; free: number; usedPct: number | null }[]; totals?: { mounts: number; total: number; used: number; free: number } | null; at: number }[];
+}
+
+export interface ResourcesDoc {
+  at: number;
+  cpu: { current: number | null; unit: string; average: number | null; peak: number | null; samples: number; cores: number | null; load: (number | null)[]; availability: string; source: string; timestamp: number | null };
+  memory: { current: number | null; total: number | null; available: number | null; cached: number | null; usedPct: number | null; unit: string; averagePct: number | null; peakPct: number | null; samples: number; availability: string; source: string; timestamp: number | null };
+  network: { current: { rxPerSec: number; txPerSec: number } | null; unit: string; averageRx: number | null; peakRx: number | null; averageTx: number | null; peakTx: number | null; samples: number; interfaces: string[]; availability: string; source: string; timestamp: number | null };
+  storage: { current: { mounts: number; total: number; used: number; free: number } | null; mounts: number | null; availability: string; source: string; timestamp: number | null };
+  gpu: { current: { vendor: string; devices: string[] | null; driver: string | null } | null; availability: string; reason?: string; source: string; timestamp: number | null };
+}
+
+export type HealthState = 'available' | 'healthy' | 'degraded' | 'unhealthy' | 'stopped' | 'starting' | 'unknown' | 'unreachable';
+
+export interface ServiceHealthDoc {
+  service: string | null; displayName: string | null;
+  health: { state: HealthState; evidence: { container: string; healthcheck: string; http: string }; stack: string | null; startedAt: string | null; url: string | null; urlSource: string; detail: string };
+  probe: { checked: boolean; reachable?: boolean | null; statusCode?: number | null; latencyMs?: number | null; checkedAt?: string | null; source?: string | null; errorType?: string | null; code?: string; reason?: string };
+  evaluatedAt: number;
+}
+
+export interface AlertItem {
+  id: string; signature: string;
+  severity: 'warning' | 'critical';
+  title: string; detail: string;
+  evidence?: Record<string, unknown> | null;
+  links?: { label: string; href: string }[];
+  firedAt: number;
+  acknowledged: boolean; ackAt: number | null;
+}
+export interface AlertChannel { id: string; label: string; blurb: string; status: string; configured: boolean }
+export interface AlertsDoc {
+  at: string;
+  alerts: AlertItem[];
+  counts: { critical: number; warning: number };
+  channels: AlertChannel[];
 }

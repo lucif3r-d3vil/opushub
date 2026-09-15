@@ -204,8 +204,9 @@ async function dockerWatcher() {
           logEvent({ source: 'docker', type, subject: cur.name, message: `${cur.state} · ${cur.status}`, meta, signature: `${type}:${id}:${cur.state}` });
         }
         if (prev.state === cur.state && prev.health !== cur.health && cur.health) {
-          // health moved while the state held — its own fact (became unhealthy / recovered)
-          logEvent({ source: 'docker', type: 'container.health', subject: cur.name, message: `health: ${cur.health}`, meta, signature: `container.health:${id}:${cur.health}` });
+          // health moved while the state held — its own fact (became unhealthy / recovered);
+          // from/to lets the activity classifier grade unhealthy transitions as warnings.
+          logEvent({ source: 'docker', type: 'container.health', subject: cur.name, message: `health: ${cur.health}`, meta: { ...meta, from: prev.health, to: cur.health }, signature: `container.health:${id}:${cur.health}` });
         }
       }
       for (const [id, prev] of lastDockerSnapshot) {

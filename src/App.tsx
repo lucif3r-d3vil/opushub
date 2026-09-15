@@ -12,6 +12,7 @@ const Services = lazy(() => import('./pages/Services'));
 const ServiceDetail = lazy(() => import('./pages/ServiceDetail'));
 const Stacks = lazy(() => import('./pages/Stacks'));
 const StackDetail = lazy(() => import('./pages/StackDetail'));
+const Infrastructure = lazy(() => import('./pages/Infrastructure'));
 const SystemPage = lazy(() => import('./pages/System'));
 const Activity = lazy(() => import('./pages/Activity'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -217,6 +218,7 @@ function ShellWithRoutes() {
             <Route path="services/:group/:name" element={<ServiceDetail />} />
             <Route path="stacks" element={<Stacks />} />
             <Route path="stacks/:name" element={<StackDetail />} />
+            <Route path="infrastructure" element={<Infrastructure />} />
             <Route path="system" element={<SystemPage />} />
             <Route path="activity" element={<Activity />} />
             <Route path="settings" element={<Settings />} />

@@ -20,6 +20,9 @@ import { checkBackgroundUrl } from './providers/background.js';
 import { URL_REASONS } from './urlResolver.js';
 import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons.js';
 import { logEvent, readEvents, firstEventAt } from './activity.js';
+import { ackAlert, countRecentAuthFailures, getActiveAlerts, refreshAlerts } from './alerts.js';
+import { listChannels } from './notify.js';
+import { checkForUpdates, lastUpdateCheck, REPO_URL } from './updateCheck.js';
 import { searchAll } from './search.js';
 import { loadEnv } from './env.js';
 import { DATA_DIR } from './configStore.js';
@@ -33,6 +36,9 @@ import { exportNative, exportHomepage } from './configExport.js';
 import { lintCss, lintJs, LIMITS } from './configSchema.js';
 import { makeWidget, defaultWidgets, WIDGET_TYPES } from './widgets.js';
 import { templateList, templateIds } from './templates.js';
+import { hostDocument } from './host.js';
+import { describeStorage } from './providers/storage.js';
+import { versionInfo } from './version.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -88,7 +94,10 @@ function send(res, status, obj, { etagBody } = {}) {
 }
 
 export async function handleApi(req, res, url) {
-  const p = url.pathname.replace(/\/+$/, '') || '/';
+  let p = url.pathname.replace(/\/+$/, '') || '/';
+  // /api/v1/* — the canonical versioned namespace. The unversioned routes below are permanent
+  // compatibility aliases with identical shapes; v1 exists so future versions can diverge.
+  p = rewriteV1(p);
   const method = req.method;
   const route = `${method} ${p}`;
   // Every mutating endpoint speaks JSON and only JSON. A form-encoded or text/plain body is
@@ -315,9 +324,12 @@ export async function handleApi(req, res, url) {
     }
     const env = loadEnv(CONFIG_DIR);
     const dockerProv = await dockerAvailabilityCached();
+    const ver = versionInfo();
     return send(res, 200, {
       name: appName(),
       version: '0.1.0',
+      status: 'ok', // liveness for container healthchecks; provider detail below
+      build: ver,
       node: process.version,
       platform: `${process.platform}/${process.arch}`,
       bootedAt: bootAt,
@@ -333,6 +345,7 @@ export async function handleApi(req, res, url) {
         docker: dockerProv,
         system: { ok: true, note: 'reading /proc on this host' },
       },
+      docker: { status: dockerProv.ok ? 'ok' : dockerProv.state || 'unavailable' },
     });
   }
 
@@ -454,7 +467,7 @@ export async function handleApi(req, res, url) {
   // ---------- per-service read-only detail: stats, history, logs ----------
   // Generic routes keyed by the same stable service id as the page (`:group/:name`); there is
   // deliberately no /api/jellyfin — every application is addressed through the one model.
-  const svcSub = p.match(/^\/api\/services\/([^/]+)\/([^/]+)\/(stats|stats\/history|logs|history)$/);
+  const svcSub = p.match(/^\/api\/services\/([^/]+)\/([^/]+)\/(stats|stats\/history|logs|history|health)$/);
   if (method === 'GET' && svcSub) {
     const group = decodeURIComponent(svcSub[1]);
     const name = decodeURIComponent(svcSub[2]);
@@ -465,7 +478,7 @@ export async function handleApi(req, res, url) {
     const { service, ref } = found;
 
     if (what === 'stats') {
-      if (!docker.availability().ok) return send(res, 200, { status: 'unavailable', stats: null });
+      if (!docker.availability().ok) return send(res, 200, { status: 'unavailable', code: 'docker_unavailable', stats: null });
       const stats = await statsWithHistory(ref);
       return send(res, 200, { status: stats ? 'ok' : 'unavailable', stats, at: Date.now() });
     }
@@ -477,7 +490,7 @@ export async function handleApi(req, res, url) {
 
     if (what === 'logs') {
       const a = docker.availability();
-      if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.public, lines: [] });
+      if (!a.ok) return send(res, 200, { status: 'unavailable', code: 'docker_unavailable', reason: a.public, lines: [] });
       const tail = Math.min(500, Math.max(1, Number(url.searchParams.get('tail')) || 150));
       const timestamps = url.searchParams.get('timestamps') === '1' || url.searchParams.get('timestamps') === 'true';
       try {
@@ -487,6 +500,17 @@ export async function handleApi(req, res, url) {
         const missing = /404|no such container/i.test(String(err.message));
         return send(res, 200, { status: 'error', reason: missing ? 'No such container (it may have been removed).' : 'Could not read container logs.', lines: [] });
       }
+    }
+
+    if (what === 'health') {
+      // Unified verdict: container state + healthcheck + (bounded, cached) HTTP probe of the
+      // service's own discovered URL. The browser names the service; the server resolves the URL.
+      const { evaluateServiceHealth } = await import('./healthModel.js');
+      let container = null;
+      if (docker.availability().ok) {
+        try { container = await docker.inspectContainer(ref); } catch { /* list-level evidence only */ }
+      }
+      return send(res, 200, await evaluateServiceHealth(service, { container }));
     }
 
     if (what === 'history') {
@@ -596,7 +620,7 @@ export async function handleApi(req, res, url) {
   if (route === 'GET /api/docker/status') return send(res, 200, await dockerAvailabilityCached(true));
   if (route === 'GET /api/docker/containers') {
     const a = docker.availability();
-    if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.public, containers: [] });
+    if (!a.ok) return send(res, 200, { status: 'unavailable', code: 'docker_unavailable', reason: a.public, containers: [] });
     try { return send(res, 200, { status: 'ok', containers: await docker.listContainers({ all: true }) }); }
     catch (err) {
       if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] list failed: ${err.message}`);
@@ -606,7 +630,7 @@ export async function handleApi(req, res, url) {
   const logsMatch = p.match(/^\/api\/docker\/containers\/([^/]+)\/logs$/);
   if (method === 'GET' && logsMatch) {
     const a = docker.availability();
-    if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.public, lines: [] });
+    if (!a.ok) return send(res, 200, { status: 'unavailable', code: 'docker_unavailable', reason: a.public, lines: [] });
     const tail = Math.min(500, Math.max(1, Number(url.searchParams.get('tail')) || 150));
     const timestamps = url.searchParams.get('timestamps') === '1' || url.searchParams.get('timestamps') === 'true';
     const ref = decodeURIComponent(logsMatch[1]);
@@ -627,6 +651,88 @@ export async function handleApi(req, res, url) {
       const missing = /404|no such container/i.test(String(err.message));
       return send(res, 200, { status: 'error', reason: missing ? 'No such container (it may have been removed).' : 'Could not read container logs.', lines: [] });
     }
+  }
+
+  // ---------- host & infrastructure (Phase 7 canonical inventory) ----------
+  if (route === 'GET /api/host') {
+    const inv = await model.getInventory();
+    return send(res, 200, await hostDocument({ inventory: inv }));
+  }
+  if (route === 'GET /api/docker') {
+    const [inv, infra, dockerProv] = await Promise.all([
+      model.getInventory(),
+      model.getInfra(),
+      dockerAvailabilityCached(),
+    ]);
+    return send(res, 200, {
+      at: Date.now(),
+      status: dockerProv,
+      engine: inv.engine || null,
+      counts: {
+        containers: inv.live ? inv.stats.containers : null,
+        running: inv.live ? inv.stats.running : null,
+        stopped: inv.live ? inv.stats.stopped : null,
+        images: infra.live ? infra.counts.images : null,
+        volumes: infra.live ? infra.counts.volumes : null,
+        networks: infra.live ? infra.counts.networks : null,
+      },
+      live: inv.live && infra.live,
+      statusReason: inv.live ? (infra.live ? null : infra.statusReason) : inv.statusReason,
+      code: (inv.live && infra.live) ? null : 'docker_unavailable',
+      lastKnown: inv.live ? null : inv.lastKnown,
+    });
+  }
+  if (route === 'GET /api/networks') {
+    const infra = await model.getInfra();
+    return send(res, 200, {
+      at: infra.at, live: infra.live, statusReason: infra.statusReason,
+      code: infra.live ? null : 'docker_unavailable',
+      networks: infra.networks, count: infra.counts.networks, stale: infra.stale,
+    });
+  }
+  if (route === 'GET /api/volumes') {
+    const infra = await model.getInfra();
+    return send(res, 200, {
+      at: infra.at, live: infra.live, statusReason: infra.statusReason,
+      code: infra.live ? null : 'docker_unavailable',
+      volumes: infra.volumes, count: infra.counts.volumes, stale: infra.stale,
+    });
+  }
+  if (route === 'GET /api/images') {
+    const infra = await model.getInfra();
+    return send(res, 200, {
+      at: infra.at, live: infra.live, statusReason: infra.statusReason,
+      code: infra.live ? null : 'docker_unavailable',
+      images: infra.images, count: infra.counts.images, stale: infra.stale,
+    });
+  }
+  if (route === 'GET /api/storage') {
+    return send(res, 200, await describeStorage());
+  }
+  if (route === 'GET /api/version') {
+    return send(res, 200, versionInfo());
+  }
+  // Update awareness: the cached answer only — this route never touches the network.
+  // A check happens solely through POST /api/updates/check (the "Check for updates" button).
+  if (route === 'GET /api/updates') {
+    return send(res, 200, { check: lastUpdateCheck(), repo: REPO_URL, install: versionInfo() });
+  }
+  if (route === 'POST /api/updates/check') {
+    const check = await checkForUpdates({ force: true });
+    logEvent({
+      source: 'system', type: 'update.checked', subject: check.latest || 'unknown',
+      message: check.reason, meta: { state: check.state, current: check.current, latest: check.latest },
+      severity: 'info', category: 'system',
+    });
+    return send(res, 200, { check, repo: REPO_URL });
+  }
+  if (route === 'GET /api/resources') {
+    const { resourcesDocument } = await import('./resources.js');
+    const [system, storage] = await Promise.all([
+      collectSystem().catch(() => null),
+      describeStorage().catch(() => null),
+    ]);
+    return send(res, 200, resourcesDocument({ system, points: history.window(3600_000), storage }));
   }
 
   // ---------- integrations ----------
@@ -675,11 +781,49 @@ export async function handleApi(req, res, url) {
     const type = url.searchParams.get('type');
     const sinceRaw = Number(url.searchParams.get('since'));
     const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : null;
+    const category = url.searchParams.get('category');
+    const minSeverity = url.searchParams.get('severity');
     return send(res, 200, {
-      ...readEvents({ limit, source, before, grouped, service, stack, type, since }),
+      ...readEvents({ limit, source, before, grouped, service, stack, type, since, category, minSeverity }),
       watchingSince: firstEventAt(),
-      filters: { source: source || 'all', service: service || null, stack: stack || null, type: type || null, since },
+      filters: { source: source || 'all', service: service || null, stack: stack || null, type: type || null, since, category: category || 'all', severity: minSeverity || null },
     });
+  }
+
+  // ---------- alerts ----------
+  // Evaluated on demand over snapshots the server already holds (cached discovery, one
+  // bounded system sample, the auth-failure count). Transitions log to activity inside
+  // refreshAlerts, so GET here can append exactly two kinds of honest events.
+  if (route === 'GET /api/alerts') {
+    const [servicesView, stacksDoc, system] = await Promise.all([
+      model.getServicesView().catch(() => null),
+      model.getStacksDoc().catch(() => null),
+      collectSystem().catch(() => null),
+    ]);
+    const services = servicesView?.services || [];
+    const stacks = (stacksDoc?.stacks || []).map((st) => ({
+      project: st.project, services: st.services || st.members || [],
+      running: st.runningCount ?? st.running ?? 0,
+    }));
+    const alerts = refreshAlerts({
+      dockerAvailable: servicesView ? servicesView.live !== false : true,
+      services, stacks, system,
+      authFailures: countRecentAuthFailures(),
+    });
+    return send(res, 200, {
+      at: new Date().toISOString(), alerts,
+      counts: {
+        critical: alerts.filter((x) => x.severity === 'critical').length,
+        warning: alerts.filter((x) => x.severity === 'warning').length,
+      },
+      channels: listChannels(),
+    });
+  }
+  if (route === 'POST /api/alerts/ack') {
+    const body = await jsonBody();
+    const found = ackAlert(body?.id);
+    if (!found) return send(res, 404, { error: 'no such active alert' });
+    return send(res, 200, { ok: true, alert: found });
   }
 
   // ---------- provider health ----------
@@ -689,7 +833,7 @@ export async function handleApi(req, res, url) {
 
   // ---------- search ----------
   if (route === 'GET /api/search') {
-    const q = url.searchParams.get('q') || '';
+    const q = (url.searchParams.get('q') || '').slice(0, 80);
     return send(res, 200, { query: q, results: await searchAll(q, { newsItems: lastNews.items || [] }) });
   }
 
@@ -1458,3 +1602,20 @@ function summarizeSettingsPatch(patch) {
 }
 
 export function markBoot(t) { bootAt = t; }
+
+/**
+ * /api/v1/* → /api/* rewrite for the allowlisted canonical routes. Anything not listed passes
+ * through untouched (and 404s as `no route`), so v1 can never accidentally expose a route that
+ * was not deliberately versioned.
+ */
+const V1_ROUTES = new Set([
+  '/host', '/docker', '/networks', '/volumes', '/images', '/storage', '/version', '/resources',
+  '/services', '/stacks', '/system', '/discovery', '/providers',
+]);
+
+export function rewriteV1(pathname) {
+  if (!pathname.startsWith('/api/v1/')) return pathname;
+  const rest = pathname.slice('/api/v1'.length);
+  if (V1_ROUTES.has(rest)) return '/api' + rest;
+  return pathname;
+}

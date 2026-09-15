@@ -15,13 +15,14 @@ const KIND_LABEL: Record<string, string> = {
   // Phase 6: a *thing you can configure* (a service's presentation, a group) is a different kind of
   // result from a page about configuring things — it opens the editor on that row.
   config: 'Configuration', activity: 'Recent activity', bookmark: 'Bookmarks', news: 'News',
+  alert: 'Alerts', infra: 'Infrastructure',
 };
-const ORDER = ['Actions', 'Services', 'Stacks', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
+const ORDER = ['Actions', 'Alerts', 'Services', 'Stacks', 'Infrastructure', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
 
 const KIND_ICON: Record<string, string> = {
   page: 'lucide:house', stack: 'lucide:layers', bookmark: 'lucide:bookmark', news: 'lucide:newspaper',
   action: 'lucide:command', setting: 'lucide:sliders-horizontal', activity: 'lucide:activity',
-  config: 'lucide:settings-2',
+  config: 'lucide:settings-2', alert: 'lucide:triangle-alert', infra: 'lucide:server',
 };
 
 /** ⌘K on a Mac, Ctrl K everywhere else — the overlay should not teach the wrong muscle memory. */

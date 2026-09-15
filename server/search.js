@@ -1,15 +1,17 @@
-// Unified search: pages · services · stacks · bookmarks · settings · recent news.
+// Unified search: pages · services · stacks · infrastructure · alerts · bookmarks · settings · recent news.
 // Services and stacks come from the SAME canonical inventory the Hub, Services and Stacks pages
 // render — one model, so search can never offer something that isn't a container, or hide
 // something that is. (Bookmarks and pages are OpusHub's own surfaces, not infrastructure.)
 // A lightweight scoring pass — the client adds its own instant fuzzy layer on top.
-import { readBookmarks, readServices, getInventory, getLayout } from './model.js';
+import { readBookmarks, readServices, getInventory, getLayout, getInfra } from './model.js';
 import { readEvents } from './activity.js';
+import { getActiveAlerts } from './alerts.js';
 
 const PAGES = [
   { title: 'Hub', href: '/', hint: 'Your digital home', kind: 'page', keywords: ['home', 'start', 'dashboard'] },
   { title: 'Services', href: '/services', hint: 'Everything you run', kind: 'page', keywords: ['apps', 'containers'] },
   { title: 'Stacks', href: '/stacks', hint: 'Groups of containers', kind: 'page', keywords: ['compose', 'projects'] },
+  { title: 'Infrastructure', href: '/infrastructure', hint: 'Engine, networks, volumes, images, topology', kind: 'page', keywords: ['docker', 'network', 'volume', 'image', 'topology', 'host', 'engine'] },
   { title: 'System', href: '/system', hint: 'Host vitals', kind: 'page', keywords: ['cpu', 'memory', 'disk', 'network', 'uptime'] },
   { title: 'Activity', href: '/activity', hint: 'What happened, when', kind: 'page', keywords: ['events', 'history', 'log'] },
   { title: 'Icon browser', href: '/icons', hint: 'Find an icon and apply it', kind: 'page', keywords: ['logo', 'glyph', 'symbol'] },
@@ -27,6 +29,7 @@ const SETTINGS = [
   { title: 'Groups', href: '/settings/groups', hint: 'Create, rename, reorder and hide groups', keywords: ['grouping', 'categories', 'folders'] },
   { title: 'Bookmarks', href: '/settings/bookmarks', hint: 'Flat links, no status', keywords: ['links', 'shortcuts'] },
   { title: 'Integrations', href: '/settings/integrations', hint: 'News feeds, weather location, watchlist', keywords: ['rss', 'feed', 'weather', 'stocks', 'markets', 'symbols'] },
+  { title: 'Notifications', href: '/settings/notifications', hint: 'Alert channels: webhook, email, Telegram, Slack', keywords: ['alerts', 'notify', 'webhook', 'email', 'telegram', 'slack', 'channels'] },
   { title: 'General', href: '/settings/general', hint: 'Name, greeting, this install', keywords: ['identity', 'title', 'name', 'greeting', 'app', 'about'] },
   { title: 'Environment', href: '/settings/environment', hint: 'Engine status, URL sources, Homepage-compatible files', keywords: ['docker', 'engine', 'socket', 'discovery', 'unmatched', 'env', 'paths', 'homepage', 'overlay'] },
   { title: 'Account & sessions', href: '/settings/authentication', hint: 'Password, signed-in browsers, revocation', keywords: ['password', 'change password', 'sessions', 'sign out', 'security', 'login', 'revoke'] },
@@ -73,13 +76,13 @@ export function scoreMatch(needle, ...fields) {
 const score = scoreMatch;
 
 /** Category weights — services and stacks rank highest: they are the point of the index. */
-const KIND_WEIGHT = { service: 1, stack: 1, page: 0.92, config: 0.9, setting: 0.88, activity: 0.8, bookmark: 0.85, news: 0.75 };
+const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, page: 0.92, config: 0.9, setting: 0.88, infra: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75 };
 
 /** Docker subjects whose events are worth offering as destinations — the same names the pages use. */
 const ACTIVITY_WINDOW_MS = 7 * 24 * 3600_000;
 
 export async function searchAll(q, { newsItems = [] } = {}) {
-  const needle = String(q || '').toLowerCase().trim();
+  const needle = String(q || '').toLowerCase().trim().slice(0, 80);
   const out = [];
   const add = (item, s, weight = 1) => { if (s > 8) out.push({ ...item, _s: s * weight }); };
 
@@ -118,6 +121,46 @@ export async function searchAll(q, { newsItems = [] } = {}) {
    * different destinations — one opens the service page, the other opens its editor — so they are
    * indexed separately rather than folded into one hit that guesses which you meant.
    */
+  // Phase 7F — active alerts are destinations: the alert's own link when it has one (the
+  // service, the stack), the Activity page otherwise. At most MAX_ALERTS exist by construction.
+  try {
+    for (const al of getActiveAlerts()) {
+      const href = al.links?.[0]?.href || '/activity';
+      add({
+        title: al.title,
+        subtitle: `Alert · ${al.severity}${al.acknowledged ? ' · acknowledged' : ''} — ${al.detail}`.slice(0, 120),
+        href, kind: 'alert', status: al.severity === 'critical' ? 'down' : 'degraded',
+      }, score(needle, al.title, al.detail, al.signature, 'alert', al.severity), KIND_WEIGHT.alert);
+    }
+  } catch { /* alerting is optional — search still answers without it */ }
+
+  // Phase 7F — infrastructure names: networks, volumes, images, straight from the cached
+  // infra document (the same one the Infrastructure page renders). Each hit deep-links to
+  // its tab. Cache-first with a long window — a keystroke must never trigger engine calls.
+  try {
+    const infra = await getInfra({ refreshMs: 300_000 });
+    const doc = infra.live ? infra : (infra.stale || infra);
+    for (const n of (doc.networks || []).slice(0, 40)) {
+      add({
+        title: n.name, subtitle: `Network · ${n.driver || 'unknown driver'} · ${n.containers ?? '?'} attached`,
+        href: '/infrastructure?tab=networks', kind: 'infra',
+      }, score(needle, n.name, n.driver, 'network'), KIND_WEIGHT.infra);
+    }
+    for (const v of (doc.volumes || []).slice(0, 40)) {
+      add({
+        title: v.name, subtitle: `Volume · ${v.driver || 'unknown driver'} · ${v.refCount ?? '?'} users`,
+        href: '/infrastructure?tab=volumes', kind: 'infra',
+      }, score(needle, v.name, v.driver, 'volume'), KIND_WEIGHT.infra);
+    }
+    for (const img of (doc.images || []).slice(0, 40)) {
+      const tag = (img.tags || [])[0] || img.id;
+      add({
+        title: tag, subtitle: `Image · ${(img.usedBy || []).length} container${(img.usedBy || []).length === 1 ? '' : 's'} use it`,
+        href: '/infrastructure?tab=images', kind: 'infra',
+      }, score(needle, tag, ...(img.tags || []), 'image'), KIND_WEIGHT.infra);
+    }
+  } catch { /* infra is optional — search still answers without it */ }
+
   try {
     const { overlays, groups } = readServices();
     const layout = getLayout();
@@ -182,7 +225,7 @@ export async function searchAll(q, { newsItems = [] } = {}) {
 
   try {
     const { flat } = readBookmarks();
-    for (const b of flat) {
+    for (const b of flat.slice(0, 500)) {
       add({ title: b.name, subtitle: b.group, href: b.href, kind: 'bookmark' }, score(needle, b.name, b.description, b.group), KIND_WEIGHT.bookmark);
     }
   } catch { /* ok */ }
@@ -216,6 +259,9 @@ function describeEventType(type) {
     'auth.logout': 'signed out',
     'auth.password_changed': 'password changed',
     'auth.sessions_revoked': 'sessions revoked',
+    'alert.fired': 'alert fired',
+    'alert.resolved': 'alert resolved',
+    'update.checked': 'checked for updates',
   };
   return map[type] || String(type || 'event');
 }
