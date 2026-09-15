@@ -360,6 +360,61 @@ export function createHandler({ log = null } = {}) {
         Config: { Env: ['SHOULD_NEVER_LEAVE_SERVER=1'], Labels: fx.Labels }, // must NOT be projected
       });
     }
+    if (req.method === 'GET' && p === '/networks') {
+      // Derived from the same fleet the container endpoints serve: one network per compose
+      // project, plus the shared `proxy` network and the default `bridge`. TEST DATA ONLY.
+      const projects = [...new Set(FLEET.map((f) => f.Labels['com.docker.compose.project']).filter(Boolean))];
+      const nets = [];
+      const netId = (seed) => `${seed}net${'0'.repeat(57)}`.slice(0, 64);
+      for (const project of projects) {
+        const members = FLEET.filter((f) => f.Labels['com.docker.compose.project'] === project);
+        const containers = {};
+        members.forEach((f, i) => {
+          containers[f.Id] = { Name: f.Names[0].slice(1), EndpointID: `ep${i}`, MacAddress: '02:42:ac:1c:00:05', IPv4Address: `172.28.0.${5 + i}/16`, IPv6Address: '' };
+        });
+        nets.push({
+          Id: netId(project), Name: `${project}_default`, Driver: 'bridge', Scope: 'local',
+          Internal: false, Attachable: false, Ingress: false, Created: '2026-09-01T08:00:00Z',
+          Containers: containers,
+        });
+      }
+      const proxied = {};
+      FLEET.filter((f) => String(f.Labels['traefik.docker.network'] || '') === 'proxy' || f.Names[0] === '/traefik')
+        .forEach((f, i) => {
+          proxied[f.Id] = { Name: f.Names[0].slice(1), EndpointID: `epx${i}`, MacAddress: '02:42:ac:1d:00:07', IPv4Address: `172.29.0.${7 + i}/16`, IPv6Address: '' };
+        });
+      nets.push({
+        Id: netId('proxy'), Name: 'proxy', Driver: 'bridge', Scope: 'local',
+        Internal: false, Attachable: true, Ingress: false, Created: '2026-08-20T10:00:00Z', Containers: proxied,
+      });
+      nets.push({
+        Id: netId('bridge'), Name: 'bridge', Driver: 'bridge', Scope: 'local',
+        Internal: false, Attachable: false, Ingress: false, Created: '2026-01-01T00:00:00Z', Containers: {},
+      });
+      return send(200, nets);
+    }
+    if (req.method === 'GET' && p === '/volumes') {
+      const vols = [];
+      const seen = new Set();
+      const push = (name, size, refs) => {
+        if (seen.has(name)) return;
+        seen.add(name);
+        vols.push({
+          Name: name, Driver: 'local', Scope: 'local', CreatedAt: '2026-09-01T08:00:00Z',
+          Mountpoint: `/var/lib/docker-mock/volumes/${name}/_data`, // must NOT be projected
+          UsageData: { RefCount: refs, Size: size },
+        });
+      };
+      push('jellyfin-config', 1200000000, 1);
+      push('jellyfin-cache', 300000000, 1);
+      for (const f of FLEET) {
+        const project = f.Labels['com.docker.compose.project'];
+        const service = f.Labels['com.docker.compose.service'];
+        if (project && service && f.Names[0] !== '/jellyfin') push(`${project}-${service}-data`, 50000000, 1);
+      }
+      push('orphan-volume-nothing-uses', 12000000, 0);
+      return send(200, { Volumes: vols, Warnings: [] });
+    }
     if (req.method === 'GET' && p === '/system/df') {
       return send(200, { LayersSize: 1, Images: [], Containers: [], Volumes: [] });
     }
