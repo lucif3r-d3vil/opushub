@@ -45,7 +45,7 @@ function Background() {
         style={{ ['--bg-blur' as never]: `${blur}`, ['--bg-scrim' as never]: `${scrim}` }}
         aria-hidden="true"
       >
-        {mode === 'photo' && bg?.photo && <BackgroundImage url={bg.photo} />}
+        {mode === 'photo' && bg?.photo && <BackgroundImage url={bg.photo} position={bg.position} fit={bg.fit} />}
       </div>
       {mode === 'photo' && (
         <div

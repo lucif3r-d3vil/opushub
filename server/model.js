@@ -9,11 +9,11 @@ import { readYaml, readJson, writeYaml, writeJson } from './configStore.js';
 import * as docker from './providers/docker.js';
 import { statsWithHistory } from './statsHistory.js';
 import { discover } from './discovery.js';
-import { suggestRef } from './providers/icons.js';
+import { suggestRef, existsLocal } from './providers/icons.js';
 import { hostAddress } from './lib/hostAddress.js';
 import { defaultLayout, normalizeLayout, describeLayoutPatch } from './layout.js';
 import { applyTemplate, hasTemplate, templateList } from './templates.js';
-import { WIDGET_CATEGORIES, widgetCatalogue } from './widgets.js';
+import { WIDGET_CATEGORIES, WIDGET_TYPES, widgetCatalogue } from './widgets.js';
 import { validateSymbol as validateMarketSymbol } from './providers/market.js';
 
 export const DEFAULT_SETTINGS = {
@@ -24,7 +24,7 @@ export const DEFAULT_SETTINGS = {
     density: 'comfortable',
     transparency: true,
     fontScale: 1,
-    background: { mode: 'quiet', photo: null, blur: 24, scrim: 62 },
+    background: { mode: 'quiet', photo: null, blur: 24, scrim: 62, position: 'center', fit: 'cover' },
   },
   hub: { greetingName: null, clock24h: false, showSeconds: false },
   integrations: {
@@ -157,6 +157,365 @@ export function writeServices(doc) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 6 — draft validation, one write per service, and group management
+//
+// The three concerns below share a property that matters more than any of them individually: they
+// let a user change *presentation* without a route into infrastructure. Every function here writes
+// `services.yaml`, `layout.json` or a settings patch, and each one validates through the very
+// normaliser its write path uses — so "the draft is valid" and "the write will succeed" are the
+// same statement rather than two guesses.
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a draft `services.yaml` without writing it.
+ * Runs the exact normaliser `writeServices` runs and throws on the exact conditions it would,
+ * then discards the result. This is what makes the editor's Validate button honest.
+ */
+export function validateServicesDraft(doc) {
+  const groups = [];
+  for (const g of doc?.groups || []) {
+    const name = str(g?.name, 80);
+    if (!name) throw Object.assign(new Error('a group needs a name'), { status: 400, code: 'group_name' });
+    if (!/^[A-Za-z0-9 ._'-]+$/.test(name)) {
+      throw Object.assign(new Error(`group “${name}” has characters OpusHub group names cannot hold`), { status: 400, code: 'group_name' });
+    }
+    if (groups.some((x) => x.name.toLowerCase() === name.toLowerCase())) {
+      throw Object.assign(new Error(`two groups are both called “${name}”`), { status: 400, code: 'duplicate_group' });
+    }
+    const services = (g.services || []).map((x) => normService(x, true));
+    const seen = new Set();
+    for (const s of services) {
+      const key = String(s.container || s.name).toLowerCase();
+      if (seen.has(key)) throw Object.assign(new Error(`“${s.name}” appears twice in ${name}`), { status: 400, code: 'duplicate_service' });
+      seen.add(key);
+    }
+    groups.push({ name, services });
+  }
+  // Two entries binding the same container from different groups is the same error one level up.
+  const byContainer = new Map();
+  for (const g of groups) {
+    for (const s of g.services) {
+      const key = String(s.container || '').toLowerCase();
+      if (!key) continue;
+      if (byContainer.has(key) && byContainer.get(key) !== g.name) {
+        throw Object.assign(
+          new Error(`“${s.name}” and the entry in ${byContainer.get(key)} both bind container “${s.container}” — a container may be presented once`),
+          { status: 400, code: 'duplicate_binding' },
+        );
+      }
+      byContainer.set(key, g.name);
+    }
+  }
+  if (groups.length > 200) throw Object.assign(new Error(`${groups.length} groups exceeds the 200 cap`), { status: 413 });
+  return { groups };
+}
+
+export function validateStacksDraft(doc) {
+  return (doc?.stacks || []).map((x) => normStack(x, true));
+}
+
+export function validateBookmarksDraft(doc) {
+  const names = new Set();
+  for (const g of doc?.groups || []) {
+    const name = str(g?.name, 80) || 'Bookmarks';
+    if (names.has(name.toLowerCase())) throw Object.assign(new Error(`two bookmark groups are both called “${name}”`), { status: 400, code: 'duplicate_group' });
+    names.add(name.toLowerCase());
+    const seen = new Set();
+    for (const b of g?.items || []) {
+      const itemName = str(b?.name, 80);
+      if (!itemName) throw Object.assign(new Error(`a bookmark in ${name} has no name`), { status: 400, code: 'bookmark_name' });
+      if (seen.has(itemName.toLowerCase())) throw Object.assign(new Error(`“${itemName}” appears twice in ${name}`), { status: 400, code: 'duplicate_bookmark' });
+      seen.add(itemName.toLowerCase());
+      try { safeHref(b?.href); }
+      catch (e) { throw Object.assign(new Error(`bookmark “${itemName}”: ${e.message}`), { status: 400, code: 'unsafe_href' }); }
+    }
+  }
+  return true;
+}
+
+/** A layout draft is valid if normalising it produces a layout — the validator never throws. */
+export function normalizeLayoutDraft(doc) {
+  const next = normalizeLayout(doc);
+  if (!next?.hub?.widgets?.length) throw Object.assign(new Error('a layout needs at least one widget'), { status: 400, code: 'empty_layout' });
+  return next;
+}
+
+export function validateSettingsDraft(patch) {
+  const cleaned = sanitizeSettings(deepMerge(getSettings(), patch || {}));
+  if (cleaned._rejected?.length) throw Object.assign(new Error(cleaned._rejected.join('; ')), { status: 400, code: 'invalid_settings' });
+  delete cleaned._rejected;
+  return cleaned;
+}
+
+/** The widget type names this build knows — the importer needs them to decide what maps. */
+export function widgetTypes() {
+  return WIDGET_TYPES;
+}
+
+/**
+ * Icon resolution probe, exposed for the importer.
+ *
+ * `suggestRef` takes bare *slugs* and returns whichever of `si:`/`mdi:` resolves; `existsLocal`
+ * answers for a fully-qualified `set:name` reference. The importer has both shapes — Homepage
+ * writes `si-jellyfin` (a slug after translation to `si:jellyfin`) and `jellyfin.png` (a bare
+ * slug) — so both are handled here, and a miss is a plain `null` rather than an invented
+ * reference. That null is what makes the service fall back to a monogram instead of a broken image.
+ */
+export function suggestIconProbe(ref) {
+  try {
+    if (!ref) return null;
+    const s = String(ref);
+    if (/^[a-z0-9-]+:[a-z0-9+._-]+$/i.test(s)) return existsLocal(s) ? s : null;
+    return suggestRef([s]);
+  } catch { return null; }
+}
+
+/**
+ * Write one container's presentation, merging into whatever overlay already exists.
+ *
+ * This is the single-service editor's write path, and its shape is the point: the caller supplies
+ * presentation fields only. There is no parameter for a container id, an image, a network, a mount
+ * or a label, so an editor — or a bug in one — cannot rewrite a discovered fact.
+ */
+export function putServicePresentation({ group, name, ref, service, draft = {}, actor = null }) {
+  const containerName = service.container?.name || service.name;
+  const doc = readYaml('services.yaml') || {};
+  const groups = Array.isArray(doc.groups) ? structuredClone(doc.groups) : [];
+
+  // Locate any existing entry binding this container, wherever it lives.
+  const binds = (s) => {
+    const c = str(s?.container, 120);
+    if (c) {
+      const lc = c.toLowerCase();
+      return lc === containerName.toLowerCase() || String(ref).toLowerCase() === lc || String(ref).toLowerCase().startsWith(lc);
+    }
+    return str(s?.name, 80)?.toLowerCase() === containerName.toLowerCase()
+      || str(s?.name, 80)?.toLowerCase() === String(name).toLowerCase();
+  };
+
+  let target = null;
+  let targetGroup = null;
+  for (const g of groups) {
+    const list = Array.isArray(g.services) ? g.services : [];
+    const idx = list.findIndex(binds);
+    if (idx >= 0) { target = list[idx]; targetGroup = g; break; }
+  }
+
+  const allowed = {
+    displayName: str(draft.displayName, 80),
+    description: str(draft.description, 300),
+    app: str(draft.app, 80),
+    icon: (() => { try { return draft.icon ? safeIcon(draft.icon) : null; } catch (e) { throw Object.assign(new Error(e.message), { status: 400, code: 'unsafe_icon' }); } })(),
+    url: (() => { try { return draft.url ? safeHref(draft.url) : null; } catch (e) { throw Object.assign(new Error(e.message), { status: 400, code: 'unsafe_href' }); } })(),
+    group: str(draft.group, 80),
+    order: Number.isFinite(Number(draft.order)) ? Number(draft.order) : null,
+  };
+  const flags = {
+    hidden: draft.hidden === true,
+    showOnHub: draft.showOnHub === false ? false : true,
+  };
+
+  const entry = target || { container: containerName, name: containerName };
+  for (const [k, v] of Object.entries(allowed)) {
+    if (v == null) delete entry[k];
+    else entry[k] = v;
+  }
+  // Booleans are always explicit on save: "I turned this on" has to survive as a fact, not as an
+  // absence that the default could later flip.
+  entry.hidden = flags.hidden;
+  entry.showOnHub = flags.showOnHub;
+
+  // An entry that overrides nothing is not worth storing — and storing it would make the container
+  // read as "configured" in discovery, which is a lie about where its appearance comes from.
+  const overridesAnything = Object.keys(allowed).some((k) => allowed[k] != null);
+  if (!overridesAnything && !flags.hidden && entry.showOnHub !== false) {
+    if (target && targetGroup) {
+      targetGroup.services = targetGroup.services.filter((_, i) => targetGroup.services[i] !== target);
+    }
+    const pruned = groups.filter((g) => (g.services || []).length);
+    writeYaml('services.yaml', { groups: pruned });
+    return { cleared: true, entry: null };
+  }
+
+  // A group named in the draft wins; otherwise the entry keeps the group it had, or the container's.
+  const wantedGroup = allowed.group || targetGroup?.name || service.group || 'Other';
+  const cleanGroup = /^[A-Za-z0-9 ._'-]+$/.test(wantedGroup) ? wantedGroup : 'Other';
+
+  if (target) {
+    if (targetGroup.name !== cleanGroup) {
+      targetGroup.services = targetGroup.services.filter((x) => x !== target);
+      entry.group = cleanGroup;
+      let dest = groups.find((g) => g.name === cleanGroup);
+      if (!dest) { dest = { name: cleanGroup, services: [] }; groups.push(dest); }
+      (dest.services ||= []).push(entry);
+    } else {
+      Object.assign(target, entry);
+    }
+  } else {
+    let dest = groups.find((g) => g.name === cleanGroup);
+    if (!dest) { dest = { name: cleanGroup, services: [] }; groups.push(dest); }
+    (dest.services ||= []).push(entry);
+  }
+
+  validateServicesDraft({ groups });
+  writeYaml('services.yaml', { groups: groups.filter((g) => (g.services || []).length) });
+  return { cleared: false, entry, group: cleanGroup };
+}
+
+/**
+ * Remove every override for one container.
+ *
+ * This is how "Use detected URL" behaves, and it is the operation that proves the design: clearing
+ * configuration does not remove a service — the container is still there, still discovered, and
+ * simply falls back to what Docker and its proxy say.
+ */
+export function clearServicePresentation({ service, ref }) {
+  const containerName = service.container?.name || service.name;
+  const doc = readYaml('services.yaml') || {};
+  const groups = Array.isArray(doc.groups) ? structuredClone(doc.groups) : [];
+  const binds = (s) => {
+    const c = str(s?.container, 120);
+    if (c) return c.toLowerCase() === containerName.toLowerCase() || String(ref).toLowerCase().startsWith(c.toLowerCase());
+    return str(s?.name, 80)?.toLowerCase() === containerName.toLowerCase();
+  };
+  let removed = 0;
+  for (const g of groups) {
+    if (!Array.isArray(g.services)) continue;
+    const kept = g.services.filter((s) => !binds(s));
+    removed += g.services.length - kept.length;
+    g.services = kept;
+  }
+  writeYaml('services.yaml', { groups: groups.filter((g) => (g.services || []).length) });
+  return { cleared: removed > 0, removed, container: containerName };
+}
+
+/**
+ * Group management as one document write.
+ *
+ * Groups live in two places by design: their metadata (description, icon) in `services.yaml`, and
+ * their order and visibility in `layout.json` — because order and visibility are properties of the
+ * *composition*, which is what layout.json is for. This function presents both as one operation so
+ * the UI can treat a group as a single first-class thing.
+ */
+export function writeGroups(body = {}, { membership = new Map() } = {}) {
+  const services = readYaml('services.yaml') || {};
+  const groups = Array.isArray(services.groups) ? structuredClone(services.groups) : [];
+  const incoming = Array.isArray(body.groups) ? body.groups : [];
+
+  const byName = new Map(groups.map((g) => [String(g.name || '').toLowerCase(), g]));
+
+  /** Every container currently presented under a group name, configured or derived. */
+  const containersIn = (groupName) => {
+    const configured = groups
+      .filter((g) => String(g?.name || '').toLowerCase() === String(groupName).toLowerCase())
+      .flatMap((g) => (g.services || []).map((s) => str(s?.container || s?.name, 120)).filter(Boolean));
+    const derived = membership instanceof Map ? (membership.get(groupName) || []) : [];
+    return [...new Set([...configured, ...derived])];
+  };
+
+  /**
+   * Rename by *re-filing the containers*, falling back to renaming the group entry when the group
+   * has one. A group discovery derived from a compose project does not exist in `services.yaml`, so
+   * there is no entry to rename — but there are containers to re-file, and re-filing them is both
+   * the only thing that works and the honest description of what a rename is.
+   */
+  const renameGroup = (from, to) => {
+    const existing = byName.get(from.toLowerCase());
+    if (existing) {
+      existing.name = to;
+      byName.delete(from.toLowerCase());
+      byName.set(to.toLowerCase(), existing);
+    }
+    const names = containersIn(from);
+    if (!names.length) return existing ? 1 : 0;
+    let dest = groups.find((g) => String(g.name || '').toLowerCase() === to.toLowerCase());
+    if (!dest) { dest = { name: to, services: [] }; groups.push(dest); byName.set(to.toLowerCase(), dest); }
+    dest.services ||= [];
+    for (const container of names) {
+      // move the existing entry if there is one, else create a minimal one that only sets `group`
+      let moved = null;
+      for (const g of groups) {
+        if (g === dest || !Array.isArray(g.services)) continue;
+        const idx = g.services.findIndex((s) => str(s?.container || s?.name, 120) === container);
+        if (idx >= 0) { [moved] = g.services.splice(idx, 1); break; }
+      }
+      if (moved) { moved.group = to; dest.services.push(moved); }
+      else if (!dest.services.some((s) => str(s?.container || s?.name, 120) === container)) {
+        dest.services.push({ container, group: to });
+      }
+    }
+    return names.length;
+  };
+
+  // Renames first, so a rename followed by an edit addresses the new name.
+  for (const change of incoming) {
+    if (!change) continue;
+    const from = str(change.from ?? change.name, 80);
+    const to = str(change.to ?? change.name, 80);
+    if (!from || !to || from === to) continue;
+    const existing = byName.get(from.toLowerCase());
+    const willMove = containersIn(from).length;
+    if (!existing && !willMove) continue;
+    // The target must be free in *both* senses: no overlay entry carries the name, and no live
+    // group is already presenting under it. Checking only the file would happily merge two groups
+    // that discovery had kept apart — which is the opposite of what a rename means.
+    const liveTarget = membership instanceof Map ? (membership.get(to) || []) : [];
+    if (byName.has(to.toLowerCase()) || liveTarget.length) {
+      throw Object.assign(new Error(`a group called “${to}” already exists`), { status: 400, code: 'duplicate_group' });
+    }
+    renameGroup(from, to);
+  }
+
+  for (const change of incoming) {
+    if (!change) continue;
+    const name = str(change.to ?? change.name, 80);
+    if (!name) continue;
+    const existing = byName.get(name.toLowerCase());
+    const patch = {
+      description: change.description !== undefined ? str(change.description, 200) : undefined,
+      icon: change.icon !== undefined ? (() => { try { return change.icon ? safeIcon(change.icon) : null; } catch { return null; } })() : undefined,
+    };
+    if (existing) {
+      if (patch.description !== undefined) { if (patch.description) existing.description = patch.description; else delete existing.description; }
+      if (patch.icon !== undefined) { if (patch.icon) existing.icon = patch.icon; else delete existing.icon; }
+      continue;
+    }
+    // A brand new group with no services renders nowhere until a container lands in it, which is
+    // the honest behaviour — so it is still stored, and the UI says so.
+    if (change.create) {
+      const created = { name, services: [] };
+      if (change.description) created.description = str(change.description, 200);
+      if (change.icon) { try { created.icon = safeIcon(change.icon); } catch { /* monogram */ } }
+      groups.push(created);
+      byName.set(name.toLowerCase(), created);
+    }
+  }
+
+  // Deletions: the group's metadata goes; nothing else can, because the group is a label.
+  const deletions = new Set((body.delete || []).map((x) => String(x).toLowerCase()));
+  const kept = groups.filter((g) => !deletions.has(String(g.name || '').toLowerCase()));
+  writeYaml('services.yaml', { groups: kept });
+
+  // Order and visibility are the composition's business.
+  const layout = getLayout();
+  const next = normalizeLayout({
+    ...layout,
+    services: {
+      ...layout.services,
+      groupOrder: Array.isArray(body.order) && body.order.length ? body.order.map((x) => str(x, 80)).filter(Boolean) : layout.services.groupOrder,
+      hiddenGroups: Array.isArray(body.hidden) ? body.hidden.map((x) => str(x, 80)).filter(Boolean) : layout.services.hiddenGroups,
+    },
+  });
+  writeJson('layout.json', next);
+
+  return {
+    groups: kept.map((g) => ({ name: g.name, description: g.description || null, icon: g.icon || null, serviceCount: (g.services || []).length })),
+    order: next.services.groupOrder,
+    hidden: next.services.hiddenGroups,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // stacks.yaml — overlay metadata for compose projects
 // ---------------------------------------------------------------------------
 
@@ -258,6 +617,12 @@ export function getSettings() {
   merged.appearance.fontScale = clampInt(10 * merged.appearance.fontScale, 9, 12, 10) / 10;
   merged.appearance.background.blur = clampInt(merged.appearance.background.blur, 0, 48, 24);
   merged.appearance.background.scrim = clampInt(merged.appearance.background.scrim, 0, 100, 62);
+  // Positioning is a closed vocabulary, not free CSS: a stored value can never become an
+  // arbitrary declaration in the page.
+  const BG_POSITION = ['center', 'top', 'bottom', 'left', 'right'];
+  const BG_FIT = ['cover', 'contain'];
+  merged.appearance.background.position = BG_POSITION.includes(merged.appearance.background.position) ? merged.appearance.background.position : 'center';
+  merged.appearance.background.fit = BG_FIT.includes(merged.appearance.background.fit) ? merged.appearance.background.fit : 'cover';
   merged.behavior.refresh.system = clampInt(merged.behavior.refresh.system, 2, 300, 5);
   merged.behavior.refresh.services = clampInt(merged.behavior.refresh.services, 5, 600, 30);
   merged.infrastructure = merged.infrastructure || {};

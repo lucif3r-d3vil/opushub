@@ -22,6 +22,13 @@ export interface SetupStatus {
   discovery?: SetupDiscovery;
 }
 
+/** One built-in presentation template, as the wizard may see it before an account exists.
+ *  Constants only: the real merged preview would carry this installation's group order. */
+export interface SetupTemplate {
+  id: string; name: string; tagline: string; description: string; spacing: string;
+  widgets: { type: string; zone: string; size: string; title: string }[];
+}
+
 /** Count-only discovery summary the wizard may show before an account exists. */
 export interface SetupDiscovery {
   docker: { ok: boolean; state: string; version: string | null; apiVersion?: string | null; operatingSystem?: string | null };
@@ -48,6 +55,15 @@ export interface SetupDiscovery {
   };
   hostAddress: string | null;
   hostAddressSource: string | null;
+  /** Phase 6 — the presentation step. Counts for "what Docker found", template constants for
+   *  "start from a template". Importing is offered as the next step, not here: it is an
+   *  authenticated configuration write and the wizard has no account yet. */
+  presentation?: {
+    detected: { groups: number; services: number; stacks: number };
+    /** the built-in default composition — a constant, not this installation's layout */
+    widgets: { type: string; zone: string; size: string; title: string }[];
+    templates: SetupTemplate[];
+  };
 }
 
 export type AuthStatus = 'loading' | 'setup' | 'login' | 'ready';
@@ -59,7 +75,10 @@ interface AuthCtx {
   error: string | null;
   login: (username: string, password: string) => Promise<void>;
   /** create the administrator account (only meaningful while `status === 'setup'`) */
-  completeSetup: (body: { username: string; password: string; infrastructure?: Record<string, unknown> }) => Promise<void>;
+  completeSetup: (body: {
+    username: string; password: string; infrastructure?: Record<string, unknown>;
+    presentation?: { mode: 'detected' | 'template'; template?: string };
+  }) => Promise<{ presentation?: { mode: string; template: string | null } }>;
   /** leave the wizard's final screen and mount the application */
   enter: () => void;
   logout: () => Promise<void>;
@@ -126,8 +145,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const completeSetup = useCallback<AuthCtx['completeSetup']>(async (body) => {
     setError(null);
     try {
-      const r = await post<{ user: AuthUser }>('/api/setup', body);
+      const r = await post<{ user: AuthUser; presentation?: { mode: string; template: string | null } }>('/api/setup', body);
       if (r?.user) setUser(r.user);
+      return { presentation: r?.presentation };
     } catch (err) {
       throw new Error(message(err, 'Setup could not be completed.'));
     }

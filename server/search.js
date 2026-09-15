@@ -3,7 +3,7 @@
 // render — one model, so search can never offer something that isn't a container, or hide
 // something that is. (Bookmarks and pages are OpusHub's own surfaces, not infrastructure.)
 // A lightweight scoring pass — the client adds its own instant fuzzy layer on top.
-import { readBookmarks, getInventory } from './model.js';
+import { readBookmarks, readServices, getInventory, getLayout } from './model.js';
 import { readEvents } from './activity.js';
 
 const PAGES = [
@@ -31,6 +31,11 @@ const SETTINGS = [
   { title: 'Environment', href: '/settings/environment', hint: 'Engine status, URL sources, Homepage-compatible files', keywords: ['docker', 'engine', 'socket', 'discovery', 'unmatched', 'env', 'paths', 'homepage', 'overlay'] },
   { title: 'Account & sessions', href: '/settings/authentication', hint: 'Password, signed-in browsers, revocation', keywords: ['password', 'change password', 'sessions', 'sign out', 'security', 'login', 'revoke'] },
   { title: 'Advanced', href: '/settings/advanced', hint: 'Custom CSS & JS, refresh intervals, launch logging', keywords: ['custom css', 'custom js', 'theme.css', 'app.js', 'advanced', 'refresh', 'poll', 'launch log'] },
+  // Phase 6 — the configuration surfaces themselves are destinations worth searching for.
+  { title: 'Import & migration', href: '/settings/import', hint: 'Bring a Homepage configuration across, with a review before anything is written', keywords: ['homepage', 'migrate', 'import', 'services.yaml', 'bookmarks.yaml', 'widgets.yaml', 'move', 'convert', 'porter'] },
+  { title: 'Configuration history', href: '/settings/history', hint: 'Every version, what changed, and restore', keywords: ['history', 'backup', 'versions', 'restore', 'undo', 'rollback', 'diff', 'snapshot', 'revert'] },
+  { title: 'Export', href: '/settings/export', hint: 'Take your configuration somewhere else', keywords: ['export', 'download', 'backup', 'move', 'homepage', 'transfer', 'portable'] },
+  { title: 'Configuration scope', href: '/settings/configuration', hint: 'What configuration may change, and what it never can', keywords: ['scope', 'boundary', 'secrets', 'credentials', 'auth', 'separation', 'safety', 'docker'] },
 ];
 
 /**
@@ -68,7 +73,7 @@ export function scoreMatch(needle, ...fields) {
 const score = scoreMatch;
 
 /** Category weights — services and stacks rank highest: they are the point of the index. */
-const KIND_WEIGHT = { service: 1, stack: 1, page: 0.92, setting: 0.88, activity: 0.8, bookmark: 0.85, news: 0.75 };
+const KIND_WEIGHT = { service: 1, stack: 1, page: 0.92, config: 0.9, setting: 0.88, activity: 0.8, bookmark: 0.85, news: 0.75 };
 
 /** Docker subjects whose events are worth offering as destinations — the same names the pages use. */
 const ACTIVITY_WINDOW_MS = 7 * 24 * 3600_000;
@@ -104,6 +109,41 @@ export async function searchAll(q, { newsItems = [] } = {}) {
       }, score(needle, st.name, st.displayName, st.project, st.description, ...st.services), KIND_WEIGHT.stack);
     }
   }
+
+  /**
+   * Phase 6 — configuration, as destinations.
+   *
+   * The brief's example is the specification: searching "Stream" should find the *service*, and
+   * also the *place you would go to change how Stream looks*. Those are different results with
+   * different destinations — one opens the service page, the other opens its editor — so they are
+   * indexed separately rather than folded into one hit that guesses which you meant.
+   */
+  try {
+    const { overlays, groups } = readServices();
+    const layout = getLayout();
+    const hidden = new Set((layout.services?.hiddenGroups || []).map((g) => String(g).toLowerCase()));
+    for (const o of overlays) {
+      const label = o.displayName || o.name || o.container;
+      if (!label) continue;
+      add({
+        title: `${label} presentation`,
+        subtitle: `Configuration · name, icon, group, URL for “${o.container || o.name}”`,
+        href: `/settings/services?service=${encodeURIComponent(o.container || o.name)}`,
+        kind: 'config',
+        icon: o.icon || null,
+      }, score(needle, label, o.name, o.container, o.description, o.app, o.group, 'presentation', 'override', 'rename icon url group'), KIND_WEIGHT.config);
+    }
+    for (const g of groups) {
+      if (!g.name) continue;
+      add({
+        title: `${g.name} group`,
+        subtitle: `Configuration · ${g.services.length} service${g.services.length === 1 ? '' : 's'}${hidden.has(g.name.toLowerCase()) ? ' · hidden' : ''}`,
+        href: `/settings/groups?group=${encodeURIComponent(g.name)}`,
+        kind: 'config',
+        icon: g.icon || null,
+      }, score(needle, g.name, g.description, 'group', 'reorder', 'hide', 'rename'), KIND_WEIGHT.config);
+    }
+  } catch { /* configuration is optional — search still answers without it */ }
 
   /**
    * Recent activity, as *destinations*: "wave — container started · 2h ago" opens the Activity

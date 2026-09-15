@@ -1,6 +1,12 @@
-// First-run setup — the six steps between `docker compose up -d` and a working OpusHub.
+// First-run setup — the eight steps between `docker compose up -d` and a working OpusHub.
 //
-// Welcome → Administrator → Environment → Discovery → Review → Finish
+// Welcome → Administrator → Environment → Discovery → Presentation → Preview → Review → Finish
+//
+// The Presentation and Preview steps are Phase 6. They exist because the migration story has to
+// start before the first page renders: someone arriving from Homepage should be able to say "import
+// my config" on the way in, and someone with a bare engine should be able to see that "nothing to
+// present yet" is a finished state rather than a broken one. Both steps are decisions, not writes —
+// the only write in the wizard is still the account (plus, if chosen, one built-in template).
 //
 // The wizard asks for exactly one thing it cannot discover (the administrator's credentials), plus
 // the two optional infrastructure knobs it cannot read off Docker (the host address used for
@@ -18,11 +24,14 @@
 // *before* the Hub takes over — so the last thing the wizard does is explain what was created,
 // rather than throwing the user straight into a dashboard.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { useAuth, type SetupDiscovery } from '../lib/auth';
+import { useAuth, type SetupDiscovery, type SetupTemplate } from '../lib/auth';
 import { LogoMark } from '../components/Logo';
 
-const STEPS = ['Welcome', 'Administrator', 'Environment', 'Discovery', 'Review', 'Finish'] as const;
+const STEPS = ['Welcome', 'Administrator', 'Environment', 'Discovery', 'Presentation', 'Preview', 'Review', 'Finish'] as const;
+const STEP_REVIEW = 6;
+const STEP_FINISH = 7;
 
 export default function SetupPage() {
   const { setup, completeSetup, enter } = useAuth();
@@ -36,6 +45,15 @@ export default function SetupPage() {
   const [busy, setBusy] = useState(false);
   const [discovery, setDiscovery] = useState<SetupDiscovery | null>(setup?.discovery ?? null);
   const [created, setCreated] = useState<{ username: string; revoked: number } | null>(null);
+  // Phase 6 — the presentation decision. `detected` writes nothing at all; `template` applies one of
+  // the six built-in templates in the same request that creates the account. Importing is offered as
+  // the step *after* sign-in: it is an authenticated configuration write, and the wizard may not
+  // touch configuration before an account exists.
+  const [mode, setMode] = useState<'detected' | 'template'>('detected');
+  const [templateId, setTemplateId] = useState<string | null>(null);
+  const [importAfter, setImportAfter] = useState(false);
+  const [applied, setApplied] = useState<string | null>(null);
+  const nav = useNavigate();
   const heading = useRef<HTMLHeadingElement>(null);
 
   // the wizard is the one screen that may talk to the discovery summary before an account exists
@@ -80,9 +98,14 @@ export default function SetupPage() {
     const ports = Object.fromEntries(Object.entries(entrypointPorts).filter(([, v]) => String(v || '').trim()));
     if (Object.keys(ports).length) infra.entrypointPorts = ports;
     try {
-      await completeSetup({ username: username.trim(), password, ...(Object.keys(infra).length ? { infrastructure: infra } : {}) });
+      const r = await completeSetup({
+        username: username.trim(), password,
+        ...(Object.keys(infra).length ? { infrastructure: infra } : {}),
+        ...(mode === 'template' && templateId ? { presentation: { mode: 'template' as const, template: templateId } } : {}),
+      });
+      setApplied(r?.presentation?.template ?? null);
       setCreated({ username: username.trim(), revoked: 0 });
-      setStep(5);
+      setStep(STEP_FINISH);
       setBusy(false);
     } catch (err) {
       setProblem(err instanceof Error ? err.message : 'Setup could not be completed.');
@@ -276,6 +299,147 @@ export default function SetupPage() {
           {step === 4 && (
             <>
               <p className="lede">
+                Docker decided what exists. This decides how it looks on the way in — and it is the
+                only part of setup where your own taste enters. Anything you pick here can be changed
+                later in Settings; nothing here changes what Docker reports.
+              </p>
+
+              <div className="setup-choices" role="radiogroup" aria-label="Starting presentation">
+                <button
+                  type="button" role="radio" aria-checked={mode === 'detected' && !importAfter}
+                  className={`setup-choice${mode === 'detected' && !importAfter ? ' sel' : ''}`}
+                  onClick={() => { setMode('detected'); setTemplateId(null); setImportAfter(false); }}
+                >
+                  <span className="setup-choice-title">Use what Docker found</span>
+                  <span className="setup-choice-desc">
+                    Every container is listed under its compose project with the name, icon and URL the
+                    engine and your proxy already imply. Nothing is written. This is the right answer
+                    for a fresh install, and the wrong one for nobody.
+                  </span>
+                  <span className="setup-choice-meta">
+                    {discovery?.presentation?.detected.groups ?? discovery?.stacks ?? 0} group(s) ·
+                    {' '}{discovery?.presentation?.detected.services ?? discovery?.services ?? 0} application(s)
+                  </span>
+                </button>
+
+                <button
+                  type="button" role="radio" aria-checked={mode === 'template'}
+                  className={`setup-choice${mode === 'template' ? ' sel' : ''}`}
+                  onClick={() => { setMode('template'); setImportAfter(false); if (!templateId) setTemplateId(discovery?.presentation?.templates[0]?.id ?? null); }}
+                >
+                  <span className="setup-choice-title">Start from a template</span>
+                  <span className="setup-choice-desc">
+                    A pre-arranged Hub: which blocks appear, how big they are and how tightly the page
+                    is set. Presentation only — a template can never add, remove or rename a service.
+                  </span>
+                  <span className="setup-choice-meta">{discovery?.presentation?.templates.length ?? 0} built in</span>
+                </button>
+
+                <button
+                  type="button" role="radio" aria-checked={importAfter}
+                  className={`setup-choice${importAfter ? ' sel' : ''}`}
+                  onClick={() => { setImportAfter(!importAfter); }}
+                >
+                  <span className="setup-choice-title">Import a Homepage configuration</span>
+                  <span className="setup-choice-desc">
+                    Comes from a Homepage install: <code className="mono-meta">services.yaml</code>,{' '}
+                    <code className="mono-meta">bookmarks.yaml</code>, widgets, theme and custom assets.
+                    You will review what matched and what did not before a single file is written, and
+                    entries that match no container stay links rather than becoming fake services.
+                  </span>
+                  <span className="setup-choice-meta">
+                    {importAfter ? 'Opens the import screen after you sign in' : 'Nothing imported yet — this only takes you there next'}
+                  </span>
+                </button>
+              </div>
+
+              {mode === 'template' && !importAfter && (
+                <>
+                  <h3 className="setup-explain-title" style={{ marginTop: 'var(--sp-8)' }}>Which template</h3>
+                  <div className="setup-templates" role="radiogroup" aria-label="Template">
+                    {(discovery?.presentation?.templates ?? []).map((t) => (
+                      <button
+                        key={t.id} type="button" role="radio" aria-checked={templateId === t.id}
+                        className={`setup-template${templateId === t.id ? ' sel' : ''}`}
+                        onClick={() => setTemplateId(t.id)}
+                      >
+                        <span className="setup-template-name">{t.name}</span>
+                        <span className="setup-template-tag">{t.tagline}</span>
+                        <span className="setup-template-meta">
+                          {t.widgets.length} block{t.widgets.length === 1 ? '' : 's'} · {t.spacing}
+                        </span>
+                      </button>
+                    ))}
+                    {!(discovery?.presentation?.templates ?? []).length && (
+                      <p className="hint">No templates available — the engine is reachable but the catalogue could not be read.</p>
+                    )}
+                  </div>
+                  <p className="hint">
+                    Group preferences inside a template are matched against the groups your containers
+                    actually produce. Names that match nothing are simply not applied, and the choice is
+                    recorded as a configuration version you can undo.
+                  </p>
+                </>
+              )}
+            </>
+          )}
+
+          {step === 5 && (
+            <>
+              <p className="lede">
+                {importAfter
+                  ? 'Nothing has been chosen yet, and nothing has been written.'
+                  : mode === 'template'
+                    ? `This is the shape “${(discovery?.presentation?.templates ?? []).find((t) => t.id === templateId)?.name || templateId}” produces.`
+                    : 'This is the shape your Hub takes with no configuration at all.'}
+              </p>
+
+              {importAfter ? (
+                <>
+                  <div className="setup-result">
+                    <p>
+                      The import is next, and it begins with a review: every entry in the files you
+                      provide is classified as <b>matched to a running container</b>,{' '}
+                      <b>unmatched</b>, or <b>invalid</b>, with the counts in front of you before you
+                      apply anything.
+                    </p>
+                    <p className="hint">
+                      Unmatched entries are kept only as bookmarks or presentation overlays. They can
+                      never enter the Docker inventory — a configuration file cannot invent a container.
+                      Credentials found in widget blocks are dropped and never re-exported.
+                    </p>
+                  </div>
+                  <p className="hint">
+                    Your account is created first (that request is the only write in this wizard), and
+                    then you land on the import screen with it already open.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <SetupPreview
+                    widgets={mode === 'template'
+                      ? (discovery?.presentation?.templates ?? []).find((t) => t.id === templateId)?.widgets ?? []
+                      : discovery?.presentation?.widgets ?? []}
+                    spacing={mode === 'template'
+                      ? (discovery?.presentation?.templates ?? []).find((t) => t.id === templateId)?.spacing ?? 'comfortable'
+                      : 'comfortable'}
+                    tiles={Math.min(discovery?.presentation?.detected.services ?? discovery?.services ?? 0, 12)}
+                    groups={discovery?.presentation?.detected.groups ?? discovery?.stacks ?? 0}
+                  />
+                  <p className="hint">
+                    A wireframe, not a screenshot: the blocks and their arrangement are exactly what
+                    {' '}{mode === 'template' ? 'the template' : 'a fresh install'} sets up, while the tiles stand in for
+                    your {discovery?.presentation?.detected.services ?? discovery?.services ?? 0} applications — their real
+                    names, icons and URLs come from the engine once you are signed in.
+                  </p>
+                </>
+              )}
+            </>
+          )}
+
+          {step === STEP_REVIEW && (
+            <>
+              <p className="lede">
                 One last look before anything is written. Creating the account closes setup for good:
                 the wizard cannot be run again, and every API locks behind a session.
               </p>
@@ -319,7 +483,7 @@ export default function SetupPage() {
             </>
           )}
 
-          {step === 5 && (
+          {step === STEP_FINISH && (
             <>
               <p className="lede">
                 OpusHub is ready. You are signed in as <b>{created?.username || username}</b>, and the
@@ -341,23 +505,75 @@ export default function SetupPage() {
         {problem && <p className="auth-error" role="alert">{problem}</p>}
 
         <footer className="setup-foot">
-          <button className="btn btn-quiet" onClick={back} disabled={step === 0 || step >= 5 || busy}>Back</button>
+          <button className="btn btn-quiet" onClick={back} disabled={step === 0 || step >= STEP_FINISH || busy}>Back</button>
           <span className="setup-step-note">Step {Math.min(step + 1, STEPS.length)} of {STEPS.length}</span>
-          {step < 4 && (
+          {step < STEP_REVIEW && (
             <button className="btn btn-primary" onClick={step === 1 ? advanceFromAccount : next}>
               {step === 0 ? 'Begin' : 'Continue'}
             </button>
           )}
-          {step === 4 && (
+          {step === STEP_REVIEW && (
             <button className="btn btn-primary" onClick={finish} disabled={busy}>
               {busy ? 'Creating account…' : 'Create account'}
             </button>
           )}
-          {step === 5 && (
-            <button className="btn btn-primary" onClick={() => enter()}>Enter OpusHub</button>
+          {step === STEP_FINISH && (
+            <button
+              className="btn btn-primary"
+              onClick={() => { enter(); if (importAfter) nav('/settings/import'); }}
+            >{importAfter ? 'Enter OpusHub and import' : 'Enter OpusHub'}</button>
           )}
         </footer>
       </main>
+    </div>
+  );
+}
+
+/** The Preview step's wireframe.
+ *
+ *  It shows two true things and invents nothing: the arrangement of blocks the choice produces
+ *  (template constants, or the built-in default composition), and how many applications will be
+ *  listed. Tiles are deliberately blank — the real names, icons and URLs belong to the engine and
+ *  are only readable once an account exists. */
+function SetupPreview({ widgets, spacing, tiles, groups }: {
+  widgets: { type: string; zone: string; size: string; title: string }[];
+  spacing: string; tiles: number; groups: number;
+}) {
+  const rail = widgets.filter((w) => w.zone === 'rail');
+  const main = widgets.filter((w) => w.zone !== 'rail');
+  return (
+    <div className={`setup-preview spacing-${spacing}`} aria-label="Illustrative preview of the Hub">
+      <div className="setup-preview-chrome" aria-hidden="true">
+        <span className="setup-preview-dot" /><span className="setup-preview-dot" /><span className="setup-preview-dot" />
+        <span className="setup-preview-name">The Hub</span>
+      </div>
+      <div className="setup-preview-cols">
+        <div className="setup-preview-main">
+          {main.map((w, i) => <SetupBlock key={`${w.type}-${i}`} w={w} />)}
+          <div className="setup-preview-group">
+            <span className="setup-preview-group-name">
+              {groups ? `${groups} group${groups === 1 ? '' : 's'} from your engine` : 'Your services'}
+            </span>
+            <div className="setup-tiles">
+              {Array.from({ length: tiles }).map((_, i) => <span key={i} className="setup-tile" aria-hidden="true" />)}
+              {!tiles && <span className="stale-note">Nothing to list yet — an empty inventory is a finished state, not a broken one.</span>}
+            </div>
+          </div>
+        </div>
+        <div className="setup-preview-rail">
+          {rail.map((w, i) => <SetupBlock key={`${w.type}-${i}`} w={w} />)}
+          {!rail.length && <span className="stale-note">No rail blocks in this arrangement.</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SetupBlock({ w }: { w: { size: string; title: string } }) {
+  return (
+    <div className={`setup-block setup-block--${w.size || 'md'}`}>
+      <span className="setup-block-title">{w.title}</span>
+      <span className="setup-block-skel" aria-hidden="true" />
     </div>
   );
 }

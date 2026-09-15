@@ -5,7 +5,7 @@ import { relTime } from '../lib/format';
 import { useLayout, useSettings, type DeepPartial } from '../lib/theme';
 import { useAuth } from '../lib/auth';
 import type {
-  DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
+  CustomDoc, DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
   TemplatesDoc, WidgetCatalogueEntry, WidgetDoc, WidgetInstance, WidgetZone,
 } from '../lib/types';
 import { Icon } from '../components/Icon';
@@ -14,13 +14,15 @@ import { Loading, Menu, MenuButton, type MenuItem, Modal, PageHero, ProviderNote
 import { GroupNameField } from '../components/GroupNameField';
 import { checkGroupName, renameGroupAt, uniqueGroupName } from '../lib/groupName';
 import { Sortable } from '../components/Sortable';
+import { Block, Row } from './settings/parts';
+import { ConfigurationTab, ExportTab, HistoryTab, ImportTab } from './settings/Configuration';
 import { HubPreview } from '../components/hub/HubPreview';
 import {
   addWidget, configSummary, hiddenWidgets, moveWidget, removeWidget, setSpacing, setWidget, visibleInZone,
 } from '../lib/hubLayout';
 import {
   assignGroup, clearGroup, ensureOverlay, overlayFromInventory, removeEntry, removeGroup,
-  saveOverlay, setGroupDescription, setIcon, type DraftGroup, type DraftService,
+  saveOverlay, setGroupDescription, setGroupIcon, setIcon, type DraftGroup, type DraftService,
 } from '../lib/overlay';
 
 /**
@@ -50,6 +52,10 @@ const TABS = [
   { id: 'groups', label: 'Groups', section: 'Content' },
   { id: 'bookmarks', label: 'Bookmarks', section: 'Content' },
   { id: 'integrations', label: 'Integrations', section: 'Connections' },
+  { id: 'import', label: 'Import & migration', section: 'Configuration' },
+  { id: 'history', label: 'History', section: 'Configuration' },
+  { id: 'export', label: 'Export', section: 'Configuration' },
+  { id: 'configuration', label: 'Scope', section: 'Configuration' },
   { id: 'environment', label: 'Environment', section: 'This install' },
   { id: 'authentication', label: 'Account & sessions', section: 'This install' },
   { id: 'advanced', label: 'Advanced', section: 'This install' },
@@ -118,6 +124,10 @@ export default function SettingsPage() {
           {tab === 'authentication' && <AuthenticationTab />}
           {tab === 'environment' && <EnvironmentTab />}
           {tab === 'advanced' && <AdvancedTab />}
+          {tab === 'import' && <ImportTab />}
+          {tab === 'history' && <HistoryTab />}
+          {tab === 'export' && <ExportTab />}
+          {tab === 'configuration' && <ConfigurationTab />}
           {!TABS.some((t) => t.id === tab) && (
             <p className="stale-note">Unknown section. <button className="section-link" onClick={() => nav('/settings/appearance')}>Go to Appearance →</button></p>
           )}
@@ -128,25 +138,6 @@ export default function SettingsPage() {
 }
 
 /* ============ row primitives ============ */
-function Row({ label, desc, children, tight }: { label: string; desc?: string; children: ReactNode; tight?: boolean }) {
-  return (
-    <div className="form-row" style={tight ? { padding: '10px 0' } : undefined}>
-      <div>
-        <div className="fr-label">{label}</div>
-        {desc && <div className="fr-desc">{desc}</div>}
-      </div>
-      <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>{children}</div>
-    </div>
-  );
-}
-function Block({ title, children, aside }: { title: ReactNode; children: ReactNode; aside?: ReactNode }) {
-  return (
-    <section style={{ marginBottom: 'var(--section-gap)' }}>
-      <div className="section-head" style={{ marginBottom: 2 }}><h2 className="section-title">{title}</h2><span className="section-aside">{aside}</span></div>
-      {children}
-    </section>
-  );
-}
 
 /* ============ General ============ */
 /**
@@ -551,6 +542,9 @@ function BackgroundTab() {
           </div>
           <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>
             Drop images into <code className="mono-meta">config/backgrounds/</code>, or paste a URL below.
+            {' '}{photo
+              ? <>In use: <span className="mono-meta">{files.some((f) => f.url === photo) ? photo.replace('/user/backgrounds/', '') : photo}</span>{files.some((f) => f.url === photo) ? ' (local file)' : urlPhoto ? ' (remote — validated when you set it)' : ''}</>
+              : 'Nothing selected.'}
           </p>
           <div className="field" style={{ marginTop: 'var(--sp-4)', maxWidth: 480 }}>
             <label htmlFor="bgurl">Background URL</label>
@@ -577,6 +571,26 @@ function BackgroundTab() {
           <Row label="Scrim" desc="Veil between photo and content. Below 45% the preview will tell you what it costs.">
             <input type="range" min={0} max={100} value={a.background.scrim} onChange={(e) => set({ appearance: { background: { scrim: Number(e.target.value) } } })} aria-label="Background scrim" />
             <span className="mono-meta" style={{ width: 40 }}>{a.background.scrim}%</span>
+          </Row>
+          <Row label="Position" desc="Which part of the image survives the crop. The subject is rarely in the middle of a photo.">
+            <Segmented
+              value={a.background.position} ariaLabel="Background position"
+              onChange={(v) => set({ appearance: { background: { position: v } } })}
+              options={[
+                { value: 'center', label: 'Centre' }, { value: 'top', label: 'Top' },
+                { value: 'bottom', label: 'Bottom' }, { value: 'left', label: 'Left' }, { value: 'right', label: 'Right' },
+              ]}
+            />
+          </Row>
+          <Row label="Fit" desc="Cover fills the viewport and crops; contain shows the whole image and lets the base background show through.">
+            <Segmented
+              value={a.background.fit} ariaLabel="Background fit"
+              onChange={(v) => set({ appearance: { background: { fit: v } } })}
+              options={[{ value: 'cover', label: 'Cover' }, { value: 'contain', label: 'Contain' }]}
+            />
+          </Row>
+          <Row label="Remove" desc="Clears the photo but keeps your blur, scrim, position and fit for the next one." tight>
+            <button className="btn btn-sm" disabled={!photo} onClick={() => { setVerdict(null); set({ appearance: { background: { photo: null } } }); }}>Remove background</button>
           </Row>
         </Block>
       )}
@@ -858,6 +872,7 @@ function TemplatesTab({ onPreview }: { onPreview: (t: TemplateEntry | null) => v
   const { data, loading } = usePolled<TemplatesDoc>('/api/templates', 0);
   const { busy, err, save } = useSave();
   const [applied, setApplied] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<TemplateEntry | null>(null);
   const templates = data?.templates || [];
   const currentSpacing = layout?.hub.spacing;
 
@@ -901,13 +916,7 @@ function TemplatesTab({ onPreview }: { onPreview: (t: TemplateEntry | null) => v
                 <button
                   className="btn btn-primary btn-sm"
                   disabled={busy}
-                  onClick={() => save(async () => {
-                    await post('/api/layout/template', { id: t.id });
-                    invalidateShared('/api/layout');
-                    await reload();
-                    onPreview(null);
-                    setApplied(t.id);
-                  })}
+                  onClick={() => setConfirming(t)}
                 >
                   {applied === t.id ? 'Applied' : 'Apply'}
                 </button>
@@ -919,7 +928,46 @@ function TemplatesTab({ onPreview }: { onPreview: (t: TemplateEntry | null) => v
       </div>
       <p className="stale-note" style={{ marginTop: 'var(--sp-5)' }}>
         Applying keeps your service ordering, hidden groups and first-run dismissal — a template only rearranges the page.
+        A configuration version is recorded immediately before it is applied, so the previous arrangement is one
+        click away in <Link className="section-link" to="/settings/history">History</Link>.
       </p>
+
+      {confirming && (
+        <Modal
+          title={`Apply “${confirming.name}”?`}
+          onClose={() => setConfirming(null)}
+          footer={(
+            <>
+              <button className="btn" onClick={() => setConfirming(null)}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                disabled={busy}
+                onClick={() => save(async () => {
+                  await post('/api/layout/template', { id: confirming.id });
+                  invalidateShared('/api/layout');
+                  await reload();
+                  onPreview(null);
+                  setApplied(confirming.id);
+                  setConfirming(null);
+                })}
+              >Replace my arrangement</button>
+            </>
+          )}
+        >
+          <p>
+            This replaces the current Hub arrangement — {(layout?.hub.widgets || []).length} block(s) at{' '}
+            <span className="mono-meta">{layout?.hub.spacing}</span> — with the {(confirming.widgets || []).length} block(s)
+            this template defines.
+          </p>
+          <p className="stale-note">
+            Your service ordering, hidden groups, icon and naming choices are not touched: a template
+            rearranges the page, it never edits what a service is.
+          </p>
+          <p className="stale-note">
+            A snapshot of the current arrangement is recorded first and appears in History, so this is undoable.
+          </p>
+        </Modal>
+      )}
     </>
   );
 }
@@ -941,8 +989,10 @@ function ServicesTab() {
   const bound = useMemo(() => new Set(inventory.filter((s) => s.configured).map((s) => s.name)), [inventory]);
   const groups = useMemo<DraftGroup[] | null>(() => draft ?? (data ? overlayFromInventory(data) : null), [draft, data]);
 
-  // ?container=<name> — "Customize" from the Hub lands straight in the editor for that service
-  const focus = params.get('container');
+  // ?container=<name> — "Customize" from the Hub lands straight in the editor for that service.
+  // ?service=<name> is the same thing from the command palette, which addresses containers by the
+  // name the engine reports; both are accepted so neither link can land on a closed drawer.
+  const focus = params.get('container') || params.get('service');
   useEffect(() => {
     if (!focus || !data || draft) return;
     const svc = inventory.find((s) => s.name === focus);
@@ -1128,6 +1178,29 @@ function ServicesTab() {
   );
 }
 
+/** Marks whether the field it sits beside is the detected value or your own override. */
+function FieldOrigin({ overridden }: { overridden: boolean }) {
+  return <span className={`field-origin${overridden ? ' field-origin--override' : ''}`}>{overridden ? 'override' : 'detected'}</span>;
+}
+
+function urlSourceWord(source: string | null | undefined): string {
+  switch (source) {
+    case 'traefik': return 'Traefik route';
+    case 'published-port': return 'published port';
+    case 'manual': return 'your override';
+    default: return 'no source';
+  }
+}
+
+function iconSourceWord(source: string | null | undefined): string {
+  switch (source) {
+    case 'config': return 'services.yaml';
+    case 'label': return 'a container label';
+    case 'derived:image': return 'the image name';
+    default: return 'nothing in particular';
+  }
+}
+
 function ServiceEditor({ group, svc, inventory, onSave, onClose }: { group: string; svc: DraftService; inventory: Service[]; onSave: (p: Partial<DraftService>) => void; onClose: () => void }) {
   const [form, setForm] = useState({ ...svc, keywordsText: (svc.keywords || []).join(', '), metaText: (svc.meta || []).map((m) => `${m.label}: ${m.value}`).join('\n') });
   const f = (k: string, v: unknown) => setForm((x) => ({ ...x, [k]: v }));
@@ -1151,6 +1224,30 @@ function ServiceEditor({ group, svc, inventory, onSave, onClose }: { group: stri
         </>
       }
     >
+      {live && (
+        <div className="svc-identity" aria-label="Container identity, read from Docker">
+          <div className="svc-identity-head">
+            <span className="svc-identity-tag">From Docker</span>
+            <span className="stale-note">read-only — OpusHub never edits infrastructure</span>
+          </div>
+          <dl className="svc-identity-kv">
+            <dt>Container</dt>
+            <dd className="mono-meta">{live.name}</dd>
+            <dt>Image</dt>
+            <dd className="mono-meta">{live.container.image || '—'}</dd>
+            <dt>Compose project</dt>
+            <dd className="mono-meta">
+              {live.container.composeProject || <span className="stale-note">standalone — not part of a project</span>}
+              {live.container.composeService ? <span className="stale-note"> · service {live.container.composeService}</span> : null}
+            </dd>
+            <dt>Container ID</dt>
+            <dd className="mono-meta">{live.id}</dd>
+            <dt>State</dt>
+            <dd className="mono-meta">{live.container.state || 'unknown'}</dd>
+          </dl>
+        </div>
+      )}
+
       <div className="field">
         <label>Container <span className="hint">(what this overlay is about — required for it to show anywhere)</span></label>
         <input className="input mono-meta" list="opus-live-containers" value={form.container || ''} onChange={(e) => f('container', e.target.value)} placeholder={live ? live.name : 'start typing a running container'} />
@@ -1160,18 +1257,33 @@ function ServiceEditor({ group, svc, inventory, onSave, onClose }: { group: stri
         {form.container && !live && <p className="stale-note" style={{ color: 'var(--warn)' }}>no container named “{form.container}” on this engine — this entry will be reported as unmatched, and no service will appear.</p>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 var(--sp-5)' }}>
-        <div className="field"><label>Display name</label><input className="input" value={form.displayName || ''} onChange={(e) => f('displayName', e.target.value)} placeholder={live ? live.displayName : 'derived from the container'} /></div>
-        <div className="field"><label>Group</label><input className="input" value={form.group || ''} onChange={(e) => f('group', e.target.value)} placeholder={live?.group || 'Other'} /></div>
+        <div className="field">
+          <label>Display name <FieldOrigin overridden={!!form.displayName} /></label>
+          <input className="input" value={form.displayName || ''} onChange={(e) => f('displayName', e.target.value)} placeholder={live ? live.displayName : 'derived from the container'} />
+          {live && <span className="hint">Detected: <span className="mono-meta">{live.displayName}</span>{live.overlaid ? ` · from ${live.overlaid}` : ''}</span>}
+        </div>
+        <div className="field">
+          <label>Group <FieldOrigin overridden={!!form.group} /></label>
+          <input className="input" value={form.group || ''} onChange={(e) => f('group', e.target.value)} placeholder={live?.group || 'Other'} />
+          {live && <span className="hint">Detected: <span className="mono-meta">{live.group}</span> ({live.groupSource || 'derived'})</span>}
+        </div>
       </div>
       <div className="field"><label>App / software <span className="hint">(shown as identity; the image is the default)</span></label><input className="input" value={form.app || ''} onChange={(e) => f('app', e.target.value)} /></div>
       <div className="field"><label>Description</label><input className="input" value={form.description || ''} onChange={(e) => f('description', e.target.value)} /></div>
       <div className="field">
-        <label>URL override <span className="hint">(optional — wins over Traefik and published ports)</span></label>
-        <input className="input mono-meta" value={form.url || ''} onChange={(e) => f('url', e.target.value)} placeholder={live && live.url ? `discovered: ${live.url}` : 'leave empty to use what the engine says'} />
-        {live?.url && !form.url && (
-          <p className="stale-note">discovered from {live.urlSource === 'traefik' ? 'Traefik metadata' : live.urlSource === 'published-port' ? 'a published port' : 'config'} · <span className="mono-meta">{live.url}</span></p>
+        <label>URL <FieldOrigin overridden={!!form.url} /></label>
+        <input className="input mono-meta" value={form.url || ''} onChange={(e) => f('url', e.target.value)} placeholder={live && live.url ? `leave empty to keep ${live.url}` : 'leave empty unless you need to point somewhere else'} />
+        {live?.url ? (
+          <span className="hint">
+            Detected: <span className="mono-meta">{live.url}</span> · source <b>{urlSourceWord(live.urlSource)}</b>
+            {form.url ? ' — your override wins until you clear this field.' : ' — this is what the Hub links to.'}
+          </span>
+        ) : (
+          <span className="hint">
+            No URL was detected ({live?.urlNote || 'no proxy route and no published port'}). Setting one here is an
+            override, not a discovery, and it is shown as such everywhere.
+          </span>
         )}
-        {!live?.url && !form.url && <p className="stale-note">{live?.urlNote || 'this container has no web endpoint — it will read “No web endpoint detected”, which is honest, not broken'}</p>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 var(--sp-5)' }}>
         <div className="field"><label>Order in group</label><input type="number" className="input" value={form.order ?? ''} onChange={(e) => f('order', e.target.value === '' ? null : Number(e.target.value))} /></div>
@@ -1186,7 +1298,13 @@ function ServiceEditor({ group, svc, inventory, onSave, onClose }: { group: stri
       <div className="field"><label>Notes / meta — one per line as <span className="mono-meta">Label: value</span></label><textarea className="textarea" rows={3} value={form.metaText} onChange={(e) => f('metaText', e.target.value)} /></div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
         <Icon ref={form.icon || live?.icon} name={form.displayName || form.name || 'svc'} size={40} />
-        <span className="stale-note">current icon — set it from the list so it overrides the derived one</span>
+        <span className="stale-note">
+          {form.icon
+            ? <>Override in use — <span className="mono-meta">{form.icon}</span></>
+            : live?.icon
+              ? <>Detected from {iconSourceWord(live.iconSource)}: <span className="mono-meta">{live.icon}</span>. Set one from the list to override it.</>
+              : 'No icon detected — the monogram below the name is what renders. Choose one, or leave it.'}
+        </span>
       </div>
     </Modal>
   );
@@ -1202,8 +1320,12 @@ function GroupsTab() {
   // the row that is being edited (that was the bug behind “can't rename New group”).
   const [editing, setEditing] = useState<number | null>(null);
   const [freshGroup, setFreshGroup] = useState<number | null>(null);
+  const [iconFor, setIconFor] = useState<string | null>(null);
   const inventory = useMemo(() => data?.services ?? [], [data]);
   const hiddenGroups = layout?.services?.hiddenGroups || [];
+  // ?group=<name> from the command palette: open that row rather than making someone hunt for it
+  const [params, setParams] = useSearchParams();
+  const focus = params.get('group');
 
   const groups = useMemo<DraftGroup[] | null>(() => {
     if (draft) return draft;
@@ -1221,6 +1343,16 @@ function GroupsTab() {
     }
     return seen;
   }, [inventory]);
+
+  // ?group=<name> from the command palette: open that row rather than making someone hunt for it.
+  useEffect(() => {
+    if (!focus || !groups?.length) return;
+    const at = groups.findIndex((g) => g.name === focus);
+    if (at >= 0) setEditing((current) => current ?? at);
+    params.delete('group');
+    setParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus, groups?.length]);
 
   if (!groups) return <Loading what="the service groups" />;
   const dirty = !!draft;
@@ -1245,6 +1377,11 @@ function GroupsTab() {
         discovery (their compose project) or by an overlay you write here. Nothing in this pane can create a service.
         {dirty && <b style={{ color: 'var(--warn)' }}> · unsaved changes</b>}
       </p>
+      <p className="stale-note" style={{ marginBottom: 'var(--sp-5)' }}>
+        <b>An OpusHub group is not a Docker Compose project.</b> Compose projects decide the default filing
+        Docker produces; a group is what you choose to call that heading, and it can hold containers from
+        several projects, bookmarks with no container at all, or nothing yet.
+      </p>
       {err && <p className="stale-note" style={{ color: 'var(--fail)' }}>{err}</p>}
 
       <Sortable
@@ -1265,6 +1402,13 @@ function GroupsTab() {
             <div className="group-row" key={name}>
               <div className="group-row-head">
                 {ctx.handle}
+                <button
+                  className="icon-btn group-icon-btn" title={`Icon for ${g.name}`}
+                  aria-label={`Choose an icon for ${g.name}`}
+                  onClick={() => setIconFor(g.name)}
+                >
+                  <Icon ref={g.icon} name={g.name} size={22} />
+                </button>
                 <GroupNameField
                   name={g.name}
                   existing={groups.filter((_, i) => i !== gi).map((x) => x.name)}
@@ -1340,6 +1484,13 @@ function GroupsTab() {
         <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => save(async () => { await saveOverlay(groups); setDraft(null); })}>{busy ? 'Saving…' : 'Save groups'}</button>
         {dirty && <button className="btn btn-quiet" onClick={() => setDraft(null)}>Discard</button>}
       </div>
+      {iconFor && (
+        <IconPickerModal
+          initial={groups.find((g) => g.name === iconFor)?.icon ?? null}
+          onPick={(ref) => setDraft(setGroupIcon(groups, iconFor, ref))}
+          onClose={() => setIconFor(null)}
+        />
+      )}
     </>
   );
 }
@@ -1551,9 +1702,6 @@ function hostOf(u: string) { try { return new URL(u).hostname; } catch { return 
 /* ============ Advanced ============ */
 function AdvancedTab() {
   const { settings, update } = useSettings();
-  const { data: custom } = usePolled<{ cssEnabled: boolean; jsEnabled: boolean; css: string | null; jsPresent: boolean }>('/api/custom', 0);
-  const { save, busy, err } = useSave();
-  const [cssText, setCssText] = useState<string | null>(null);
   return (
     <>
       <p className="lede">
@@ -1576,25 +1724,134 @@ function AdvancedTab() {
         </Row>
       </Block>
 
-      <Block title="Custom CSS & JS" aside={<span className="stale-note">files live next to services.yaml</span>}>
-        <Row label="theme.css" desc="Custom CSS, linked into every page when enabled. A stylesheet cannot break OpusHub's own rendering — it only adds." tight>
-          <Switch checked={custom?.cssEnabled ?? false} onChange={(v) => update({ advanced: { customCss: v } }, true)} label="Enable custom CSS" />
-        </Row>
-        <Row label="app.js" desc="Custom JS, same-origin, opt-in. A thrown error is contained to that script; it never runs server-side." tight>
-          <Switch checked={custom?.jsEnabled ?? false} onChange={(v) => update({ advanced: { customJs: v } }, true)} label="Enable custom JS" />
-        </Row>
-        {(custom?.cssEnabled) && (
-          <div className="field" style={{ marginTop: 'var(--sp-4)' }}>
-            <label>config/theme.css</label>
-            <textarea className="textarea" rows={8} value={cssText ?? custom?.css ?? ''} onChange={(e) => setCssText(e.target.value)} />
-            <span>
-              <button className="btn btn-sm" disabled={busy} onClick={() => save(async () => { await put('/api/custom', { css: cssText ?? '' }); setCssText(null); })}>{busy ? 'Saving…' : 'Save theme.css'}</button>
-              {err && <span className="stale-note" style={{ color: 'var(--fail)', marginLeft: 10 }}>{err}</span>}
-            </span>
-          </div>
-        )}
-      </Block>
+      <CustomCodeBlock
+        cssEnabled={settings?.advanced?.customCss ?? false}
+        jsEnabled={settings?.advanced?.customJs ?? false}
+        onToggle={(which, v) => update(which === 'css' ? { advanced: { customCss: v } } : { advanced: { customJs: v } }, true)}
+      />
     </>
+  );
+}
+
+/**
+ * The custom-code editor. Two files, each with its own switch, its own draft and its own failure.
+ *
+ * What it deliberately does not do is hide the file behind the switch: an operator who turns custom
+ * CSS off still sees what is in theme.css, because the alternative is a file they cannot read
+ * without a shell. Editing stays available either way — nothing here is loaded into a page until
+ * the switch is on, and nothing here is ever executed by the server.
+ *
+ * A save is refused as a whole when the syntax check fails (server-side, in `PUT /api/custom`), so
+ * the draft is preserved on screen and the previous file stays on disk. Reset is the escape hatch.
+ */
+function CustomCodeBlock({ cssEnabled, jsEnabled, onToggle }: {
+  cssEnabled: boolean; jsEnabled: boolean; onToggle: (which: 'css' | 'js', v: boolean) => void;
+}) {
+  const { data: custom, refresh } = usePolled<CustomDoc>('/api/custom', 0);
+  const { save, busy, err } = useSave();
+  const [cssDraft, setCssDraft] = useState<string | null>(null);
+  const [jsDraft, setJsDraft] = useState<string | null>(null);
+  const [noted, setNoted] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<'theme.css' | 'app.js' | null>(null);
+
+  const commit = (which: 'css' | 'js') => save(async () => {
+    const body = which === 'css' ? { css: cssDraft ?? '' } : { js: jsDraft ?? '' };
+    await put('/api/custom', body);
+    if (which === 'css') setCssDraft(null); else setJsDraft(null);
+    await refresh();
+    invalidateShared('/api/custom');
+    setNoted(`${which === 'css' ? 'theme.css' : 'app.js'} saved — versions recorded`);
+  });
+
+  const reset = async (file: 'theme.css' | 'app.js') => {
+    await save(async () => {
+      await post('/api/custom/reset', { file });
+      setConfirming(null);
+      if (file === 'theme.css') setCssDraft(null); else setJsDraft(null);
+      await refresh();
+      invalidateShared('/api/custom');
+      setNoted(`${file} emptied`);
+    });
+  };
+
+  const dirty = (which: 'css' | 'js') => (which === 'css' ? cssDraft != null && cssDraft !== (custom?.css ?? '') : jsDraft != null && jsDraft !== (custom?.js ?? ''));
+
+  return (
+    <Block title="Custom CSS & JS" aside={<span className="stale-note">config/theme.css · config/app.js</span>}>
+      <p className="stale-note" style={{ marginBottom: 'var(--sp-3)' }}>
+        Same-origin, authenticated, opt-in, and never executed by the server: theme.css is a stylesheet
+        the browser loads, app.js is a script the browser runs in the page. A syntax error is refused
+        at save time, so the file that is live stays valid. Every save is a configuration version.
+      </p>
+
+      <Row label="theme.css" desc={custom?.cssEnabled ? 'Loading on every page.' : 'Not loaded — the file is saved but no page links it.'} tight>
+        <span className="mono-meta">
+          {custom ? `${new Blob([cssDraft ?? custom.css]).size} B · ${custom.cssModified ? relTime(Date.parse(custom.cssModified)) : 'never written'}` : '—'}
+        </span>
+        <Switch checked={cssEnabled} onChange={(v) => onToggle('css', v)} label="Enable custom CSS" />
+      </Row>
+      <div className="field" style={{ marginBottom: 'var(--sp-4)' }}>
+        <textarea
+          className="textarea mono-meta cfg-code" rows={9} spellCheck={false} aria-label="theme.css"
+          value={cssDraft ?? custom?.css ?? ''}
+          onChange={(e) => { setCssDraft(e.target.value); setNoted(null); }}
+        />
+        <div className="cfg-code-actions">
+          <button className="btn btn-sm btn-primary" disabled={busy || !dirty('css')} onClick={() => void commit('css')}>{busy ? 'Saving…' : 'Save theme.css'}</button>
+          {dirty('css') && <button className="btn btn-sm btn-quiet" onClick={() => setCssDraft(null)}>Discard</button>}
+          <button className="btn btn-sm btn-quiet" disabled={busy || !(custom?.css)} onClick={() => setConfirming('theme.css')}>Reset</button>
+          <span className="stale-note">
+            stylesheets add — they cannot remove OpusHub&apos;s own rules, and <code className="mono-meta">@import</code> is refused
+            so a theme cannot pull in a third-party page.
+          </span>
+        </div>
+      </div>
+
+      <Row label="app.js" desc={custom?.jsEnabled ? 'Running in every page you open.' : 'Not loaded — the file is saved but no page includes it.'} tight>
+        <span className="mono-meta">
+          {custom ? `${new Blob([jsDraft ?? custom.js]).size} B · ${custom.jsModified ? relTime(Date.parse(custom.jsModified)) : 'never written'}` : '—'}
+        </span>
+        <Switch checked={jsEnabled} onChange={(v) => onToggle('js', v)} label="Enable custom JS" />
+      </Row>
+      <div className="field">
+        <textarea
+          className="textarea mono-meta cfg-code" rows={9} spellCheck={false} aria-label="app.js"
+          value={jsDraft ?? custom?.js ?? ''}
+          onChange={(e) => { setJsDraft(e.target.value); setNoted(null); }}
+        />
+        <div className="cfg-code-actions">
+          <button className="btn btn-sm btn-primary" disabled={busy || !dirty('js')} onClick={() => void commit('js')}>{busy ? 'Saving…' : 'Save app.js'}</button>
+          {dirty('js') && <button className="btn btn-sm btn-quiet" onClick={() => setJsDraft(null)}>Discard</button>}
+          <button className="btn btn-sm btn-quiet" disabled={busy || !(custom?.js)} onClick={() => setConfirming('app.js')}>Reset</button>
+          <span className="stale-note">
+            this runs in your browser only. It has exactly the privileges the page has — no shell, no
+            filesystem, no Docker — because the server never evaluates it.
+          </span>
+        </div>
+      </div>
+
+      {(err || noted) && (
+        <p className="stale-note" role="status" style={{ marginTop: 'var(--sp-3)', color: err ? 'var(--fail)' : 'var(--ok)' }}>
+          {err || noted}
+        </p>
+      )}
+
+      {confirming && (
+        <Modal
+          title={`Empty ${confirming}?`}
+          onClose={() => setConfirming(null)}
+          footer={(
+            <>
+              <button className="btn" onClick={() => setConfirming(null)}>Cancel</button>
+              <button className="btn btn-primary" disabled={busy} onClick={() => void reset(confirming)}>Reset the file</button>
+            </>
+          )}
+        >
+          <p>This writes an empty file and records a version first, so it can be restored from History.</p>
+          <p className="stale-note">Nothing else is touched — the enable switch stays where it is.</p>
+        </Modal>
+      )}
+    </Block>
   );
 }
 

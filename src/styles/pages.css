@@ -412,3 +412,263 @@
 .setup-reasons .why { min-width: 0; }
 .setup-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding-top: var(--sp-5); border-top: 1px solid var(--hair); }
 .setup-step-note { color: var(--ink-3); font-size: var(--fs-micro); }
+
+/* ==========================================================================
+   Phase 6 — configuration, migration, history, export
+   =
+   These four panes are read-mostly surfaces: counts, lists, diffs and one
+   decisive button each. They borrow the existing language (hairlines, sunken
+   wells, mono meta, quiet chips) and add only what a diff and a review screen
+   genuinely need — a plus/minus axis, and a verdict row that separates "real"
+   from "unmatched" at a glance.
+   ========================================================================== */
+
+/* ---------- counts ---------- */
+.cfg-counts { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-4) 0; }
+.cfg-count {
+  display: flex; flex-direction: column; gap: 1px; min-width: 92px;
+  padding: 10px var(--sp-3); border: 1px solid var(--hair); border-radius: var(--r-md);
+  background: var(--sunken);
+}
+.cfg-count strong { font-size: 19px; font-weight: 620; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.cfg-count span { color: var(--ink-3); font-size: var(--fs-micro); }
+.cfg-count--ok { border-color: color-mix(in srgb, var(--ok) 42%, transparent); }
+.cfg-count--ok strong { color: var(--ok); }
+.cfg-count--warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.cfg-count--warn strong { color: var(--warn); }
+.cfg-count--err { border-color: color-mix(in srgb, var(--fail) 45%, transparent); }
+.cfg-count--err strong { color: var(--fail); }
+/* The verdict row is the review screen's headline: what Docker confirmed, and what it did not. */
+.cfg-counts--verdict { margin-top: var(--sp-6); padding-top: var(--sp-4); border-top: 1px solid var(--hair); }
+
+/* ---------- step 1: files ---------- */
+.cfg-drop {
+  border: 1px dashed var(--hair-strong); border-radius: var(--r-md);
+  padding: var(--sp-5); text-align: center; color: var(--ink-2);
+  background: var(--sunken); transition: border-color var(--t-fast);
+}
+.cfg-drop:hover { border-color: var(--accent-ink); }
+.cfg-filelist { list-style: none; margin: var(--sp-3) 0 0; padding: 0; text-align: left; display: grid; gap: 2px; }
+.cfg-filelist li { display: flex; align-items: center; gap: var(--sp-3); padding: 7px var(--sp-3); border-radius: var(--r-sm); }
+.cfg-filelist li:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.cfg-filelist li .mono-meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cfg-paste { width: 100%; max-width: 100%; resize: vertical; font-size: 12px; line-height: 1.6; margin-top: var(--sp-3); }
+
+.cfg-details { margin-top: var(--sp-4); }
+.cfg-details > summary {
+  cursor: pointer; color: var(--ink-2); font-size: var(--fs-meta);
+  padding: 6px 0; list-style: none;
+}
+.cfg-details > summary::-webkit-details-marker { display: none; }
+.cfg-details > summary::before { content: '▸ '; color: var(--ink-3); }
+.cfg-details[open] > summary::before { content: '▾ '; }
+.cfg-details > summary:hover { color: var(--ink); }
+.cfg-two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-6); margin-top: var(--sp-2); }
+.cfg-sub { font-size: var(--fs-meta); font-weight: 620; color: var(--ink-2); margin-bottom: var(--sp-2); letter-spacing: 0.01em; }
+.cfg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; font-size: var(--fs-meta); }
+.cfg-list--warn li { color: var(--ink-2); }
+
+/* ---------- step 2: review tabs ---------- */
+.cfg-tabs { display: flex; gap: 2px; margin: var(--sp-6) 0 var(--sp-4); border-bottom: 1px solid var(--hair); }
+.cfg-tab {
+  background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
+  padding: 8px var(--sp-3); color: var(--ink-3); font: inherit; font-size: var(--fs-meta);
+}
+.cfg-tab:hover { color: var(--ink); }
+.cfg-tab.active { color: var(--ink); border-bottom-color: var(--accent-ink); font-weight: 600; }
+
+.cfg-table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); margin-top: var(--sp-3); }
+.cfg-table th {
+  text-align: left; color: var(--ink-3); font-weight: 560; font-size: var(--fs-micro);
+  text-transform: uppercase; letter-spacing: 0.05em; padding: 6px var(--sp-2) 6px 0; border-bottom: 1px solid var(--hair);
+}
+.cfg-table td { padding: 9px var(--sp-2) 9px 0; border-bottom: 1px solid var(--hair); vertical-align: top; }
+.cfg-table tr:last-child td { border-bottom: 0; }
+.cfg-table td:last-child, .cfg-table th:last-child { padding-right: 0; }
+.cfg-applied { display: inline-flex; align-items: center; gap: 7px; }
+
+.cfg-conf {
+  display: inline-block; padding: 1px 7px; border-radius: var(--r-pill); font-size: var(--fs-micro);
+  background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink-2); margin-right: 4px;
+}
+.cfg-conf--explicit { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.cfg-conf--name { background: color-mix(in srgb, var(--accent-ink) 16%, transparent); color: var(--accent-ink); }
+
+.cfg-items { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: grid; gap: 2px; }
+.cfg-items li {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4);
+  padding: 10px var(--sp-3); border-radius: var(--r-sm); font-size: var(--fs-meta);
+}
+.cfg-items li:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.cfg-items code { color: var(--ink-3); word-break: break-all; text-align: right; max-width: 46%; }
+
+/* The choice of what to do with unmatched entries — the phase's central judgement call. */
+.cfg-choices { display: grid; gap: var(--sp-2); margin: var(--sp-4) 0 0; }
+.cfg-choice {
+  display: flex; gap: var(--sp-3); align-items: flex-start; cursor: pointer;
+  padding: var(--sp-3) var(--sp-4); border: 1px solid var(--hair); border-radius: var(--r-md); transition: border-color var(--t-fast);
+}
+.cfg-choice:hover { border-color: var(--hair-strong); }
+.cfg-choice.sel { border-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 6%, transparent); }
+.cfg-choice input { margin-top: 3px; accent-color: var(--accent-ink); }
+.cfg-choice span { display: grid; gap: 2px; }
+.cfg-choice strong { font-size: var(--fs-meta); font-weight: 600; }
+.cfg-choice em { font-style: normal; color: var(--ink-3); font-size: var(--fs-micro); }
+
+.cfg-checklist { margin: var(--sp-6) 0; padding-top: var(--sp-4); border-top: 1px solid var(--hair); display: grid; gap: 2px; }
+.cfg-check { display: flex; gap: var(--sp-3); align-items: flex-start; padding: 9px var(--sp-3); border-radius: var(--r-sm); cursor: pointer; }
+.cfg-check:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.cfg-check span { display: grid; gap: 2px; }
+.cfg-check strong { font-size: var(--fs-meta); font-weight: 600; }
+.cfg-check em { font-style: normal; color: var(--ink-3); font-size: var(--fs-micro); max-width: 62ch; }
+
+.cfg-conflict { margin-top: var(--sp-5); }
+.cfg-conflict:first-of-type { margin-top: var(--sp-3); }
+.cfg-conflict h4 { font-size: var(--fs-meta); margin-bottom: 2px; }
+
+.cfg-notes { margin: var(--sp-5) 0; padding: var(--sp-4); border-radius: var(--r-md); background: var(--sunken); border: 1px solid var(--hair); }
+.cfg-notes--warn { border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.cfg-note { padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); background: var(--sunken); font-size: var(--fs-meta); margin: var(--sp-4) 0; }
+.cfg-note--warn { border-left: 3px solid var(--warn); }
+.cfg-note--ok { border-left: 3px solid var(--ok); }
+.cfg-error {
+  padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); font-size: var(--fs-meta);
+  background: color-mix(in srgb, var(--fail) 10%, transparent); border-left: 3px solid var(--fail);
+}
+.cfg-apply { margin-top: var(--sp-8); border-top: 1px solid var(--hair); }
+.cfg-result { margin-top: var(--sp-6); padding: var(--sp-5); border-radius: var(--r-md); border: 1px solid color-mix(in srgb, var(--ok) 38%, transparent); background: color-mix(in srgb, var(--ok) 7%, transparent); }
+.cfg-result h4 { font-size: var(--fs-title); margin-bottom: var(--sp-2); }
+.cfg-result p { font-size: var(--fs-meta); color: var(--ink-2); }
+
+/* ---------- history ---------- */
+.cfg-versions { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: grid; gap: 2px; }
+.cfg-versions > li { border-radius: var(--r-md); padding: 2px; }
+.cfg-versions > li.open { background: var(--sunken); }
+.cfg-version-head { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-2); border-radius: var(--r-sm); }
+.cfg-version-head:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.cfg-version-main {
+  flex: 1; min-width: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 2px var(--sp-4);
+  background: none; border: 0; cursor: pointer; font: inherit; text-align: left; padding: 4px 0;
+}
+.cfg-version-main .cfg-when { font-size: var(--fs-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
+.cfg-version-main .cfg-label { font-size: var(--fs-meta); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cfg-version-main .stale-note { grid-column: 2; }
+.cfg-badge {
+  padding: 2px 8px; border-radius: var(--r-pill); font-size: var(--fs-micro); font-weight: 600;
+  background: color-mix(in srgb, var(--accent-ink) 16%, transparent); color: var(--accent-ink);
+}
+.cfg-badge--quiet { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink-2); font-weight: 500; }
+.cfg-version-body { padding: var(--sp-3) var(--sp-3) var(--sp-5); border-top: 1px solid var(--hair); margin-top: var(--sp-2); }
+.cfg-diffsection { margin-top: var(--sp-5); }
+.cfg-diff { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: grid; gap: 1px; }
+.cfg-diff li {
+  display: flex; gap: var(--sp-3); align-items: baseline;
+  padding: 5px var(--sp-3); border-radius: var(--r-sm); font-size: var(--fs-meta); color: var(--ink-2);
+}
+.cfg-difftag { font-family: var(--font-mono); font-size: 12px; width: 10px; flex: none; text-align: center; font-weight: 700; }
+.cfg-diff--added { background: color-mix(in srgb, var(--ok) 9%, transparent); }
+.cfg-diff--added .cfg-difftag { color: var(--ok); }
+.cfg-diff--removed { background: color-mix(in srgb, var(--fail) 9%, transparent); }
+.cfg-diff--removed .cfg-difftag { color: var(--fail); }
+.cfg-diff--changed .cfg-difftag { color: var(--warn); }
+
+@media (max-width: 860px) {
+  .cfg-two { grid-template-columns: 1fr; }
+  .cfg-version-main { grid-template-columns: 1fr; }
+  .cfg-version-main .stale-note { grid-column: 1; }
+  .cfg-items code { display: none; }
+}
+
+/* ==========================================================================
+   Setup wizard — Presentation & Preview (Phase 6)
+   =
+   Two steps where a decision is made and its shape is shown. The choice cards
+   are deliberately full-width and text-first, because the differences between
+   them ("nothing is written" / "a template" / "something is imported later")
+   are the important part, not the pictures.
+   ========================================================================== */
+.setup-choices { display: grid; gap: var(--sp-3); margin-top: var(--sp-4); }
+.setup-choice {
+  display: grid; gap: 4px; text-align: left; cursor: pointer; font: inherit; color: inherit;
+  padding: var(--sp-4) var(--sp-5); border: 1px solid var(--hair); border-radius: var(--r-lg);
+  background: var(--sunken); transition: border-color var(--t-fast), background var(--t-fast);
+}
+.setup-choice:hover { border-color: var(--hair-strong); }
+.setup-choice.sel { border-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 7%, transparent); }
+.setup-choice-title { font-weight: 620; font-size: var(--fs-title); }
+.setup-choice-desc { color: var(--ink-2); font-size: var(--fs-meta); line-height: 1.55; max-width: 68ch; }
+.setup-choice-meta { color: var(--ink-3); font-size: var(--fs-micro); margin-top: 2px; }
+
+.setup-templates { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--sp-3); margin-top: var(--sp-3); }
+.setup-template {
+  display: grid; gap: 2px; text-align: left; cursor: pointer; font: inherit; color: inherit;
+  padding: var(--sp-3) var(--sp-4); border: 1px solid var(--hair); border-radius: var(--r-md);
+  background: var(--surface); transition: border-color var(--t-fast);
+}
+.setup-template:hover { border-color: var(--hair-strong); }
+.setup-template.sel { border-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 6%, transparent); }
+.setup-template-name { font-weight: 600; }
+.setup-template-tag { color: var(--ink-2); font-size: var(--fs-micro); line-height: 1.45; }
+.setup-template-meta { color: var(--ink-3); font-size: var(--fs-micro); margin-top: 3px; }
+
+.setup-result { padding: var(--sp-4) var(--sp-5); border-radius: var(--r-md); background: var(--sunken); border: 1px solid var(--hair); font-size: var(--fs-meta); }
+.setup-result p { color: var(--ink-2); }
+.setup-result p + p { margin-top: var(--sp-3); }
+
+/* The wireframe: structure is real (the blocks and their sizes come from the chosen layout),
+   contents are not — every tile stands in for a container the wizard is not allowed to name. */
+.setup-preview { border: 1px solid var(--hair); border-radius: var(--r-lg); overflow: hidden; background: var(--bg); }
+.setup-preview-chrome {
+  display: flex; align-items: center; gap: 6px; padding: 9px var(--sp-4);
+  border-bottom: 1px solid var(--hair); background: var(--sunken);
+}
+.setup-preview-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--hair-strong); }
+.setup-preview-name { margin-left: var(--sp-3); font-size: var(--fs-micro); color: var(--ink-3); letter-spacing: 0.04em; text-transform: uppercase; }
+.setup-preview-cols { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: var(--sp-4); padding: var(--sp-4); }
+.setup-preview-main, .setup-preview-rail { display: grid; gap: var(--sp-3); align-content: start; }
+.setup-preview.spacing-cozy .setup-preview-main, .setup-preview.spacing-cozy .setup-preview-rail { gap: var(--sp-2); }
+.setup-preview.spacing-airy .setup-preview-main, .setup-preview.spacing-airy .setup-preview-rail { gap: var(--sp-5); }
+.setup-preview-rail { border-left: 1px solid var(--hair); padding-left: var(--sp-4); }
+.setup-block { display: grid; gap: 6px; padding: var(--sp-3); border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--surface); }
+.setup-block-title { font-size: var(--fs-micro); color: var(--ink-2); font-weight: 600; }
+.setup-block-skel { display: block; height: 12px; border-radius: var(--r-sm); background: linear-gradient(90deg, var(--sunken) 0%, color-mix(in srgb, var(--ink) 7%, var(--sunken)) 100%); }
+.setup-block--lg .setup-block-skel { height: 34px; }
+.setup-block--md .setup-block-skel { height: 22px; }
+.setup-preview-group { display: grid; gap: var(--sp-3); }
+.setup-preview-group-name { font-size: var(--fs-micro); color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.setup-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: var(--sp-3); }
+.setup-tile {
+  display: block; aspect-ratio: 1; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--hair);
+}
+@media (max-width: 720px) {
+  .setup-preview-cols { grid-template-columns: minmax(0, 1fr); }
+  .setup-preview-rail { border-left: 0; padding-left: 0; border-top: 1px solid var(--hair); padding-top: var(--sp-4); }
+}
+
+/* ---------- service presentation editor: identity vs presentation ---------- */
+.svc-identity { border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--sunken); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4); }
+.svc-identity-head { display: flex; align-items: baseline; gap: var(--sp-3); margin-bottom: var(--sp-2); }
+.svc-identity-tag {
+  font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 650;
+  color: var(--ink-3); border: 1px solid var(--hair-strong); border-radius: var(--r-pill); padding: 2px 8px;
+}
+.svc-identity-kv { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 4px var(--sp-3); font-size: var(--fs-meta); }
+.svc-identity-kv dt { color: var(--ink-3); }
+.svc-identity-kv dd { color: var(--ink); word-break: break-all; }
+
+/* detected vs override, said as a word rather than implied by a placeholder */
+.field-origin {
+  margin-left: 6px; padding: 1px 7px; border-radius: var(--r-pill); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.03em; text-transform: uppercase; vertical-align: 1px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink-3);
+}
+.field-origin--override { background: color-mix(in srgb, var(--accent-ink) 16%, transparent); color: var(--accent-ink); }
+
+/* ---------- group icon button ---------- */
+.group-icon-btn { width: 32px; height: 32px; flex: none; }
+
+/* ---------- custom code editor ---------- */
+.cfg-code { width: 100%; font-size: 12px; line-height: 1.6; resize: vertical; tab-size: 2; }
+.cfg-code-actions { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; margin-top: var(--sp-2); }
+.cfg-code-actions .stale-note { flex: 1; min-width: 220px; }

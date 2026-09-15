@@ -8,7 +8,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { CONFIG_DIR, APP_ROOT, readConfigText, writeText } from './configStore.js';
+import { CONFIG_DIR, APP_ROOT, readConfigText, writeText, writePresentationText } from './configStore.js';
 import * as auth from './auth.js';
 import * as model from './model.js';
 import { collect as collectSystem, History } from './providers/system.js';
@@ -25,6 +25,14 @@ import { loadEnv } from './env.js';
 import { DATA_DIR } from './configStore.js';
 import { statsWithHistory, statsHistory, aggregateHistory } from './statsHistory.js';
 import { providerHealthDoc, reportProvider } from './providers/health.js';
+import { configScopeDoc, presentationFileNames } from './configScope.js';
+import * as configHistory from './configHistory.js';
+import { parseHomepageBundle, buildImportPreview, HOMEPAGE_FILES, REFUSED_FILES } from './homepageImport.js';
+import { planImport, commitPlan } from './configImport.js';
+import { exportNative, exportHomepage } from './configExport.js';
+import { lintCss, lintJs, LIMITS } from './configSchema.js';
+import { makeWidget, defaultWidgets, WIDGET_TYPES } from './widgets.js';
+import { templateList, templateIds } from './templates.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -143,7 +151,36 @@ export async function handleApi(req, res, url) {
       return send(res, 409, { error: 'OpusHub is already set up. Sign in instead.', code: 'already_setup' });
     }
     const body = await jsonBody();
+    // First-run presentation choice. `detected` writes nothing (the default); `template` applies one
+    // of the built-in templates, whose ids are a fixed server-side list. Validated *before* the
+    // account is created, so a bad choice cannot leave a half-finished install behind.
+    // An unauthenticated route reads this field, so its *shape* is part of the contract: an object
+    // or nothing. A scalar, an array or a nested document is refused rather than coerced — the
+    // coercion is what let `['balanced']` select a template, which is not a write primitive (the id
+    // still has to name one of the six built-ins) but is exactly the kind of type confusion an
+    // unauthenticated field should not be able to negotiate.
+    const rawPres = body?.presentation;
+    if (rawPres != null && (typeof rawPres !== 'object' || Array.isArray(rawPres))) {
+      return send(res, 400, { error: 'presentation must be an object', code: 'bad_presentation' });
+    }
+    const pres = rawPres || null;
+    let template = null;
+    if (pres && pres.mode && pres.mode !== 'detected') {
+      if (pres.mode !== 'template') return send(res, 400, { error: 'presentation.mode must be detected or template', code: 'bad_presentation' });
+      if (typeof pres.template !== 'string' || !templateIds().includes(pres.template)) {
+        return send(res, 400, { error: `unknown template: ${String(pres.template).slice(0, 40)}`, code: 'unknown_template' });
+      }
+      template = pres.template;
+    }
     const user = await auth.createAdmin({ username: body?.username, password: body?.password });
+    if (template) {
+      // Layout-only, and it runs through the same writer an authenticated template apply uses.
+      // Awaited before the version is recorded: the snapshot has to see the file the apply wrote,
+      // or it records the empty state that preceded it.
+      await model.applyLayoutTemplate(template);
+      recordVersion({ reason: 'template.applied', subject: template, label: `${template} template applied at setup`, actor: user.username });
+      logEvent({ source: 'config', type: 'template.applied', subject: template, message: 'presentation template applied during setup' });
+    }
     // Infrastructure knobs the wizard may set (host address for published-port URLs, entrypoint
     // port mapping). Whitelisted: setup can never write anything else into settings.yaml.
     const infra = body?.infrastructure && typeof body.infrastructure === 'object' ? body.infrastructure : null;
@@ -162,7 +199,7 @@ export async function handleApi(req, res, url) {
       res.setHeader('set-cookie', auth.sessionCookie(minted.token, { maxAgeMs: minted.expiresAt - Date.now(), secure }));
     }
     logEvent({ source: 'system', type: 'setup.completed', subject: user.username, message: 'administrator account created' });
-    return send(res, 201, { ok: true, user, authenticated: true });
+    return send(res, 201, { ok: true, user, authenticated: true, presentation: { mode: template ? 'template' : 'detected', template } });
   }
 
   // ---------- authentication ----------
@@ -322,6 +359,7 @@ export async function handleApi(req, res, url) {
     }
     const next = model.putSettings(patch);
     model.invalidateDiscovery(); // infrastructure.* changes how URLs are resolved
+    recordVersion({ reason: 'settings.updated', subject: 'settings.yaml', label: summarizeSettingsPatch(patch), actor: session?.username });
     logEvent({ source: 'config', type: 'settings.updated', subject: 'settings.yaml', message: summarizeSettingsPatch(patch) });
     return send(res, 200, next);
   }
@@ -334,12 +372,14 @@ export async function handleApi(req, res, url) {
   if (route === 'PUT /api/layout') {
     const patch = await jsonBody();
     const next = model.putLayout(patch);
+    recordVersion({ reason: 'layout.updated', subject: 'layout.json', label: model.describeLayoutPatch(patch), actor: session?.username });
     logEvent({ source: 'config', type: 'layout.updated', subject: 'layout.json', message: model.describeLayoutPatch(patch) });
     return send(res, 200, next);
   }
   if (route === 'GET /api/widgets') return send(res, 200, model.getWidgetDoc());
   if (route === 'POST /api/layout/reset') {
     const next = model.resetLayout();
+    recordVersion({ reason: 'layout.reset', subject: 'layout.json', label: 'hub composition reset to defaults', actor: session?.username });
     logEvent({ source: 'config', type: 'layout.updated', subject: 'layout.json', message: 'hub composition reset to defaults' });
     return send(res, 200, next);
   }
@@ -349,9 +389,14 @@ export async function handleApi(req, res, url) {
   if (route === 'POST /api/layout/template') {
     const body = await jsonBody();
     const id = String(body?.id || '').trim();
+    // A template replaces the whole composition, so the state it is about to replace is captured
+    // *before* the write as well as after — applying the wrong preset is a one-click mistake and
+    // should be a one-click undo.
+    const before = recordVersion({ reason: 'template', subject: 'layout.json', label: `pre-template snapshot before "${id}"`, force: true, actor: session?.username });
     const next = await model.applyLayoutTemplate(id);
+    recordVersion({ reason: 'template', subject: 'layout.json', label: `template applied: ${id}`, actor: session?.username });
     logEvent({ source: 'config', type: 'layout.updated', subject: 'layout.json', message: `template applied: ${id}` });
-    return send(res, 200, next);
+    return send(res, 200, { ...next, undoVersion: before?.id || null });
   }
 
   // ---------- services & stacks (both read the one canonical inventory) ----------
@@ -361,6 +406,7 @@ export async function handleApi(req, res, url) {
     const next = model.writeServices(patch);
     const n = next.groups.reduce((a, g) => a + g.services.length, 0);
     model.invalidateDiscovery();
+    recordVersion({ reason: 'services.updated', subject: 'services.yaml', label: `${next.groups.length} group(s), ${n} overlay entries`, actor: session?.username });
     logEvent({ source: 'config', type: 'services.updated', subject: 'services.yaml', message: `updated ${next.groups.length} group(s), ${n} overlay entr${n === 1 ? 'y' : 'ies'}` });
     return send(res, 200, await model.getServicesView());
   }
@@ -507,6 +553,7 @@ export async function handleApi(req, res, url) {
     const patch = await jsonBody();
     const next = model.writeStacks(patch);
     model.invalidateDiscovery();
+    recordVersion({ reason: 'stacks.updated', subject: 'stacks.yaml', label: `${next.stacks.length} stack overlay(s)`, actor: session?.username });
     logEvent({ source: 'config', type: 'stacks.updated', subject: 'stacks.yaml', message: `updated ${next.stacks.length} stack overlay(s)` });
     return send(res, 200, next);
   }
@@ -515,6 +562,8 @@ export async function handleApi(req, res, url) {
   if (route === 'GET /api/bookmarks') return send(res, 200, model.readBookmarks());
   if (route === 'PUT /api/bookmarks') {
     const next = model.writeBookmarks(await jsonBody());
+    const bmCount = next.groups.reduce((a, g) => a + g.items.length, 0);
+    recordVersion({ reason: 'bookmarks.updated', subject: 'bookmarks.yaml', label: `${bmCount} bookmark(s)`, actor: session?.username });
     logEvent({ source: 'config', type: 'bookmarks.updated', subject: 'bookmarks.yaml', message: 'bookmarks updated' });
     return send(res, 200, next);
   }
@@ -666,19 +715,38 @@ export async function handleApi(req, res, url) {
   // ---------- custom css/js ----------
   if (route === 'GET /api/custom') {
     const s = model.getSettings();
+    // The text is returned whether or not it is enabled: this is the editor's read, and an editor
+    // that cannot show a file it is asked to edit is not an editor. Nothing here is a secret —
+    // theme.css and app.js are files the operator writes by hand.
     return send(res, 200, {
       cssEnabled: !!s.advanced?.customCss,
       jsEnabled: !!s.advanced?.customJs,
-      css: s.advanced?.customCss ? readConfigText('theme.css') : null,
+      css: readConfigText('theme.css') ?? '',
+      js: readConfigText('app.js') ?? '',
+      cssModified: fileMtime('theme.css'),
+      jsModified: fileMtime('app.js'),
       jsPresent: fs.existsSync(path.join(CONFIG_DIR, 'app.js')),
     });
   }
   if (route === 'PUT /api/custom') {
     const b = await jsonBody();
+    // Custom code is the one configuration area where a syntax error is *visible* and a bad save
+    // is *invisible until reload* — so it is linted here, and a refusal writes nothing at all.
+    const problems = [];
+    if (typeof b.css === 'string') {
+      if (Buffer.byteLength(b.css, 'utf8') > LIMITS.cssBytes) problems.push(`theme.css exceeds the ${Math.round(LIMITS.cssBytes / 1024)} KB cap`);
+      else { const lint = lintCss(b.css); if (!lint.ok) problems.push(`theme.css: ${lint.problems[0]}`); }
+    }
+    if (typeof b.js === 'string') {
+      if (Buffer.byteLength(b.js, 'utf8') > LIMITS.jsBytes) problems.push(`app.js exceeds the ${Math.round(LIMITS.jsBytes / 1024)} KB cap`);
+      else { const lint = lintJs(b.js); if (!lint.ok) problems.push(`app.js: ${lint.problems[0]}`); }
+    }
+    if (problems.length) return send(res, 400, { error: problems.join('; '), code: 'custom_syntax', problems });
     if (typeof b.css === 'string') writeText('theme.css', b.css);
     if (typeof b.js === 'string') writeText('app.js', b.js);
+    recordVersion({ reason: 'custom.updated', subject: 'theme.css / app.js', label: 'custom code updated', actor: session?.username });
     logEvent({ source: 'config', type: 'custom.updated', subject: 'theme.css / app.js', message: 'custom code updated' });
-    return send(res, 200, { ok: true });
+    return send(res, 200, { ok: true, cssModified: fileMtime('theme.css'), jsModified: fileMtime('app.js') });
   }
 
   // ---------- background images ----------
@@ -695,7 +763,560 @@ export async function handleApi(req, res, url) {
     return send(res, 200, { files: files.map((f) => ({ name: f, url: `/user/backgrounds/${encodeURIComponent(f)}` })) });
   }
 
+  // =========================================================================
+  // Phase 6 — configuration: scope, drafts, history, migration, export
+  // =========================================================================
+  //
+  // Everything below writes *presentation* configuration only. There is no route here that can
+  // reach the Docker socket, run a command, or touch authentication/runtime state — see
+  // server/configScope.js for the boundary, which is a list rather than a convention.
+
+  // ---------- the boundary, stated ----------
+  if (route === 'GET /api/config/scope') return send(res, 200, configScopeDoc());
+
+  /** What Settings → Configuration shows at the top: what can change, and what the last change was. */
+  if (route === 'GET /api/config/overview') {
+    const s = model.getSettings();
+    const services = model.readServices();
+    const bookmarks = model.readBookmarks();
+    const layout = model.getLayout();
+    const inv = await model.getInventory();
+    const stats = configHistory.historyStats();
+    return send(res, 200, {
+      scope: configScopeDoc(),
+      counts: {
+        groups: (inv.groupsRaw || []).length,
+        services: inv.services.length,
+        configured: inv.services.filter((x) => x.configured).length,
+        bookmarks: bookmarks.flat.length,
+        widgets: (layout.hub.widgets || []).length,
+        unmatched: inv.unmatched.length,
+      },
+      custom: {
+        cssEnabled: !!s.advanced?.customCss,
+        jsEnabled: !!s.advanced?.customJs,
+        cssBytes: Buffer.byteLength(readConfigText('theme.css') || '', 'utf8'),
+        jsBytes: Buffer.byteLength(readConfigText('app.js') || '', 'utf8'),
+        cssModified: fileMtime('theme.css'),
+        jsModified: fileMtime('app.js'),
+      },
+      history: stats,
+      limits: LIMITS,
+    });
+  }
+
+  /**
+   * Draft validation. Every editor posts here before it saves, so "will this be accepted?" has one
+   * answer rather than one per screen. Nothing is written: a rejection returns the reason and the
+   * caller keeps the draft.
+   */
+  if (route === 'POST /api/config/validate') {
+    const body = await jsonBody();
+    const area = String(body?.area || '');
+    if (area === 'custom-css') {
+      const lint = lintCss(body?.draft ?? '');
+      return send(res, 200, { ok: lint.ok, area, problems: lint.problems });
+    }
+    if (area === 'custom-js') {
+      const lint = lintJs(body?.draft ?? '');
+      return send(res, 200, { ok: lint.ok, area, problems: lint.problems });
+    }
+    // The YAML/JSON editors validate by *trying the write against a copy of the model*. The model
+    // functions are pure up to their final write, so the honest way to know whether a document is
+    // acceptable is to run the same normalisation the write would, and discard the result.
+    try {
+      if (area === 'services') { model.validateServicesDraft(body?.draft); return send(res, 200, { ok: true, area, problems: [] }); }
+      if (area === 'stacks') { model.validateStacksDraft(body?.draft); return send(res, 200, { ok: true, area, problems: [] }); }
+      if (area === 'bookmarks') { model.validateBookmarksDraft(body?.draft); return send(res, 200, { ok: true, area, problems: [] }); }
+      if (area === 'layout') { model.normalizeLayoutDraft(body?.draft); return send(res, 200, { ok: true, area, problems: [] }); }
+      if (area === 'settings') { model.validateSettingsDraft(body?.draft); return send(res, 200, { ok: true, area, problems: [] }); }
+    } catch (err) {
+      return send(res, 200, { ok: false, area, problems: [err.message], code: err.code || 'invalid_config' });
+    }
+    return send(res, 400, { error: `unknown validation area: ${area || '(none)'}`, code: 'unknown_area' });
+  }
+
+  // ---------- history: list, read, diff, restore ----------
+  if (route === 'GET /api/config/history') {
+    const versions = configHistory.listVersions();
+    return send(res, 200, {
+      versions,
+      stats: configHistory.historyStats(),
+      current: versions[0]?.id ?? null,
+      scope: presentationFileNames(),
+    });
+  }
+  const histVersion = p.match(/^\/api\/config\/history\/([^/]+)$/);
+  if (method === 'GET' && histVersion) {
+    const v = configHistory.readVersion(decodeURIComponent(histVersion[1]));
+    if (!v) return send(res, 404, { error: 'no such configuration version', code: 'version_not_found' });
+    return send(res, 200, {
+      id: v.id, at: v.at, reason: v.reason, subject: v.subject, label: v.label, actor: v.actor,
+      checksum: v.checksum, changed: v.changed || [],
+      files: Object.entries(v.files || {}).map(([name, text]) => ({ name, bytes: Buffer.byteLength(text, 'utf8') })),
+    });
+  }
+  const histDiff = p.match(/^\/api\/config\/history\/([^/]+)\/diff$/);
+  if (method === 'GET' && histDiff) {
+    const id = decodeURIComponent(histDiff[1]);
+    const version = configHistory.readVersion(id);
+    if (!version) return send(res, 404, { error: 'no such configuration version', code: 'version_not_found' });
+    // "against" defaults to *now*: the common question is "what would restoring this change?".
+    const against = url.searchParams.get('against');
+    const other = against && against !== 'current' ? configHistory.readVersion(against) : null;
+    const otherFiles = other ? other.files : configHistory.snapshotFiles();
+    // diff(from = other, to = version) reads as "restoring this would…"
+    const diff = configHistory.diffSnapshots(otherFiles || {}, version.files || {});
+    return send(res, 200, {
+      version: id,
+      against: other ? other.id : 'current',
+      ...diff,
+    });
+  }
+  const histRestore = p.match(/^\/api\/config\/history\/([^/]+)\/restore$/);
+  if (method === 'POST' && histRestore) {
+    const id = decodeURIComponent(histRestore[1]);
+    const result = configHistory.restoreVersion(id, { actor: session?.username || null });
+    model.invalidateDiscovery();
+    logEvent({ source: 'config', type: 'config.restored', subject: id, message: `configuration restored from ${result.restoredFrom} (${result.files.length} file(s))` });
+    return send(res, 200, { ...result, overview: await model.getDiscoveryStatus({ refreshMs: 0 }) });
+  }
+  const histDelete = p.match(/^\/api\/config\/history\/([^/]+)$/);
+  if (method === 'DELETE' && histDelete) {
+    const id = decodeURIComponent(histDelete[1]);
+    const pathToDelete = path.join(configHistory.historyDir(), `${id.replace(/[^0-9A-Za-z-]/g, '')}.json`);
+    if (!fs.existsSync(pathToDelete)) return send(res, 404, { error: 'no such configuration version', code: 'version_not_found' });
+    fs.unlinkSync(pathToDelete);
+    logEvent({ source: 'config', type: 'config.history_pruned', subject: id, message: 'configuration version removed' });
+    return send(res, 200, { ok: true, removed: id, stats: configHistory.historyStats() });
+  }
+
+  // ---------- migration: what can be imported ----------
+  if (route === 'GET /api/config/import/files') {
+    return send(res, 200, {
+      accepted: Object.entries(HOMEPAGE_FILES).map(([name, spec]) => ({ name, kind: spec.kind, label: spec.label })),
+      refused: Object.entries(REFUSED_FILES).map(([name, why]) => ({ name, why })),
+      note: 'Imported files are parsed, validated and shown for review. Nothing is written until you apply.',
+      limits: {
+        fileBytes: LIMITS.importFileBytes,
+        bundleBytes: LIMITS.importBundleBytes,
+        files: LIMITS.importFiles,
+        depth: LIMITS.yamlDepth,
+        nodes: LIMITS.yamlNodes,
+      },
+    });
+  }
+
+  /**
+   * Parse + classify → the review screen. Deliberately writes nothing: calling it is free, and
+   * the user can paste a config, look at what it would do, and close the page.
+   */
+  if (route === 'POST /api/config/import/parse') {
+    const body = await jsonBody();
+    const files = body?.files && typeof body.files === 'object' ? body.files : null;
+    if (!files) return send(res, 400, { error: 'files must be an object of { filename: text }', code: 'files_required' });
+    const inv = await model.getInventory();
+    const { bundle, report } = parseHomepageBundle(files, {
+      widgetTypes: Object.keys(model.widgetTypes()),
+      suggestIcon: model.suggestIconProbe,
+    });
+    const preview = buildImportPreview({ bundle, report, inventory: publicInventoryForImport(inv), existingOverlays: existingOverlayIndex() });
+    // The write plan is included so the screen can show *exactly* which files would change.
+    const plan = planImport({ preview, rawDecisions: body?.decisions, current: currentConfiguration(), makeWidget });
+    return send(res, 200, {
+      ...preview,
+      plan: {
+        files: plannedFiles(plan),
+        services: plannedServiceEntries(plan),
+        bookmarks: plannedBookmarkEntries(plan),
+        preservedUnmatched: plan.bookmarks?.preserved || 0,
+        settings: plan.settings ? Object.keys(plan.settings) : [],
+        widgets: plan.layout?.hub?.widgets?.length || 0,
+        custom: plan.custom.problems,
+      },
+    });
+  }
+
+  /**
+   * Apply. The files are re-sent and re-parsed rather than looked up in a server-side preview
+   * cache, so what is applied is what was reviewed *in this request* — there is no window in which
+   * a stale preview could be applied to a configuration that has since changed underneath it.
+   */
+  if (route === 'POST /api/config/import/apply') {
+    const body = await jsonBody();
+    const files = body?.files && typeof body.files === 'object' ? body.files : null;
+    if (!files) return send(res, 400, { error: 'files must be an object of { filename: text }', code: 'files_required' });
+    const mode = body?.mode === 'replace' ? 'replace' : 'merge';
+    const inv = await model.getInventory();
+    const { bundle, report } = parseHomepageBundle(files, {
+      widgetTypes: Object.keys(model.widgetTypes()),
+      suggestIcon: model.suggestIconProbe,
+    });
+    const preview = buildImportPreview({ bundle, report, inventory: publicInventoryForImport(inv), existingOverlays: existingOverlayIndex() });
+    const plan = planImport({ preview, rawDecisions: body?.decisions, current: currentConfiguration(), makeWidget, mode });
+
+    const commit = commitPlan({
+      plan,
+      read: (name) => readConfigText(name),
+      write: writeConfigTarget,
+      snapshot: configHistory.snapshot,
+      actor: session?.username || null,
+      reason: 'import',
+    });
+
+    model.invalidateDiscovery();
+    logEvent({
+      source: 'config',
+      type: 'config.imported',
+      subject: 'homepage',
+      message: `${commit.written.length} file(s) from ${bundle.source} import: ${preview.summary.matched} matched, ${preview.summary.unmatched} unmatched, ${plan.bookmarks?.preserved || 0} kept as links`,
+    });
+    return send(res, 200, {
+      ok: true,
+      mode,
+      written: commit.written,
+      version: commit.version,
+      summary: preview.summary,
+      preservedUnmatched: plan.bookmarks?.preserved || 0,
+      skipped: preview.summary.invalid,
+      warnings: [...preview.warnings, ...plan.custom.problems],
+      secretsDropped: preview.secretsDropped.length,
+    });
+  }
+
+  // ---------- export ----------
+  if (route === 'GET /api/config/export') {
+    const format = (url.searchParams.get('format') || 'native').toLowerCase();
+    const includeParam = url.searchParams.get('include');
+    const include = includeParam ? includeParam.split(',').map((s) => s.trim()).filter(Boolean) : null;
+    const bundle = await configExportInputs({ include });
+    const result = format === 'homepage' ? exportHomepage(bundle) : exportNative(bundle);
+    logEvent({ source: 'config', type: 'config.exported', subject: result.kind, message: `${Object.keys(result.files).length} file(s) exported as ${result.kind}` });
+    return send(res, 200, result);
+  }
+  if (route === 'GET /api/config/export/download') {
+    const format = (url.searchParams.get('format') || 'native').toLowerCase();
+    const bundle = await configExportInputs({});
+    const result = format === 'homepage' ? exportHomepage(bundle) : exportNative(bundle);
+    // An export is a set of files; served as one JSON document so a browser download is a single
+    // artifact. `?file=` picks one out for copy-paste into a real config/ directory.
+    const wanted = url.searchParams.get('file');
+    if (wanted) {
+      const text = result.files[wanted];
+      if (text == null) return send(res, 404, { error: `that export has no file named ${wanted}` });
+      res.setHeader('content-type', 'text/plain; charset=utf-8');
+      res.setHeader('content-disposition', `attachment; filename="${wanted.replace(/[^A-Za-z0-9._-]/g, '')}"`);
+      res.writeHead(200);
+      return res.end(text);
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.setHeader('content-disposition', `attachment; filename="opushub-${result.kind}-${stamp}.json"`);
+    res.writeHead(200);
+    return res.end(JSON.stringify(result, null, 2));
+  }
+
+  // ---------- one service's presentation: detected vs override ----------
+  //
+  // The editor's whole job is to keep those two apart, so the API keeps them apart too rather than
+  // handing the client one merged blob and trusting the UI to remember which half was which.
+  const presMatch = p.match(/^\/api\/services\/([^/]+)\/([^/]+)\/presentation$/);
+  if (presMatch) {
+    const group = decodeURIComponent(presMatch[1]);
+    const name = decodeURIComponent(presMatch[2]);
+    const inv = await model.getInventory();
+    const found = resolveServiceContainer(inv, group, name);
+    if (!found) return send(res, 404, { error: `no live container for: ${group}/${name}` });
+    const { service, ref } = found;
+
+    if (method === 'GET') {
+      const overlay = model.readServices().overlays.find((o) =>
+        (o.container && (o.container.toLowerCase() === service.name.toLowerCase() || ref.startsWith(o.container)))
+        || (!o.container && o.name.toLowerCase() === service.name.toLowerCase()));
+      return send(res, 200, {
+        id: service.id,
+        identity: {
+          /* discovered facts — read-only, and the UI must render them as such */
+          containerName: service.container?.name || service.name,
+          composeProject: service.container?.composeProject || null,
+          composeService: service.container?.composeService || null,
+          image: service.container?.image || null,
+          state: service.container?.state || null,
+          labels: service.container?.labels || null,
+        },
+        detected: {
+          displayName: service.baseDisplayName || service.name,
+          group: service.baseGroup || 'Other',
+          url: service.detectedUrl ?? null,
+          urlSource: service.detectedUrlSource ?? null,
+          icon: service.iconSuggestion || null,
+        },
+        override: {
+          displayName: overlay?.displayName ?? null,
+          description: overlay?.description ?? null,
+          icon: overlay?.icon ?? null,
+          group: overlay?.group ?? null,
+          url: overlay?.url ?? null,
+          hidden: overlay?.hidden === true,
+          showOnHub: overlay?.showOnHub !== false,
+          order: overlay?.order ?? null,
+          app: overlay?.app ?? null,
+          keywords: overlay?.keywords || [],
+        },
+        effective: {
+          displayName: service.displayName,
+          group: service.group,
+          url: service.url,
+          urlSource: service.urlSource,
+          icon: service.icon,
+          status: service.status,
+        },
+        configured: !!service.configured,
+      });
+    }
+
+    if (method === 'PUT') {
+      const draft = await jsonBody();
+      const next = model.putServicePresentation({
+        group, name, ref, service, draft, actor: session?.username || null,
+      });
+      model.invalidateDiscovery();
+      recordVersion({ reason: 'service.presentation', subject: service.name, label: `presentation for "${service.displayName}"`, actor: session?.username });
+      logEvent({ source: 'config', type: 'services.updated', subject: service.name, message: `presentation for “${service.displayName}” updated` });
+      return send(res, 200, next);
+    }
+    if (method === 'DELETE') {
+      const next = model.clearServicePresentation({ service, ref, actor: session?.username || null });
+      model.invalidateDiscovery();
+      recordVersion({ reason: 'service.presentation_cleared', subject: service.name, label: `overrides cleared for "${service.displayName}"`, actor: session?.username });
+      logEvent({ source: 'config', type: 'services.updated', subject: service.name, message: `presentation overrides for “${service.displayName}” cleared — detected values are back in force` });
+      return send(res, 200, next);
+    }
+  }
+
+  // ---------- groups: first-class, and explicitly not compose projects ----------
+  if (route === 'GET /api/groups') {
+    const inv = await model.getInventory();
+    const layout = model.getLayout();
+    const servicesDoc = model.readServices();
+    const meta = new Map(servicesDoc.groups.map((g) => [String(g.name).toLowerCase(), g]));
+    const hidden = new Set((layout.services?.hiddenGroups || []).map((g) => String(g).toLowerCase()));
+    return send(res, 200, {
+      groups: (inv.groupsRaw || []).map((g) => ({
+        name: g.name,
+        description: meta.get(g.name.toLowerCase())?.description ?? null,
+        icon: meta.get(g.name.toLowerCase())?.icon ?? null,
+        configured: !!meta.has(g.name.toLowerCase()),
+        hidden: hidden.has(g.name.toLowerCase()),
+        serviceCount: g.services.length,
+        running: g.services.filter((s) => s.container?.state === 'running').length,
+        // Said in the payload, not only in the copy: a group is a label, not a compose project.
+        composeProjects: [...new Set(g.services.map((s) => s.container?.composeProject).filter(Boolean))],
+      })),
+      order: layout.services?.groupOrder || null,
+      hiddenGroups: layout.services?.hiddenGroups || [],
+      // Groups the overlays name but no container fills — reported, never rendered as empty cards.
+      empty: servicesDoc.groups.filter((g) => !g.services.length).map((g) => g.name),
+      note: 'OpusHub groups are a presentation label you choose. They are not Docker Compose projects — a group may contain services from several projects, and a project may span several groups.',
+    });
+  }
+  if (route === 'PUT /api/groups') {
+    const body = await jsonBody();
+    // A group that exists only because Docker reported a compose project has no entry in
+    // `services.yaml`, so "rename it" has to become per-service `group:` overrides — which is
+    // exactly the right statement of the rule: configuration decides presentation, and it decides
+    // it *about containers*, not about a project.
+    const inv = await model.getInventory();
+    const membership = new Map((inv.groupsRaw || []).map((g) => [g.name, g.services.map((x) => x.name)]));
+    const next = model.writeGroups(body, { membership });
+    model.invalidateDiscovery();
+    recordVersion({ reason: 'groups.updated', subject: 'services.yaml + layout.json', label: `${next.groups.length} group(s)`, actor: session?.username });
+    logEvent({ source: 'config', type: 'services.updated', subject: 'services.yaml', message: `groups updated: ${next.groups.length} group(s)` });
+    return send(res, 200, next);
+  }
+
+  // ---------- custom CSS / JS: enable, disable, reset ----------
+  if (route === 'POST /api/custom/reset') {
+    const body = await jsonBody();
+    const which = String(body?.file || '');
+    if (which === 'theme.css') { writeText('theme.css', ''); recordVersion({ reason: 'custom.reset', subject: 'theme.css', label: 'custom CSS reset', actor: session?.username }); logEvent({ source: 'config', type: 'custom.updated', subject: 'theme.css', message: 'custom CSS reset' }); return send(res, 200, { ok: true, file: 'theme.css', bytes: 0 }); }
+    if (which === 'app.js') { writeText('app.js', ''); recordVersion({ reason: 'custom.reset', subject: 'app.js', label: 'custom JS reset', actor: session?.username }); logEvent({ source: 'config', type: 'custom.updated', subject: 'app.js', message: 'custom JS reset' }); return send(res, 200, { ok: true, file: 'app.js', bytes: 0 }); }
+    return send(res, 400, { error: 'file must be theme.css or app.js', code: 'bad_file' });
+  }
+
+  // ---------- export helpers ----------
+
   notFound();
+}
+
+/**
+ * The plan's documents are nullable, and null means "this file is not part of the change" rather
+ * than "an empty document". Every counter that reads the plan goes through these two, so a file the
+ * import does not touch is never reported as a write of zero entries.
+ */
+function plannedServiceEntries(plan) {
+  return (plan?.services?.groups || []).reduce((a, g) => a + (g.services || []).length, 0);
+}
+function plannedBookmarkEntries(plan) {
+  return (plan?.bookmarks?.groups || []).reduce((a, g) => a + (g.items || []).length, 0);
+}
+
+/** `configExportInputs` gathers every presentation document in the shape the exporters expect. */
+async function configExportInputs({ include = null } = {}) {
+  const services = model.readServices();
+  const stacks = model.readStacks();
+  const bookmarks = model.readBookmarks();
+  return {
+    services: {
+      groups: services.groups.map((g) => ({
+        name: g.name,
+        description: g.description,
+        icon: g.icon,
+        services: g.services.map((s) => ({
+          container: s.container || null,
+          name: s.name,
+          displayName: s.displayName,
+          app: s.app,
+          description: s.description,
+          icon: s.icon,
+          group: s.group,
+          order: s.order,
+          hidden: s.hidden,
+          showOnHub: s.showOnHub,
+          keywords: s.keywords,
+          url: s.url,
+        })),
+      })),
+    },
+    stacks: { stacks: stacks.stacks },
+    bookmarks,
+    settings: model.getSettings(),
+    layout: model.getLayout(),
+    custom: { css: readConfigText('theme.css'), js: readConfigText('app.js') },
+    include,
+  };
+}
+
+/** Which files a plan would touch — used by the review screen's "this will change" list. */
+function plannedFiles(plan) {
+  const files = [];
+  if (plan.services) files.push({ name: 'services.yaml', entries: plannedServiceEntries(plan) });
+  if (plan.bookmarks) files.push({ name: 'bookmarks.yaml', entries: plannedBookmarkEntries(plan) });
+  if (plan.settings) files.push({ name: 'settings.yaml', entries: Object.keys(plan.settings).length });
+  if (plan.layout) files.push({ name: 'layout.json', entries: plan.layout.hub?.widgets?.length || 0 });
+  if (plan.custom?.css != null) files.push({ name: 'theme.css', entries: 1 });
+  if (plan.custom?.js != null) files.push({ name: 'app.js', entries: 1 });
+  return files;
+}
+
+/** The slice of the inventory the importer is allowed to see — identity, never raw labels. */
+function publicInventoryForImport(inv) {
+  return {
+    live: inv.live,
+    services: inv.services.map((s) => ({
+      id: s.id,
+      name: s.name,
+      displayName: s.displayName,
+      group: s.group,
+      url: s.url,
+      urlSource: s.urlSource,
+      kind: s.kind,
+      container: s.container ? {
+        id: s.container.id, name: s.container.name,
+        composeService: s.container.composeService, project: s.container.project,
+        image: s.container.image, state: s.container.state,
+      } : null,
+    })),
+  };
+}
+
+/** Existing presentation overlays, indexed the two ways an imported entry can bind to one. */
+function existingOverlayIndex() {
+  const map = new Map();
+  for (const o of model.readServices().overlays) {
+    if (o.container) map.set(String(o.container).toLowerCase(), o);
+    if (o.name) map.set(String(o.name).toLowerCase(), o);
+  }
+  return map;
+}
+
+/** Everything an import can read and rewrite, in the shape the planner expects. */
+function currentConfiguration() {
+  const services = model.readServices();
+  return {
+    services: {
+      groups: services.groups.map((g) => ({
+        name: g.name,
+        ...(g.description ? { description: g.description } : {}),
+        ...(g.icon ? { icon: g.icon } : {}),
+        services: g.services.map((s) => ({
+          container: s.container || undefined,
+          name: s.name,
+          ...(s.displayName ? { displayName: s.displayName } : {}),
+          ...(s.description ? { description: s.description } : {}),
+          ...(s.icon ? { icon: s.icon } : {}),
+          ...(s.group ? { group: s.group } : {}),
+          ...(s.url ? { url: s.url } : {}),
+          ...(s.hidden ? { hidden: true } : {}),
+          ...(s.showOnHub === false ? { showOnHub: false } : {}),
+          ...(s.order != null ? { order: s.order } : {}),
+        })),
+      })),
+    },
+    bookmarks: { groups: model.readBookmarks().groups },
+    layout: model.getLayout(),
+  };
+}
+
+/**
+ * The single write function the commit path uses.
+ *
+ * Dispatched on the **filename**, never on an abstract content kind. That distinction is load
+ * bearing: `services.yaml` and `bookmarks.yaml` are both "yaml" and both carry a `groups:` key,
+ * but they are written by different normalisers, and routing one through the other's writer
+ * produces a perfectly valid document containing none of the data. Naming the file leaves no room
+ * for that class of mistake.
+ */
+const TARGET_WRITERS = {
+  'services.yaml': (value) => model.writeServices(value),
+  'bookmarks.yaml': (value) => model.writeBookmarks(value),
+  'stacks.yaml': (value) => model.writeStacks(value),
+  // settings and layout arrive from the planner as *patches*, so they merge into what is there
+  // rather than replacing it — an import carries the settings it understood, not a whole document.
+  'settings.yaml': (value) => model.putSettings(value),
+  'layout.json': (value) => model.putLayout(value),
+  'theme.css': (value) => writeText('theme.css', String(value ?? '')),
+  'app.js': (value) => writeText('app.js', String(value ?? '')),
+};
+
+function writeConfigTarget(name, value, _kind, opts = {}) {
+  if (opts.raw) {
+    // rollback path: put the exact previous bytes back, whatever the file is
+    if (value == null) return { file: name };
+    return writePresentationText(name, value);
+  }
+  const writer = TARGET_WRITERS[name];
+  if (!writer) throw Object.assign(new Error(`${name} is not a writable configuration file`), { status: 400, code: 'scope_violation' });
+  return writer(value);
+}
+
+/**
+ * Record a configuration version after a successful write.
+ *
+ * Called *after* the write, never before, and never allowed to fail it: a user's settings save must
+ * not break because history bookkeeping could not get a file descriptor. Returns the version
+ * record (or null when the snapshot was a duplicate), so routes that offer an undo can name it.
+ */
+function recordVersion({ reason, subject, label, actor = null, force = false }) {
+  return configHistory.snapshot({ reason, subject, label, actor, force });
+}
+
+/** Last-modified time of a config file, for the custom-code panel. */
+function fileMtime(name) {
+  try {
+    const file = path.join(CONFIG_DIR, name);
+    return fs.statSync(file).mtime.toISOString();
+  } catch { return null; }
 }
 
 /** What this install calls itself. Falls back to the product name if settings.yaml has no app.name
@@ -774,7 +1395,42 @@ async function setupSummary() {
     },
     hostAddress: s.urlDiscovery.hostAddress,
     hostAddressSource: s.urlDiscovery.hostAddressSource,
+    // The presentation step of the wizard, before an account exists.
+    presentation: {
+      detected: {
+        // counts, not names: how many groups discovery would produce on its own
+        groups: new Set(inv.services.map((x) => x.group).filter(Boolean)).size,
+        services: inv.services.length,
+        stacks: s.inventory.stacks,
+      },
+      // The composition a fresh install starts with — a constant, not this installation's layout
+      // (which stays behind the auth gate).
+      widgets: defaultWidgetCatalogue(),
+      templates: templateCatalogue(),
+    },
   };
+}
+
+/** `defaultWidgets()` as the same constant shape the template catalogue uses. */
+function defaultWidgetCatalogue() {
+  return defaultWidgets().map((w) => ({
+    type: w.type, zone: w.zone, size: w.size, title: WIDGET_TYPES[w.type]?.title || w.type,
+  }));
+}
+
+/**
+ * The constant part of each template: what it arranges, never how it resolved here.
+ * `model.getTemplates()` returns a real preview — computed against the live layout, so it carries
+ * this install's group order — and that must stay behind the auth gate. These fields are template
+ * literals and cannot vary with the installation, so they are safe to offer the wizard.
+ */
+function templateCatalogue() {
+  // `groupNames: []` is the point: with no groups to resolve against, the preview cannot carry this
+  // installation's group order, and only the template's own constants come back.
+  return templateList({ groupNames: [] }).map((t) => ({
+    id: t.id, name: t.name, tagline: t.tagline, description: t.description, spacing: t.spacing,
+    widgets: t.widgets.map((x) => ({ type: x.type, zone: x.zone, size: x.size, title: x.title })),
+  }));
 }
 
 let dockerAvailCache = { at: 0, value: null };

@@ -12,13 +12,16 @@ interface ServerResult extends SearchEntry { group?: string; status?: string }
 
 const KIND_LABEL: Record<string, string> = {
   action: 'Actions', page: 'Pages', service: 'Services', stack: 'Stacks', setting: 'Settings',
-  activity: 'Recent activity', bookmark: 'Bookmarks', news: 'News',
+  // Phase 6: a *thing you can configure* (a service's presentation, a group) is a different kind of
+  // result from a page about configuring things — it opens the editor on that row.
+  config: 'Configuration', activity: 'Recent activity', bookmark: 'Bookmarks', news: 'News',
 };
-const ORDER = ['Actions', 'Services', 'Stacks', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
+const ORDER = ['Actions', 'Services', 'Stacks', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
 
 const KIND_ICON: Record<string, string> = {
   page: 'lucide:house', stack: 'lucide:layers', bookmark: 'lucide:bookmark', news: 'lucide:newspaper',
   action: 'lucide:command', setting: 'lucide:sliders-horizontal', activity: 'lucide:activity',
+  config: 'lucide:settings-2',
 };
 
 /** ⌘K on a Mac, Ctrl K everywhere else — the overlay should not teach the wrong muscle memory. */

@@ -808,13 +808,15 @@ export async function runWebTests(): Promise<WebResult> {
     await h.mount(<TestApp entry="/settings/general"><Settings /></TestApp>);
     await h.waitFor(() => !!q('.settings-nav'), 'the settings navigation');
     const labels = qa('.settings-nav-label').map((el) => text(el));
-    expect(labels.length === 5, `the nav is not grouped into five sections (${labels.join(' / ')})`);
-    for (const section of ['Home', 'Hub', 'Content', 'Connections', 'This install']) {
+    // Phase 6 added a sixth section: the four configuration surfaces (import, history, export,
+    // scope) are their own group rather than being filed under an existing one.
+    expect(labels.length === 6, `the nav is not grouped into six sections (${labels.join(' / ')})`);
+    for (const section of ['Home', 'Hub', 'Content', 'Connections', 'Configuration', 'This install']) {
       expect(labels.includes(section), `the “${section}” section heading is missing (${labels.join(' / ')})`);
     }
-    // every section of the IA is reachable, including the three Phase 5 panes
+    // every section of the IA is reachable, including the three Phase 5 panes and Phase 6's four
     const navText = text(q('.settings-nav')!);
-    for (const item of ['General', 'Appearance', 'Services', 'Groups', 'Bookmarks', 'Widgets', 'Integrations', 'Account & sessions', 'Environment', 'Advanced']) {
+    for (const item of ['General', 'Appearance', 'Services', 'Groups', 'Bookmarks', 'Widgets', 'Integrations', 'Import & migration', 'History', 'Export', 'Scope', 'Account & sessions', 'Environment', 'Advanced']) {
       expect(navText.includes(item), `“${item}” is missing from the settings navigation`);
     }
     // the item you are on says so — visually and to assistive tech
@@ -860,7 +862,7 @@ export async function runWebTests(): Promise<WebResult> {
   });
 
   /* 18b — Phase 5: the wizard walks all six steps, explains URLs, and does not enter the app by itself */
-  await test('setup wizard: six steps, URL reasons explained, and a Finish screen before the Hub', async (h) => {
+  await test('setup wizard: eight steps (with the Phase 6 presentation choice), URL reasons explained, and a Finish screen before the Hub', async (h) => {
     const discovery = {
       docker: { ok: true, state: 'connected', version: '26.1.0-mock', apiVersion: '1.43', operatingSystem: 'linux' },
       containers: 25, running: 18, stopped: 7, stacks: 7, services: 19, infrastructure: 6, standalone: 4,
@@ -877,8 +879,21 @@ export async function runWebTests(): Promise<WebResult> {
       },
       traefik: { routes: 14, tlsRoutes: 12, routedContainers: 13, entrypoints: ['web', 'websecure'], entrypointPorts: {} },
       hostAddress: '198.51.100.7', hostAddressSource: 'outbound-interface',
+      // Phase 6: the presentation step is built from constants only — template arrangements and the
+      // default composition — plus the counts above. No names are involved.
+      presentation: {
+        detected: { groups: 7, services: 19, stacks: 7 },
+        widgets: [
+          { type: 'system', zone: 'main', size: 'md', title: 'System' },
+          { type: 'services', zone: 'main', size: 'lg', title: 'Services' },
+        ],
+        templates: [
+          { id: 'minimal', name: 'Minimal', tagline: 'Just your services', description: '', spacing: 'airy', widgets: [{ type: 'services', zone: 'main', size: 'lg', title: 'Services' }] },
+          { id: 'media', name: 'Media', tagline: 'Streaming first', description: '', spacing: 'comfortable', widgets: [{ type: 'services', zone: 'main', size: 'lg', title: 'Services' }, { type: 'system', zone: 'rail', size: 'sm', title: 'System' }] },
+        ],
+      },
     };
-    let created: { username?: string; password?: string; infrastructure?: { hostAddress?: string } } | null = null;
+    let created: { username?: string; password?: string; infrastructure?: { hostAddress?: string }; presentation?: { mode?: string; template?: string } } | null = null;
     h.setRoutes({
       // the fixture flips to "initialized" the moment the account exists, exactly like the server
       '/api/setup/status': () => (created
@@ -925,6 +940,33 @@ export async function runWebTests(): Promise<WebResult> {
     expect(!text().includes('jellyfin') && !text().includes('wave'), 'a container name leaked into the pre-auth wizard');
 
     await advance('Continue');
+    // Presentation (Phase 6): three ways in, all of them presentation-only
+    expect(text().includes('Presentation'), 'the Presentation step heading is missing');
+    expect(text().includes('Use what Docker found'), 'the default choice is not offered');
+    expect(text().includes('Start from a template'), 'the template choice is not offered');
+    expect(text().includes('Import a Homepage configuration'), 'the import choice is not offered');
+    expect(text().includes('19'), 'the choice does not say how many applications are behind it');
+    // the decision is a decision — nothing has been written, and the wizard says so
+    expect(!h.writes('POST', '/api/setup').length, 'the wizard wrote during the presentation step');
+
+    // the template choice selects one, and the preview shows that arrangement
+    const template = qa('button').find((x) => text(x).includes('Start from a template'))!;
+    click(template);
+    await h.flush(20);
+    expect(text().includes('Minimal') && text().includes('Media'), `the templates were not listed: ${text().slice(0, 400)}`);
+    const media = qa('button').find((x) => text(x).trim().startsWith('Media'))!;
+    click(media);
+    await h.flush(20);
+    await advance('Continue');
+
+    // Preview: a wireframe of the arrangement, still no names, still no writes
+    expect(text().includes('Preview'), 'no preview step');
+    expect(!!q('.setup-preview'), 'the preview wireframe is missing');
+    expect(text().includes('Services'), 'the preview does not show the blocks the template arranges');
+    expect(!text().includes('jellyfin') && !text().includes('wave'), 'a container name leaked into the preview');
+    expect(!h.writes('POST', '/api/setup').length, 'the preview wrote something');
+    await advance('Continue');
+
     // Review: the recap, then the one mutation
     expect(text().includes('Review'), 'no review step');
     expect(text().includes('admin'), 'the recap does not name the account being created');
@@ -933,6 +975,7 @@ export async function runWebTests(): Promise<WebResult> {
     const post = h.writes('POST', '/api/setup')[0];
     expect(!!post, 'the account was never created');
     expect((post.body as { username?: string }).username === 'admin', 'the wrong username was sent');
+    expect((post.body as { presentation?: { template?: string } }).presentation?.template === 'media', 'the chosen template was not carried by the one write');
     expect(!!created, 'the fixture never saw the create call');
 
     // Finish: a real screen, still no application behind it
@@ -1434,6 +1477,80 @@ export async function runWebTests(): Promise<WebResult> {
     await h.waitFor(() => h.writes('PUT', '/api/settings').length > 0, 'the settings write');
     const put = h.writes('PUT', '/api/settings').pop()!;
     expect((put.body as { app?: { name?: string } }).app?.name === 'Grid Control', `the name was not written (${JSON.stringify(put.body)})`);
+  });
+
+  /* 32 — Phase 6: migration is a review before it is a write */
+  await test('settings: import requires a review, and the review shows counts, not promises', async (h) => {
+    const preview = {
+      source: 'homepage',
+      files: [{ name: 'services.yaml', present: true, size: 120 }],
+      ignored: [], refused: [], warnings: [],
+      counts: { groups: 2, services: 3, matched: 1, unmatched: 2, bookmarks: 2, widgets: 1, conflicts: 1 },
+      groups: [{ name: 'Media', added: true, renamed: false, preserved: false }],
+      services: [
+        { key: 'jellyfin', name: 'Jellyfin', group: 'Media', matched: true, container: 'jellyfin', notes: [] },
+        { key: 'ghost', name: 'Ghost', group: 'Lab', matched: false, container: null, notes: ['no matching container'] },
+      ],
+      bookmarks: [{ group: 'Media', name: 'Docs', url: 'https://docs.example.com', matched: false, notes: [] }],
+      widgets: 1, invalid: [], unchanged: [],
+    };
+    h.setRoutes({
+      '/api/config/import/parse': preview,
+      '/api/config/import/apply': (body) => ({ ok: true, mode: (body as { mode?: string })?.mode || 'merge', written: ['services.yaml', 'bookmarks.yaml'], counts: preview.counts, version: '2026-09-15T120000Z' }),
+      ...stubRoutes(),
+    });
+    await h.mount(<TestApp entry="/settings/import"><Settings /></TestApp>);
+    await h.waitFor(() => text().includes('Review') || text().includes('review'), 'the import pane');
+    // nothing is written until a plan has been reviewed
+    expect(h.writes('POST', '/api/config/import/apply').length === 0, 'the pane wrote before a review existed');
+    expect(/Docker/i.test(text()), 'the pane never mentions Docker — it must say what an import cannot do');
+  });
+
+  /* 33 — Phase 6: history is configuration versions, with the runtime state nowhere in sight */
+  await test('settings: history lists configuration versions and never runtime state', async (h) => {
+    h.setRoutes({
+      '/api/config/history': {
+        current: '2026-09-15T12-00-00-000Z',
+        scope: ['services.yaml', 'bookmarks.yaml', 'layout.json'],
+        stats: {
+          count: 1, totalBytes: 1300, oldest: new Date(Date.now() - 60_000).toISOString(), newest: new Date(Date.now() - 60_000).toISOString(),
+          retention: { versions: 20, bytes: 4_000_000 },
+        },
+        versions: [{
+          id: '2026-09-15T12-00-00-000Z', at: new Date(Date.now() - 60_000).toISOString(), reason: 'import',
+          subject: 'services.yaml', label: 'Imported a Homepage configuration', actor: 'admin',
+          bytes: 1300, files: ['services.yaml', 'bookmarks.yaml', 'layout.json'],
+          changed: [{ file: 'services.yaml', from: 'a1b2c3', to: 'd4e5f6' }],
+        }],
+      },
+      ...stubRoutes(),
+    });
+    await h.mount(<TestApp entry="/settings/history"><Settings /></TestApp>);
+    await h.waitFor(() => text().includes('Imported a Homepage configuration'), 'the history version label');
+    expect(!!q('.cfg-versions'), 'the version list is missing');
+    expect(text().includes('1 of 20'), `the retention bound is not shown: ${text().slice(-300)}`);
+    expect(/1\.3 KB|1300/.test(text()), `the version size is not reported: ${text().slice(-300)}`);
+    expect(!/sessions\.json|auth\.json|cookie/i.test(text()), 'history exposes runtime or authentication state');
+  });
+
+  /* 34 — Phase 6: export offers both dialects, and says what it strips */
+  await test('settings: export offers both dialects and names what is excluded', async (h) => {
+    h.setRoutes({
+      '/api/config/export': {
+        format: 'opushub', formatVersion: 1, kind: 'native', generatedAt: new Date().toISOString(),
+        scope: ['services.yaml', 'bookmarks.yaml', 'layout.json'],
+        files: { 'services.yaml': 'groups: []\n', 'bookmarks.yaml': 'groups: []\n' },
+        notes: ['Integration API keys are not exported.'],
+        redactions: [{ kind: 'query', url: 'http://lab.internal/news?apiKey=…', note: 'a credential in a URL query was stripped', where: 'services.yaml' }],
+        machineSpecific: ['hostAddress'],
+      },
+      ...stubRoutes(),
+    });
+    await h.mount(<TestApp entry="/settings/export"><Settings /></TestApp>);
+    await h.waitFor(() => text().includes('Homepage'), 'the export pane');
+    expect(text().includes('opushub') || text().includes('OpusHub'), 'the native dialect is not named');
+    expect(/credential|query|stripped/i.test(text()), `the redaction of a URL credential is not surfaced: ${text().slice(0, 400)}`);
+    expect(text().includes('services.yaml'), 'the files in the export are not listed');
   });
 
   for (const r of results) {
