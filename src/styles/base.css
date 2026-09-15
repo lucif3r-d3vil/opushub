@@ -36,7 +36,19 @@ code, pre, kbd { font-family: var(--font-mono); font-size: 0.92em; }
 :focus:not(:focus-visible) { outline: none; }
 
 /* ---------- background layer ---------- */
-.bg-layer { position: fixed; inset: 0; z-index: -2; pointer-events: none; }
+/* The background is a fixed viewport layer behind the app shell. It must be
+   z-index 0 (not -2) because body has an opaque background (var(--bg)) that
+   would paint over any negative z-index child per CSS spec, making the image
+   invisible. With z-index 0 it sits above the body background but below the
+   shell (z-index 1) and rail (z-index 40). The structure is:
+     root
+     ├── bg-layer (fixed, image)
+     ├── bg-overlay (fixed, scrim)
+     └── app-shell (relative, z-index 1, scrollable content)
+   This ensures full-viewport coverage regardless of widget height or content
+   length, no layout shift, no pointer-events, and correct stacking on desktop
+   and mobile. */
+.bg-layer { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .bg-layer::after { content: ''; position: absolute; inset: 0; }
 .bg-quiet::after { background: var(--bg); }
 .bg-horizon::after {
@@ -53,14 +65,25 @@ html[data-theme='light'] .bg-horizon::after {
 .bg-photo .bg-img {
   position: absolute; inset: -48px; /* bleed so blur has something to sample at edges */
   background-size: cover; background-position: center;
+  background-repeat: no-repeat;
   filter: blur(calc(var(--bg-blur, 24) * 1px)) saturate(1.05);
   transform: scale(1.02);
+  will-change: filter, transform;
 }
+/* Separate overlay layer per preferred structure: image in bg-layer, scrim in bg-overlay.
+   Both are fixed viewport layers at z-index 0, painted in DOM order (overlay above image).
+   The ::after fallback is kept for quiet/horizon and as fallback for photo if overlay is absent. */
+.bg-overlay { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: rgba(8, 9, 11, calc(var(--bg-scrim, 62) / 100)); }
+html[data-theme='light'] .bg-overlay { background: rgba(247, 247, 245, calc(var(--bg-scrim, 62) / 100)); }
 .bg-photo::after { background: rgba(8, 9, 11, calc(var(--bg-scrim, 62) / 100)); }
 html[data-theme='light'] .bg-photo::after { background: rgba(247, 247, 245, calc(var(--bg-scrim, 62) / 100)); }
+/* When photo mode is active, make body background transparent so the fixed layer is the
+   sole background source and doesn't compete with an opaque body. The html element keeps
+   its own background as fallback for overscroll. */
+html[data-bg='photo'] body { background: transparent; }
 
 /* ---------- app shell ---------- */
-.app-shell { display: flex; min-height: 100dvh; }
+.app-shell { display: flex; min-height: 100dvh; position: relative; z-index: 1; }
 
 .rail {
   position: fixed; left: 0; top: 0; bottom: 0; width: var(--rail-w);

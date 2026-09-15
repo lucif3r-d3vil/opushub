@@ -33,14 +33,28 @@ function Background() {
   const { settings } = useSettings();
   const bg = settings?.appearance.background;
   const mode = bg?.mode ?? 'quiet';
+  const blur = bg?.blur ?? 24;
+  const scrim = bg?.scrim ?? 62;
+  // Preferred structure: root ├── background layer (image) ├── overlay (scrim) ├── content
+  // Both background and overlay are fixed viewport layers at z-index 0, content is z-index 1.
+  // This ensures full-viewport coverage, behind rail (z-index 40), no pointer-events, no flow impact.
   return (
-    <div
-      className={`bg-layer bg-${mode}`}
-      style={{ ['--bg-blur' as never]: `${bg?.blur ?? 24}`, ['--bg-scrim' as never]: `${bg?.scrim ?? 62}` }}
-      aria-hidden="true"
-    >
-      {mode === 'photo' && bg?.photo && <BackgroundImage url={bg.photo} />}
-    </div>
+    <>
+      <div
+        className={`bg-layer bg-${mode}`}
+        style={{ ['--bg-blur' as never]: `${blur}`, ['--bg-scrim' as never]: `${scrim}` }}
+        aria-hidden="true"
+      >
+        {mode === 'photo' && bg?.photo && <BackgroundImage url={bg.photo} />}
+      </div>
+      {mode === 'photo' && (
+        <div
+          className="bg-overlay"
+          style={{ ['--bg-scrim' as never]: `${scrim}` }}
+          aria-hidden="true"
+        />
+      )}
+    </>
   );
 }
 

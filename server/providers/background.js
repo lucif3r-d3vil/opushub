@@ -250,28 +250,77 @@ export async function probeImageUrl(url, { fetchImpl = fetch, lookup = lookupFn 
  * Resolve an Unsplash photo page URL to its direct image URL, through the public napi JSON
  * endpoint. The only outbound call is to unsplash.com itself; the resolved URL must live on
  * the pinned CDN host. `fetchImpl` is injectable for tests.
+ *
+ * Unsplash pages come in two shapes:
+ *   https://unsplash.com/photos/<id>               (just the id)
+ *   https://unsplash.com/photos/<slug>-<id>         (description + id)
+ * The id itself may start with underscore and may contain hyphens/underscores.
+ * The napi endpoint expects just the id, not the full slug. To be robust, we try:
+ *   1. the full captured segment (covers the <id>-only case and any future where the API accepts slug)
+ *   2. the substring after the last hyphen (covers <slug>-<id> where id is after last hyphen)
+ * If both 404, we report not found. This keeps the security boundary (still only unsplash.com,
+ * still only [A-Za-z0-9_-] chars) while fixing the common case where a user pastes a page URL
+ * with a descriptive slug.
  */
-export async function resolveUnsplashPage(input, { fetchImpl = fetch } = {}) {
+export async function resolveUnsplashPage(input, { fetchImpl = fetch, lookup = lookupFn } = {}) {
   const m = UNSPLASH_PAGE_RE.exec(String(input).trim());
   if (!m) return { ok: false, error: 'Only https://unsplash.com/photos/<id> photo pages are resolved.' };
-  const photoId = m[1];
-  try {
-    const doc = await fetchJson(`https://unsplash.com/napi/photos/${encodeURIComponent(photoId)}`, {
-      timeoutMs: UNSPLASH_TIMEOUT_MS,
-      headers: { 'user-agent': UA, accept: 'application/json' },
-    });
-    const raw = doc?.urls?.raw;
-    if (typeof raw !== 'string') throw new Error('photo not found');
-    const u = new URL(raw);
-    if (u.protocol !== 'https:' || u.hostname !== UNSPLASH_CDN_HOST) throw new Error('unexpected image host');
-    return { ok: true, url: u.toString(), resolvedFrom: input };
-  } catch (err) {
-    if (/HTTP 404|not found/i.test(String(err?.message || err))) {
-      return { ok: false, error: 'Unsplash could not find that photo — the link may be wrong or removed.' };
-    }
-    if (/timeout/i.test(String(err?.message || err))) return { ok: false, error: 'Unsplash did not answer in time — try again.' };
-    return { ok: false, error: 'Unsplash could not resolve that photo page.' };
+  const fullSlug = m[1];
+
+  // Build candidate id list: full slug, then id after last hyphen (if different).
+  const candidates = [fullSlug];
+  const lastHyphen = fullSlug.lastIndexOf('-');
+  if (lastHyphen > 0 && lastHyphen < fullSlug.length - 1) {
+    const after = fullSlug.slice(lastHyphen + 1);
+    if (after && after !== fullSlug && /^[A-Za-z0-9_-]+$/.test(after)) candidates.push(after);
   }
+
+  // Also validate unsplash.com itself is public (defense-in-depth, though pinned host)
+  try {
+    await assertPublicHost('unsplash.com', lookup);
+  } catch (err) {
+    return { ok: false, error: String(err?.message || 'refused host') };
+  }
+
+  let lastErr = null;
+  for (const photoId of candidates) {
+    try {
+      // The napi endpoint is JSON-only and pinned to unsplash.com; no HTML is fetched.
+      const doc = await fetchJson(`https://unsplash.com/napi/photos/${encodeURIComponent(photoId)}`, {
+        timeoutMs: UNSPLASH_TIMEOUT_MS,
+        headers: { 'user-agent': UA, accept: 'application/json' },
+      });
+      const raw = doc?.urls?.raw;
+      if (typeof raw !== 'string') throw new Error('photo not found');
+      const u = new URL(raw);
+      if (u.protocol !== 'https:' || u.hostname !== UNSPLASH_CDN_HOST) throw new Error('unexpected image host');
+      // Final CDN host must also be public
+      try {
+        await assertPublicHost(u.hostname, lookup);
+      } catch (err) {
+        return { ok: false, error: String(err?.message || 'refused host') };
+      }
+      return { ok: true, url: u.toString(), resolvedFrom: input };
+    } catch (err) {
+      lastErr = err;
+      // If it's a 404, try next candidate; otherwise break to generic error
+      if (!/HTTP 404|not found/i.test(String(err?.message || err))) {
+        if (/timeout/i.test(String(err?.message || err))) return { ok: false, error: 'Unsplash did not answer in time — try again.' };
+        // For other errors, stop retrying and report generic failure
+        break;
+      }
+      // 404: try next candidate if any
+      continue;
+    }
+  }
+
+  if (lastErr && /HTTP 404|not found/i.test(String(lastErr?.message || lastErr))) {
+    return { ok: false, error: 'Unsplash could not find that photo — the link may be wrong or removed.' };
+  }
+  if (lastErr && /timeout/i.test(String(lastErr?.message || lastErr))) {
+    return { ok: false, error: 'Unsplash did not answer in time — try again.' };
+  }
+  return { ok: false, error: 'Unsplash could not resolve that photo page.' };
 }
 
 /**
