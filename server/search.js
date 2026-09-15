@@ -10,6 +10,7 @@ const PAGES = [
   { title: 'Hub', href: '/', hint: 'Your digital home', kind: 'page', keywords: ['home', 'start', 'dashboard'] },
   { title: 'Services', href: '/services', hint: 'Everything you run', kind: 'page', keywords: ['apps', 'containers'] },
   { title: 'Stacks', href: '/stacks', hint: 'Groups of containers', kind: 'page', keywords: ['compose', 'projects'] },
+  { title: 'Infrastructure', href: '/infrastructure', hint: 'Engine, networks, volumes, images, topology', kind: 'page', keywords: ['docker', 'network', 'volume', 'image', 'topology', 'host', 'engine'] },
   { title: 'System', href: '/system', hint: 'Host vitals', kind: 'page', keywords: ['cpu', 'memory', 'disk', 'network', 'uptime'] },
   { title: 'Activity', href: '/activity', hint: 'What happened, when', kind: 'page', keywords: ['events', 'history', 'log'] },
   { title: 'Icon browser', href: '/icons', hint: 'Find an icon and apply it', kind: 'page', keywords: ['logo', 'glyph', 'symbol'] },
@@ -73,7 +74,7 @@ export function scoreMatch(needle, ...fields) {
 const score = scoreMatch;
 
 /** Category weights — services and stacks rank highest: they are the point of the index. */
-const KIND_WEIGHT = { service: 1, stack: 1, page: 0.92, config: 0.9, setting: 0.88, activity: 0.8, bookmark: 0.85, news: 0.75 };
+const KIND_WEIGHT = { service: 1, stack: 1, page: 0.92, config: 0.9, setting: 0.88, infra: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75 };
 
 /** Docker subjects whose events are worth offering as destinations — the same names the pages use. */
 const ACTIVITY_WINDOW_MS = 7 * 24 * 3600_000;

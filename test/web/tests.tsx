@@ -17,6 +17,7 @@ import ServiceDetail from '../../src/pages/ServiceDetail';
 import StackDetail from '../../src/pages/StackDetail';
 import SystemPage from '../../src/pages/System';
 import ActivityPage from '../../src/pages/Activity';
+import InfrastructurePage from '../../src/pages/Infrastructure';
 import { Loading } from '../../src/components/ui';
 import { GREETINGS, greetingFor } from '../../src/components/hub/HubHeader';
 import type { LayoutDoc, WidgetInstance } from '../../src/lib/types';
@@ -155,6 +156,66 @@ const providersFixture = {
   ],
 };
 
+/* Phase 7 fixtures: the infrastructure inventory, in the shapes the API serves. */
+const hostDoc = {
+  at: Date.now(),
+  host: { hostname: 'opusgrid', os: 'Debian GNU/Linux 13 (trixie)', kernel: '6.1.0-1-amd64', arch: 'x64', model: null, uptimeSec: 86400 * 4 + 43200, bootAt: null },
+  cpu: { model: 'Intel N100', cores: 4, threads: 4, mhz: 1800 },
+  memory: { total: 8_000_000_000 },
+  docker: { status: 'connected', available: true, version: '26.1.0', apiVersion: '1.43', os: 'linux', arch: 'amd64', driver: 'overlay2', containers: 3, running: 2, stopped: 1, paused: 0 },
+  address: { configured: null, detected: '198.51.100.20', effective: '198.51.100.20', source: 'outbound-interface' },
+  traefik: { detected: true, source: 'container-labels', routedContainers: 2, routers: 3, tlsRouters: 1, entrypoints: ['web', 'websecure'], container: { name: 'traefik', state: 'running' } },
+  opushub: { name: 'OpusHub', version: '0.1.0', gitSha: 'abc1234', buildTime: null, imageTag: null, installationMode: 'source' },
+};
+const dockerDoc = {
+  at: Date.now(), status: { ok: true, state: 'connected', version: '26.1.0', api: '1.43' },
+  engine: { version: '26.1.0', apiVersion: '1.43', os: 'linux', arch: 'amd64', driver: 'overlay2' },
+  counts: { containers: 3, running: 2, stopped: 1, images: 2, volumes: 2, networks: 2 },
+  live: true, statusReason: null, code: null, lastKnown: null,
+};
+const networksDoc = {
+  at: Date.now(), live: true, statusReason: null, code: null, count: 2, stale: null,
+  networks: [
+    { id: 'aaaabbbbcccc', name: 'proxy', driver: 'bridge', scope: 'local', internal: false, attachable: true, created: null, containerCount: 2, containers: [{ name: 'wave' }, { name: 'stream' }] },
+    { id: 'dddddeeeefff', name: 'media_default', driver: 'bridge', scope: 'local', internal: false, attachable: false, created: null, containerCount: 1, containers: [{ name: 'wave' }] },
+  ],
+};
+const volumesDoc = {
+  at: Date.now(), live: true, statusReason: null, code: null, count: 2, stale: null,
+  volumes: [
+    { name: 'wave-data', driver: 'local', scope: 'local', createdAt: null, refCount: 1, size: 500_000_000 },
+    { name: 'orphan-volume', driver: 'local', scope: 'local', createdAt: null, refCount: 0, size: 12_000_000 },
+  ],
+};
+const imagesDoc = {
+  at: Date.now(), live: true, statusReason: null, code: null, count: 2, stale: null,
+  images: [
+    { id: 'abc123def456', tags: ['ghcr.io/example/wave:1.0'], digests: [], created: 1789000000, size: 268_435_456, containers: 1, usedBy: ['wave'] },
+    { id: 'deadbeef0000', tags: ['alpine:3.20'], digests: [], created: 1788000000, size: 8_000_000, containers: 0, usedBy: [] },
+  ],
+};
+const resourcesDoc = {
+  at: Date.now(),
+  cpu: { current: 21.4, unit: 'percent', average: 18.2, peak: 44.0, samples: 120, cores: 4, load: [1.2, 0.9, 0.5], availability: 'available', source: 'system-provider', timestamp: Date.now() },
+  memory: { current: 4_000_000_000, total: 8_000_000_000, available: 4_000_000_000, cached: 1_000_000_000, usedPct: 50, unit: 'bytes', averagePct: 48, peakPct: 61, samples: 120, availability: 'available', source: 'system-provider', timestamp: Date.now() },
+  network: { current: { rxPerSec: 1000, txPerSec: 500 }, unit: 'bytes-per-second', averageRx: 900, peakRx: 2000, averageTx: 400, peakTx: 900, samples: 120, interfaces: ['eth0'], availability: 'available', source: 'system-provider', timestamp: Date.now() },
+  storage: { current: { mounts: 2, total: 100_000_000_000, used: 40_000_000_000, free: 60_000_000_000 }, mounts: 2, availability: 'available', source: 'storage-provider', timestamp: Date.now() },
+  gpu: { current: null, availability: 'unavailable', reason: 'Not available', source: 'system-provider', timestamp: Date.now() },
+};
+const storageDoc = {
+  at: Date.now(),
+  providers: [
+    { id: 'filesystem', label: 'Filesystems', available: true, reason: null, mounts: [{ mount: '/', device: '/dev/sda1', fs: 'ext4', total: 100_000_000_000, used: 40_000_000_000, free: 60_000_000_000, usedPct: 40 }], totals: { mounts: 1, total: 100_000_000_000, used: 40_000_000_000, free: 60_000_000_000 }, at: Date.now() },
+    { id: 'zfs', label: 'ZFS', available: 'not-implemented', reason: 'ZFS integration is not implemented yet.', pools: [], datasets: [], at: Date.now() },
+  ],
+};
+const waveHealth = {
+  service: 'wave', displayName: 'Wave',
+  health: { state: 'healthy', evidence: { container: 'running', healthcheck: 'healthy', http: '200' }, stack: 'Media', startedAt: new Date(Date.now() - 86_400_000).toISOString(), url: 'http://wave.lab.internal', urlSource: 'traefik', detail: 'Healthcheck passing.' },
+  probe: { checked: true, reachable: true, statusCode: 200, latencyMs: 14, checkedAt: new Date().toISOString(), source: 'traefik', errorType: null },
+  evaluatedAt: Date.now(),
+};
+
 function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) => unknown)> {
   return {
     '/api/settings': settings,
@@ -210,6 +271,14 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
     },
     '/api/stacks/media': stackDetail,
     '/api/stacks/media/history': stackHistory,
+    '/api/host': hostDoc,
+    '/api/docker': dockerDoc,
+    '/api/networks': networksDoc,
+    '/api/volumes': volumesDoc,
+    '/api/images': imagesDoc,
+    '/api/resources': resourcesDoc,
+    '/api/storage': storageDoc,
+    '/api/services/Music/wave/health': waveHealth,
   };
 }
 
@@ -227,6 +296,7 @@ function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: strin
             <Route path="/activity" element={<div data-test="activity">activity</div>} />
             <Route path="/stacks/:name" element={<StackDetail />} />
             <Route path="/system" element={<SystemPage />} />
+            <Route path="/infrastructure" element={<InfrastructurePage />} />
             <Route path="/services/:group/:name" element={<ServiceDetail />} />
           </Routes>
         </LayoutProvider>
@@ -1551,6 +1621,40 @@ export async function runWebTests(): Promise<WebResult> {
     expect(text().includes('opushub') || text().includes('OpusHub'), 'the native dialect is not named');
     expect(/credential|query|stripped/i.test(text()), `the redaction of a URL credential is not surfaced: ${text().slice(0, 400)}`);
     expect(text().includes('services.yaml'), 'the files in the export are not listed');
+  });
+
+  /* 35 — Phase 7: the infrastructure page reads engine facts, never invents them */
+  await test('infrastructure renders engine facts, tabs and the volume list', async (h) => {
+    await h.mount(<TestApp entry="/infrastructure"><InfrastructurePage /></TestApp>);
+    await h.waitFor(() => text().includes('26.1.0'), 'the engine version');
+    expect(text().includes('opusgrid'), 'the hostname is missing');
+    expect(text().includes('Intel N100'), 'the CPU model is missing');
+    for (const tab of ['Docker', 'Networks', 'Volumes', 'Images', 'Topology']) {
+      expect(text().includes(tab), `the ${tab} tab is missing`);
+    }
+    const vols = qa('button, a').find((el) => text(el).trim() === 'Volumes');
+    expect(!!vols, 'the volumes tab button is missing');
+    await click(vols!);
+    await h.waitFor(() => text().includes('wave-data'), 'the volume list');
+    expect(text().includes('orphan-volume'), 'the second volume is missing');
+    expect(!/\/var\/lib\/docker/.test(text()), 'a host mount path leaked into the volume list');
+  });
+
+  await test('infrastructure topology draws daemon-reported attachments', async (h) => {
+    await h.mount(<TestApp entry="/infrastructure?tab=topology"><InfrastructurePage /></TestApp>);
+    await h.waitFor(() => text().includes('proxy'), 'the topology network node');
+    const svg = q('.topo-svg');
+    expect(!!svg, 'the topology graph is missing');
+    const labels = [...svg!.querySelectorAll('.topo-label')].map((el) => (el.textContent || '').trim());
+    expect(labels.some((l) => l === 'proxy'), `the proxy network node is missing: ${labels.join(', ')}`);
+    expect(labels.some((l) => /wave/i.test(l)), `the attached container node is missing: ${labels.join(', ')}`);
+  });
+
+  await test('service detail shows the unified health verdict with its evidence', async (h) => {
+    await h.mount(<TestApp entry="/services/Music/wave"><ServiceDetail /></TestApp>);
+    await h.waitFor(() => text().includes('Healthcheck passing'), 'the unified verdict');
+    expect(text().includes('HTTP 200'), 'the HTTP evidence is missing');
+    expect(!/healthy merely|assumed/i.test(text()), 'the verdict overclaims');
   });
 
   for (const r of results) {

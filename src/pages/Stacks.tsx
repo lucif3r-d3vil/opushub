@@ -4,7 +4,7 @@ import { usePolled } from '../lib/api';
 import { relTime } from '../lib/format';
 import type { StandaloneContainer, Stack, StacksDoc } from '../lib/types';
 import { Icon } from '../components/Icon';
-import { OpenLink, PageHero, ProviderNote, StatusDot, StatusLine } from '../components/ui';
+import { LastKnownNote, OpenLink, PageHero, ProviderNote, StatusDot, StatusLine } from '../components/ui';
 import { LogsDrawer } from '../lib/dockerStatus';
 
 // The deterministic model from server/discovery.js, in user-facing words
@@ -59,6 +59,13 @@ export default function StacksPage() {
           reason={data?.statusReason || 'Stacks come from compose labels on the Docker engine. Without a connection there is nothing to list — an entry in stacks.yaml alone does not make a stack.'}
           fixHref="/settings/environment"
           fixLabel="Check the connection →"
+        />
+      )}
+      {!data?.live && !error && data?.lastKnown && (
+        <LastKnownNote
+          at={data.lastKnown.at}
+          lines={[`${data.lastKnown.stacks} stacks · ${data.lastKnown.containers} containers · ${data.lastKnown.running} running`]}
+          onRetry={refresh}
         />
       )}
       {!!unmatched.length && (

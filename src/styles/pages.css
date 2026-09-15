@@ -672,3 +672,46 @@
 .cfg-code { width: 100%; font-size: 12px; line-height: 1.6; resize: vertical; tab-size: 2; }
 .cfg-code-actions { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; margin-top: var(--sp-2); }
 .cfg-code-actions .stale-note { flex: 1; min-width: 220px; }
+
+/* Phase 7 — topology ------------------------------------------------------- */
+.topo-graph { position: relative; border: 1px solid var(--hair); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.topo-svg { display: block; width: 100%; cursor: grab; touch-action: none; }
+.topo-svg:active { cursor: grabbing; }
+.topo-edge { fill: none; stroke: var(--hair); stroke-width: 1.4; }
+.topo-edge.hot { stroke: var(--accent); stroke-width: 2; }
+.topo-edge.dim, .topo-node.dim { opacity: 0.28; }
+.topo-box { fill: var(--bg); stroke: var(--hair); stroke-width: 1.2; }
+.topo-box.host { stroke: var(--accent); }
+.topo-box.network { stroke-dasharray: 4 3; }
+.topo-box.run { stroke: color-mix(in srgb, var(--ok) 55%, var(--hair)); }
+.topo-box.halt { stroke: color-mix(in srgb, var(--warn) 55%, var(--hair)); }
+.topo-node.clickable { cursor: pointer; }
+.topo-node.clickable:hover .topo-box, .topo-node.sel .topo-box { stroke: var(--accent); stroke-width: 1.8; }
+.topo-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 9px; }
+.topo-dot { fill: var(--ink-3); }
+.topo-dot.host { fill: var(--accent); }
+.topo-dot.run { fill: var(--ok); }
+.topo-dot.halt { fill: var(--warn); }
+.topo-label { font-size: 12px; font-weight: 600; fill: var(--ink); }
+.topo-sub { font-size: 10.5px; fill: var(--ink-3); }
+.topo-tools { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; }
+.topo-sel { position: absolute; left: 10px; bottom: 10px; display: flex; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--hair); border-radius: 9px; padding: 6px 10px; font-size: var(--fs-meta); }
+.topo-list { display: none; }
+@media (max-width: 720px) {
+  .topo-graph { display: none; }
+  .topo-list { display: block; }
+}
+
+/* Charts: bounded, clipped, motion-safe. The graph owns its box; text below it is separate. */
+.chart { position: relative; overflow: hidden; }
+.chart svg { display: block; }
+@media (prefers-reduced-motion: reduce) {
+  .topo-edge, .topo-box, .topo-node { transition: none !important; animation: none !important; }
+  .page-anim { animation: none !important; }
+  .spark path { transition: none !important; }
+}
+
+/* Phase 7 — unified health strip ------------------------------------------------ */
+.health-strip { margin-top: var(--sp-4); border-top: 1px solid var(--hair); padding-top: var(--sp-4); }
+.health-head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.health-detail { color: var(--ink-2); font-size: var(--fs-meta); }

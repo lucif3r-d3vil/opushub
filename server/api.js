@@ -709,6 +709,14 @@ export async function handleApi(req, res, url) {
   if (route === 'GET /api/version') {
     return send(res, 200, versionInfo());
   }
+  if (route === 'GET /api/resources') {
+    const { resourcesDocument } = await import('./resources.js');
+    const [system, storage] = await Promise.all([
+      collectSystem().catch(() => null),
+      describeStorage().catch(() => null),
+    ]);
+    return send(res, 200, resourcesDocument({ system, points: history.window(3600_000), storage }));
+  }
 
   // ---------- integrations ----------
   if (route === 'GET /api/news') {
@@ -1546,7 +1554,7 @@ export function markBoot(t) { bootAt = t; }
  * was not deliberately versioned.
  */
 const V1_ROUTES = new Set([
-  '/host', '/docker', '/networks', '/volumes', '/images', '/storage', '/version',
+  '/host', '/docker', '/networks', '/volumes', '/images', '/storage', '/version', '/resources',
   '/services', '/stacks', '/system', '/discovery', '/providers',
 ]);
 

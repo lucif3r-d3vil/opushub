@@ -5,7 +5,7 @@ import { relTime } from '../lib/format';
 import { useLayout, useSettings } from '../lib/theme';
 import type { Service, ServicesDoc } from '../lib/types';
 import { Icon } from '../components/Icon';
-import { OpenLink, ProviderNote, StatusLine } from '../components/ui';
+import { LastKnownNote, OpenLink, ProviderNote, StatusLine } from '../components/ui';
 import { Sortable } from '../components/Sortable';
 import { PageHero } from '../components/ui';
 import { LogsDrawer } from '../lib/dockerStatus';
@@ -87,6 +87,13 @@ export default function ServicesPage() {
           reason={data?.statusReason || 'Docker is not connected, so OpusHub has no inventory to show. Services are discovered from the engine — nothing is listed from config alone.'}
           fixHref="/settings/environment"
           fixLabel="Check the connection →"
+        />
+      )}
+      {!data?.live && !error && data?.lastKnown && (
+        <LastKnownNote
+          at={data.lastKnown.at}
+          lines={[`${data.lastKnown.containers} services · ${data.lastKnown.running} running · ${data.lastKnown.stopped} stopped · ${data.lastKnown.stacks} stacks`]}
+          onRetry={refresh}
         />
       )}
       {!!data?.live && !total && !filter && (
