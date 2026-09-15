@@ -269,7 +269,10 @@ export interface SettingsDoc {
     density: 'comfortable' | 'compact';
     transparency: boolean;
     fontScale: number;
-    background: { mode: 'quiet' | 'horizon' | 'photo'; photo: string | null; blur: number; scrim: number };
+    background: {
+      mode: 'quiet' | 'horizon' | 'photo'; photo: string | null; blur: number; scrim: number;
+      position: 'center' | 'top' | 'bottom' | 'left' | 'right'; fit: 'cover' | 'contain';
+    };
   };
   hub: { greetingName: string | null; clock24h: boolean; showSeconds: boolean };
   integrations: {
@@ -431,4 +434,190 @@ export interface ImageInfo {
   os: string | null;
   created: string | null;
   size: number | null;
+}
+
+/* ==========================================================================
+   Phase 6 — configuration, migration, history, export
+   ========================================================================== */
+
+/** The file-scope boundary, as the API states it. Rendered rather than described, so the
+ *  separation between presentation configuration and protected state is visible in the UI. */
+export interface ConfigScopeEntry { name: string; kind: string; label: string }
+export interface ProtectedStateEntry { path: string; kind: string; why: string }
+export interface ConfigScopeDoc {
+  presentation: ConfigScopeEntry[];
+  protected: ProtectedStateEntry[];
+  rule: string;
+}
+
+export interface ConfigOverviewDoc {
+  scope: ConfigScopeDoc;
+  counts: { groups: number; services: number; configured: number; bookmarks: number; widgets: number; unmatched: number };
+  custom: { cssEnabled: boolean; jsEnabled: boolean; cssBytes: number; jsBytes: number; cssModified: string | null; jsModified: string | null };
+  history: HistoryStats;
+  limits: Record<string, number>;
+}
+
+/* ---------- migration ---------- */
+
+export interface ImportFileSpec { name: string; kind: string; label: string }
+export interface RefusedFileSpec { name: string; why: string }
+export interface ImportFilesDoc {
+  accepted: ImportFileSpec[];
+  refused: RefusedFileSpec[];
+  note: string;
+  limits: { fileBytes: number; bundleBytes: number; files: number; depth: number; nodes: number };
+}
+
+/** One entry from an imported file, after the engine has said what it is. */
+export interface ImportedEntry {
+  sourceGroup: string;
+  sourceName: string;
+  displayName: string | null;
+  description: string | null;
+  url: string | null;
+  icon: string | null;
+  iconDropped: string | null;
+  group: string;
+  containerHint: string | null;
+}
+export interface ImportMatch extends ImportedEntry {
+  container: { id: string; name: string; containerName: string; displayName: string; group: string; image: string | null; state: string | null };
+  matchHow: string;
+  matchConfidence: 'explicit' | 'name' | 'url' | 'icon';
+  existing: Record<string, unknown> | null;
+}
+export interface ImportUnmatched extends ImportedEntry {
+  reason: string;
+  suggestion: 'bookmark' | 'drop';
+}
+export interface ImportInvalid { name: string; group?: string; reason: string; kind: string }
+export interface ImportConflict {
+  container: string;
+  service: string;
+  source: string;
+  changes: { field: string; current: string; imported: string }[];
+}
+export interface ImportGroupSummary { name: string; matched: number; unmatched: number; total: number }
+
+export interface ImportPreviewDoc {
+  source: 'homepage' | 'opushub';
+  files: { file: string; kind: string; bytes: number; status: string; note?: string }[];
+  refused: string[];
+  ignored: { file: string; reason: string }[];
+  secretsDropped: string[];
+  summary: {
+    groups: number; services: number; bookmarks: number; widgets: number; widgetGroups: number;
+    matched: number; unmatched: number; invalid: number; conflicts: number;
+    dockerConnected: boolean; dockerContainers: number;
+  };
+  groups: ImportGroupSummary[];
+  matched: ImportMatch[];
+  unmatched: ImportUnmatched[];
+  invalid: ImportInvalid[];
+  conflicts: ImportConflict[];
+  bookmarks: { name: string; items: { name: string; href: string; description?: string }[] }[];
+  widgets: { instances: { from: string; type: string }[]; unmapped: { name: string; reason: string }[]; credentials: string[] };
+  unmappedWidgets: { name: string; reason: string }[];
+  ignoredSettings: { key: string; value: string; reason: string }[];
+  appearance: Record<string, unknown>;
+  app: { name?: string; tagline?: string };
+  custom: { css: string | null; js: string | null };
+  layout: LayoutDoc | null;
+  warnings: string[];
+  plan?: {
+    files: { name: string; entries: number }[];
+    services: number; bookmarks: number; preservedUnmatched: number;
+    settings: string[]; widgets: number; custom: string[];
+  };
+}
+
+export interface ImportDecisions {
+  keepUnmatched: 'bookmark' | 'drop' | 'overlay';
+  includeBookmarks: boolean;
+  includeWidgets: boolean;
+  includeAppearance: boolean;
+  includeCustom: boolean;
+  skip: string[];
+  groupRenames: Record<string, string>;
+}
+
+export interface ImportApplyResult {
+  ok: boolean; mode: 'merge' | 'replace'; written: string[]; version: string | null;
+  summary: ImportPreviewDoc['summary']; preservedUnmatched: number; skipped: number;
+  warnings: string[]; secretsDropped: number;
+}
+
+/* ---------- history ---------- */
+
+export interface HistoryStats {
+  count: number; retention: { versions: number; bytes: number };
+  totalBytes: number; oldest: string | null; newest: string | null;
+}
+export interface HistoryVersion {
+  id: string; at: string; reason: string; subject: string | null; label: string | null;
+  actor: string | null; bytes: number; files: string[]; changed: { file: string; from: string; to: string }[];
+}
+export interface HistoryDoc { versions: HistoryVersion[]; stats: HistoryStats; current: string | null; scope: string[] }
+export interface DiffEntry { text: string; kind: 'added' | 'removed' | 'changed'; scope?: string; service?: string; field?: string; path?: string }
+export interface DiffSection { file: string; title: string; kind?: 'added' | 'removed'; entries: DiffEntry[] }
+export interface DiffDoc { version: string; against: string; sections: DiffSection[]; changes: number; identical: boolean }
+export interface RestoreResult {
+  ok: boolean; restored: string; restoredFrom: string; files: string[]; skipped: { file: string; reason: string }[];
+  undoVersion: string | null; scope: string[];
+}
+
+/* ---------- export ---------- */
+
+export interface ExportRedaction { kind: 'userinfo' | 'query' | 'machine'; url: string; note: string; where?: string }
+export interface ExportBundle {
+  format: 'opushub' | 'homepage';
+  formatVersion: number;
+  generatedAt: string;
+  kind: 'native' | 'homepage';
+  files: Record<string, string>;
+  notes: string[];
+  redactions: ExportRedaction[];
+  machineSpecific?: string[];
+  scope: string[];
+}
+
+/* ---------- per-service presentation ---------- */
+
+export interface PresentationDoc {
+  id: string;
+  identity: {
+    containerName: string; composeProject: string | null; composeService: string | null;
+    image: string | null; state: string | null; labels: unknown;
+  };
+  detected: { displayName: string; group: string; url: string | null; urlSource: string | null; icon: string | null };
+  override: {
+    displayName: string | null; description: string | null; icon: string | null; group: string | null;
+    url: string | null; hidden: boolean; showOnHub: boolean; order: number | null;
+    app: string | null; keywords: string[];
+  };
+  effective: { displayName: string; group: string; url: string | null; urlSource: string | null; icon: string | null; status: string };
+  configured: boolean;
+}
+
+/* ---------- groups ---------- */
+
+export interface GroupEntry {
+  name: string; description: string | null; icon: string | null; configured: boolean;
+  hidden: boolean; serviceCount: number; running: number; composeProjects: string[];
+}
+export interface GroupsDoc {
+  groups: GroupEntry[];
+  order: string[] | null;
+  hiddenGroups: string[];
+  empty: string[];
+  note: string;
+}
+
+/** Settings → Advanced: the custom-code editor's read. */
+export interface CustomDoc {
+  cssEnabled: boolean; jsEnabled: boolean;
+  css: string; js: string;
+  cssModified: string | null; jsModified: string | null;
+  jsPresent: boolean;
 }

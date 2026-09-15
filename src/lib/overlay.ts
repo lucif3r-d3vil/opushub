@@ -63,6 +63,7 @@ export function overlayFromInventory(doc: ServicesDoc | null): DraftGroup[] {
     .map((g) => ({
       name: g.name,
       description: g.description ?? null,
+      icon: g.icon ?? null,
       services: g.services
         .filter((s) => bound.has(s.name))
         .map((s) => {
@@ -153,6 +154,16 @@ export function setGroupDescription(groups: DraftGroup[], name: string, descript
 }
 
 /** Remove a group: its entries are dropped, and services that named it lose the override. */
+/** A group's own icon. Groups are presentation, so this is presentation too — the server
+ *  validates it exactly like a service icon (local file, unknown-set ref, URL or emoji). */
+export function setGroupIcon(groups: DraftGroup[], name: string, icon: string | null): DraftGroup[] {
+  const next = clone(groups);
+  const g = next.find((x) => x.name === name);
+  if (g) g.icon = icon || null;
+  else next.push({ name, description: null, icon: icon || null, services: [] });
+  return next;
+}
+
 export function removeGroup(groups: DraftGroup[], name: string): DraftGroup[] {
   const next = clone(groups).filter((g) => g.name !== name);
   for (const g of next) for (const s of g.services) if (s.group === name) s.group = null;
@@ -194,6 +205,7 @@ export function overlayPayload(groups: DraftGroup[]) {
     groups: groups.map((g) => ({
       name: g.name,
       description: g.description || null,
+      icon: g.icon || null,
       services: g.services.map((s) => ({
         name: s.name || s.container || '',
         container: s.container || null,

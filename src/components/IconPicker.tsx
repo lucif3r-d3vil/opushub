@@ -50,8 +50,30 @@ const SETS = [
   { value: 'local', label: 'Local files' },
 ] as const;
 
+const RECENT_KEY = 'opushub.recentIcons';
+const RECENT_MAX = 12;
+
+/** Picks are remembered per browser, not per install: "recently used" is a convenience for the
+ *  person choosing, and it has no business being configuration, a file, or a sync. */
+function readRecent(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter((x) => typeof x === 'string').slice(0, RECENT_MAX) : [];
+  } catch { return []; }
+}
+
+function rememberIcon(ref: string | null) {
+  if (!ref) return;
+  try {
+    const next = [ref, ...readRecent().filter((x) => x !== ref)].slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch { /* private mode: the picker simply has no history */ }
+}
+
 export function IconPicker({ initial, onDone }: { initial: string | null; onDone: (ref: string | null) => void }) {
   const [q, setQ] = useState('');
+  const [recent, setRecent] = useState<string[]>(() => readRecent());
+  const pick = (ref: string | null) => { rememberIcon(ref); setRecent(readRecent()); onDone(ref); };
   const [set, setSet] = useState<(typeof SETS)[number]['value']>('all');
   const { doc, busy, err } = useIconSearch(q || 'star', true);
   const local = usePolledLocal();
@@ -68,13 +90,19 @@ export function IconPicker({ initial, onDone }: { initial: string | null; onDone
         <input autoFocus className="input" style={{ flex: 1, minWidth: 200 }} placeholder="Search icons — music, shield, cloud…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search icons" />
         <Segmented value={set} options={SETS.map((s) => ({ value: s.value, label: s.label }))} onChange={setSet} ariaLabel="Icon source" />
       </div>
+      {!q && recent.length > 0 && (
+        <div style={{ marginBottom: 'var(--sp-4)' }}>
+          <div className="stale-note" style={{ marginBottom: 6 }}>Recently used</div>
+          <IconGrid items={recent.map((ref) => ({ ref, label: ref.split(':').pop() || ref }))} selected={initial} onPick={pick} />
+        </div>
+      )}
       {err && <p className="stale-note" style={{ color: 'var(--warn)' }}>search failed: {err}</p>}
       {busy && !results.length && <p className="stale-note">searching…</p>}
       <div style={{ maxHeight: '46dvh', overflow: 'auto', paddingRight: 4 }}>
         <IconGrid
           items={results}
           selected={initial}
-          onPick={onDone}
+          onPick={pick}
         />
       </div>
       <div className="divider" />
@@ -84,8 +112,8 @@ export function IconPicker({ initial, onDone }: { initial: string | null; onDone
           <input id="icon-custom" className="input mono-meta" placeholder="/user/icons/my-icon.png · https://… · 🎵" value={custom} onChange={(e) => setCustom(e.target.value)} />
         </div>
         <Icon ref={custom || null} name="preview" size={34} />
-        <button className="btn" onClick={() => onDone(custom.trim() || null)}>Use</button>
-        {initial && <button className="btn btn-quiet" onClick={() => onDone(null)}>Remove icon</button>}
+        <button className="btn" onClick={() => pick(custom.trim() || null)}>Use</button>
+        {initial && <button className="btn btn-quiet" onClick={() => pick(null)}>Remove icon</button>}
       </div>
       {doc?.remote?.status === 'unavailable' && (
         <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>

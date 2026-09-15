@@ -22,7 +22,9 @@ import { useEffect, useState } from 'react';
 const cssUrl = (u: string) =>
   `url("${u.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\a ').replace(/\r/g, '\\d ')}")`;
 
-export function BackgroundImage({ url }: { url: string }) {
+export function BackgroundImage({ url, position = 'center', fit = 'cover' }: {
+  url: string; position?: 'center' | 'top' | 'bottom' | 'left' | 'right'; fit?: 'cover' | 'contain';
+}) {
   const [broken, setBroken] = useState(false);
   useEffect(() => {
     setBroken(false);
@@ -31,7 +33,11 @@ export function BackgroundImage({ url }: { url: string }) {
   if (broken || !url) return null;
 
   return (
-    <div className="bg-img" style={{ backgroundImage: cssUrl(url) }} aria-hidden="true">
+    <div
+      className="bg-img"
+      style={{ backgroundImage: cssUrl(url), backgroundPosition: position, backgroundSize: fit, backgroundRepeat: 'no-repeat' }}
+      aria-hidden="true"
+    >
       <img
         src={url}
         alt=""
