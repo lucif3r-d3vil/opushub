@@ -464,7 +464,7 @@ export async function handleApi(req, res, url) {
   // ---------- per-service read-only detail: stats, history, logs ----------
   // Generic routes keyed by the same stable service id as the page (`:group/:name`); there is
   // deliberately no /api/jellyfin — every application is addressed through the one model.
-  const svcSub = p.match(/^\/api\/services\/([^/]+)\/([^/]+)\/(stats|stats\/history|logs|history)$/);
+  const svcSub = p.match(/^\/api\/services\/([^/]+)\/([^/]+)\/(stats|stats\/history|logs|history|health)$/);
   if (method === 'GET' && svcSub) {
     const group = decodeURIComponent(svcSub[1]);
     const name = decodeURIComponent(svcSub[2]);
@@ -475,7 +475,7 @@ export async function handleApi(req, res, url) {
     const { service, ref } = found;
 
     if (what === 'stats') {
-      if (!docker.availability().ok) return send(res, 200, { status: 'unavailable', stats: null });
+      if (!docker.availability().ok) return send(res, 200, { status: 'unavailable', code: 'docker_unavailable', stats: null });
       const stats = await statsWithHistory(ref);
       return send(res, 200, { status: stats ? 'ok' : 'unavailable', stats, at: Date.now() });
     }
@@ -487,7 +487,7 @@ export async function handleApi(req, res, url) {
 
     if (what === 'logs') {
       const a = docker.availability();
-      if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.public, lines: [] });
+      if (!a.ok) return send(res, 200, { status: 'unavailable', code: 'docker_unavailable', reason: a.public, lines: [] });
       const tail = Math.min(500, Math.max(1, Number(url.searchParams.get('tail')) || 150));
       const timestamps = url.searchParams.get('timestamps') === '1' || url.searchParams.get('timestamps') === 'true';
       try {
@@ -497,6 +497,17 @@ export async function handleApi(req, res, url) {
         const missing = /404|no such container/i.test(String(err.message));
         return send(res, 200, { status: 'error', reason: missing ? 'No such container (it may have been removed).' : 'Could not read container logs.', lines: [] });
       }
+    }
+
+    if (what === 'health') {
+      // Unified verdict: container state + healthcheck + (bounded, cached) HTTP probe of the
+      // service's own discovered URL. The browser names the service; the server resolves the URL.
+      const { evaluateServiceHealth } = await import('./healthModel.js');
+      let container = null;
+      if (docker.availability().ok) {
+        try { container = await docker.inspectContainer(ref); } catch { /* list-level evidence only */ }
+      }
+      return send(res, 200, await evaluateServiceHealth(service, { container }));
     }
 
     if (what === 'history') {
@@ -606,7 +617,7 @@ export async function handleApi(req, res, url) {
   if (route === 'GET /api/docker/status') return send(res, 200, await dockerAvailabilityCached(true));
   if (route === 'GET /api/docker/containers') {
     const a = docker.availability();
-    if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.public, containers: [] });
+    if (!a.ok) return send(res, 200, { status: 'unavailable', code: 'docker_unavailable', reason: a.public, containers: [] });
     try { return send(res, 200, { status: 'ok', containers: await docker.listContainers({ all: true }) }); }
     catch (err) {
       if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] list failed: ${err.message}`);
@@ -616,7 +627,7 @@ export async function handleApi(req, res, url) {
   const logsMatch = p.match(/^\/api\/docker\/containers\/([^/]+)\/logs$/);
   if (method === 'GET' && logsMatch) {
     const a = docker.availability();
-    if (!a.ok) return send(res, 200, { status: 'unavailable', reason: a.public, lines: [] });
+    if (!a.ok) return send(res, 200, { status: 'unavailable', code: 'docker_unavailable', reason: a.public, lines: [] });
     const tail = Math.min(500, Math.max(1, Number(url.searchParams.get('tail')) || 150));
     const timestamps = url.searchParams.get('timestamps') === '1' || url.searchParams.get('timestamps') === 'true';
     const ref = decodeURIComponent(logsMatch[1]);
@@ -664,6 +675,7 @@ export async function handleApi(req, res, url) {
       },
       live: inv.live && infra.live,
       statusReason: inv.live ? (infra.live ? null : infra.statusReason) : inv.statusReason,
+      code: (inv.live && infra.live) ? null : 'docker_unavailable',
       lastKnown: inv.live ? null : inv.lastKnown,
     });
   }
@@ -671,6 +683,7 @@ export async function handleApi(req, res, url) {
     const infra = await model.getInfra();
     return send(res, 200, {
       at: infra.at, live: infra.live, statusReason: infra.statusReason,
+      code: infra.live ? null : 'docker_unavailable',
       networks: infra.networks, count: infra.counts.networks, stale: infra.stale,
     });
   }
@@ -678,6 +691,7 @@ export async function handleApi(req, res, url) {
     const infra = await model.getInfra();
     return send(res, 200, {
       at: infra.at, live: infra.live, statusReason: infra.statusReason,
+      code: infra.live ? null : 'docker_unavailable',
       volumes: infra.volumes, count: infra.counts.volumes, stale: infra.stale,
     });
   }
@@ -685,6 +699,7 @@ export async function handleApi(req, res, url) {
     const infra = await model.getInfra();
     return send(res, 200, {
       at: infra.at, live: infra.live, statusReason: infra.statusReason,
+      code: infra.live ? null : 'docker_unavailable',
       images: infra.images, count: infra.counts.images, stale: infra.stale,
     });
   }
