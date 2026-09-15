@@ -40,6 +40,7 @@ export function applyTheme(s: SettingsDoc | null, media: MediaQueryList | null) 
   el.setAttribute('data-accent', s?.appearance?.accent ?? 'sage');
   el.setAttribute('data-density', s?.appearance?.density ?? 'comfortable');
   el.setAttribute('data-transparency', s?.appearance?.transparency ? 'on' : 'off');
+  el.setAttribute('data-bg', s?.appearance?.background?.mode ?? 'quiet');
   el.style.setProperty('--font-scale', String(s?.appearance?.fontScale ?? 1));
   el.style.setProperty('--page-bg', 'transparent');
   // The configured name is what the tab says — one place, every page, so a rename is visible

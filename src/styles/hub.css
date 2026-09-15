@@ -226,7 +226,8 @@
 .hub-preview .hub-head { padding-top: var(--sp-4); padding-bottom: var(--sp-5); }
 .hub-preview .hub-head .hub-clock-time { font-size: 24px; }
 .hub-preview .hub-zones { gap: var(--sp-8); }
-.bg-embedded { position: absolute; inset: 0; z-index: 0; }
+.bg-embedded { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.bg-embedded.bg-overlay { position: absolute; /* preview overlay is absolute, not fixed, inside frame */ }
 
 /* ---------- settings surfaces that belong to the Hub ---------- */
 .widget-rows { display: flex; flex-direction: column; }

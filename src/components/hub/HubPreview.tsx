@@ -17,14 +17,25 @@ function EmbeddedBackground() {
   const bg = settings?.appearance.background;
   const mode = bg?.mode ?? 'quiet';
   if (mode === 'quiet') return null;
+  const blur = bg?.blur ?? 24;
+  const scrim = bg?.scrim ?? 62;
   return (
-    <div
-      className={`bg-layer bg-embedded bg-${mode}`}
-      style={{ ['--bg-blur' as never]: `${bg?.blur ?? 24}`, ['--bg-scrim' as never]: `${bg?.scrim ?? 62}` }}
-      aria-hidden="true"
-    >
-      {mode === 'photo' && bg?.photo && <BackgroundImage url={bg.photo} />}
-    </div>
+    <>
+      <div
+        className={`bg-layer bg-embedded bg-${mode}`}
+        style={{ ['--bg-blur' as never]: `${blur}`, ['--bg-scrim' as never]: `${scrim}` }}
+        aria-hidden="true"
+      >
+        {mode === 'photo' && bg?.photo && <BackgroundImage url={bg.photo} />}
+      </div>
+      {mode === 'photo' && (
+        <div
+          className="bg-overlay bg-embedded"
+          style={{ ['--bg-scrim' as never]: `${scrim}` }}
+          aria-hidden="true"
+        />
+      )}
+    </>
   );
 }
 
