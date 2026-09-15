@@ -219,6 +219,8 @@ export interface SystemSnapshot {
 
 export interface HistoryPoint { t: number; cpu: number | null; memUsedPct: number | null; load: number | null; rx: number | null; tx: number | null; temp: number | null; procs: number | null }
 
+export type EventSeverity = 'info' | 'notice' | 'warning' | 'critical';
+export type EventCategory = 'service' | 'stack' | 'docker' | 'system' | 'security' | 'config';
 export interface ActivityEvent {
   id: string; t: number; iso: string;
   source: 'system' | 'config' | 'user' | 'docker' | string;
@@ -226,6 +228,8 @@ export interface ActivityEvent {
   subject: string | null;
   message: string | null;
   meta?: Record<string, unknown> | null;
+  severity?: EventSeverity;
+  category?: EventCategory;
 }
 
 /** A burst of same-type docker events folded into one row (see server/activity.js groupEvents).
@@ -240,6 +244,8 @@ export interface ActivityGroup {
   subjects: string[];
   message: string | null;
   meta?: Record<string, unknown> | null;
+  severity?: EventSeverity;
+  category?: EventCategory;
   events: ActivityEvent[];
 }
 
@@ -692,8 +698,18 @@ export interface ServiceHealthDoc {
 }
 
 export interface AlertItem {
-  id: string; type: string; category: string; severity: 'info' | 'notice' | 'warning' | 'critical';
-  service: string | null; stack: string | null; state: string | null; message: string;
-  timestamp: number; source: string; acknowledged?: boolean;
+  id: string; signature: string;
+  severity: 'warning' | 'critical';
+  title: string; detail: string;
+  evidence?: Record<string, unknown> | null;
+  links?: { label: string; href: string }[];
+  firedAt: number;
+  acknowledged: boolean; ackAt: number | null;
 }
-export interface AlertsDoc { at: number; alerts: AlertItem[]; counts: Record<string, number> }
+export interface AlertChannel { id: string; label: string; blurb: string; status: string; configured: boolean }
+export interface AlertsDoc {
+  at: string;
+  alerts: AlertItem[];
+  counts: { critical: number; warning: number };
+  channels: AlertChannel[];
+}

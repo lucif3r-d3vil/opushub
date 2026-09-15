@@ -20,6 +20,8 @@ import { checkBackgroundUrl } from './providers/background.js';
 import { URL_REASONS } from './urlResolver.js';
 import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons.js';
 import { logEvent, readEvents, firstEventAt } from './activity.js';
+import { ackAlert, countRecentAuthFailures, getActiveAlerts, refreshAlerts } from './alerts.js';
+import { listChannels } from './notify.js';
 import { searchAll } from './search.js';
 import { loadEnv } from './env.js';
 import { DATA_DIR } from './configStore.js';
@@ -764,11 +766,49 @@ export async function handleApi(req, res, url) {
     const type = url.searchParams.get('type');
     const sinceRaw = Number(url.searchParams.get('since'));
     const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : null;
+    const category = url.searchParams.get('category');
+    const minSeverity = url.searchParams.get('severity');
     return send(res, 200, {
-      ...readEvents({ limit, source, before, grouped, service, stack, type, since }),
+      ...readEvents({ limit, source, before, grouped, service, stack, type, since, category, minSeverity }),
       watchingSince: firstEventAt(),
-      filters: { source: source || 'all', service: service || null, stack: stack || null, type: type || null, since },
+      filters: { source: source || 'all', service: service || null, stack: stack || null, type: type || null, since, category: category || 'all', severity: minSeverity || null },
     });
+  }
+
+  // ---------- alerts ----------
+  // Evaluated on demand over snapshots the server already holds (cached discovery, one
+  // bounded system sample, the auth-failure count). Transitions log to activity inside
+  // refreshAlerts, so GET here can append exactly two kinds of honest events.
+  if (route === 'GET /api/alerts') {
+    const [servicesView, stacksDoc, system] = await Promise.all([
+      model.getServicesView().catch(() => null),
+      model.getStacksDoc().catch(() => null),
+      collectSystem().catch(() => null),
+    ]);
+    const services = servicesView?.services || [];
+    const stacks = (stacksDoc?.stacks || []).map((st) => ({
+      project: st.project, services: st.services || st.members || [],
+      running: st.runningCount ?? st.running ?? 0,
+    }));
+    const alerts = refreshAlerts({
+      dockerAvailable: servicesView ? servicesView.live !== false : true,
+      services, stacks, system,
+      authFailures: countRecentAuthFailures(),
+    });
+    return send(res, 200, {
+      at: new Date().toISOString(), alerts,
+      counts: {
+        critical: alerts.filter((x) => x.severity === 'critical').length,
+        warning: alerts.filter((x) => x.severity === 'warning').length,
+      },
+      channels: listChannels(),
+    });
+  }
+  if (route === 'POST /api/alerts/ack') {
+    const body = await jsonBody();
+    const found = ackAlert(body?.id);
+    if (!found) return send(res, 404, { error: 'no such active alert' });
+    return send(res, 200, { ok: true, alert: found });
   }
 
   // ---------- provider health ----------

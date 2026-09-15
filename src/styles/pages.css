@@ -715,3 +715,20 @@
 .health-strip { margin-top: var(--sp-4); border-top: 1px solid var(--hair); padding-top: var(--sp-4); }
 .health-head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 .health-detail { color: var(--ink-2); font-size: var(--fs-meta); }
+
+/* Phase 7E — severity dots + active-alert strip on Activity */
+.sev-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center; background: var(--c-border); }
+.sev-notice { background: var(--c-accent); }
+.sev-warning { background: var(--c-warn, #d97706); }
+.sev-critical { background: var(--c-danger, #dc2626); }
+.alerts-strip { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.alert-card { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--c-border); border-radius: var(--r-md); background: var(--c-card); border-left-width: 3px; }
+.alert-card.sev-warning { border-left-color: var(--c-warn, #d97706); }
+.alert-card.sev-critical { border-left-color: var(--c-danger, #dc2626); }
+.alert-card.acked { opacity: 0.72; }
+.alert-main { flex: 1; min-width: 0; }
+.alert-title { font-weight: 600; }
+.alert-detail { color: var(--c-muted); font-size: 13px; margin-top: 2px; }
+.alert-meta { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); color: var(--c-muted); font-size: 12px; margin-top: var(--sp-2); }
+.alert-link { color: var(--c-accent); text-decoration: none; }
+.alert-link:hover { text-decoration: underline; }

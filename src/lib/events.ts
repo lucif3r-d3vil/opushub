@@ -30,6 +30,10 @@ export function humanEvent(e: ActivityEvent): string {
     'bookmarks.updated': 'bookmarks updated',
     'custom.updated': 'custom assets updated',
     'discovery.refreshed': 'discovery refreshed',
+    'alert.fired': 'alert fired',
+    'alert.resolved': 'alert resolved',
+    'auth.login_failed': 'failed login',
+    'auth.login': 'logged in',
   };
   return map[e.type] || e.message || e.type;
 }

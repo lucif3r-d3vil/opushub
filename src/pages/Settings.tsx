@@ -5,7 +5,7 @@ import { relTime } from '../lib/format';
 import { useLayout, useSettings, type DeepPartial } from '../lib/theme';
 import { useAuth } from '../lib/auth';
 import type {
-  CustomDoc, DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
+  AlertsDoc, CustomDoc, DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
   TemplatesDoc, WidgetCatalogueEntry, WidgetDoc, WidgetInstance, WidgetZone,
 } from '../lib/types';
 import { Icon } from '../components/Icon';
@@ -52,6 +52,7 @@ const TABS = [
   { id: 'groups', label: 'Groups', section: 'Content' },
   { id: 'bookmarks', label: 'Bookmarks', section: 'Content' },
   { id: 'integrations', label: 'Integrations', section: 'Connections' },
+  { id: 'notifications', label: 'Notifications', section: 'Connections' },
   { id: 'import', label: 'Import & migration', section: 'Configuration' },
   { id: 'history', label: 'History', section: 'Configuration' },
   { id: 'export', label: 'Export', section: 'Configuration' },
@@ -121,6 +122,7 @@ export default function SettingsPage() {
           {tab === 'groups' && <GroupsTab />}
           {tab === 'bookmarks' && <BookmarksTab />}
           {tab === 'integrations' && <IntegrationsTab />}
+          {tab === 'notifications' && <NotificationsTab />}
           {tab === 'authentication' && <AuthenticationTab />}
           {tab === 'environment' && <EnvironmentTab />}
           {tab === 'advanced' && <AdvancedTab />}
@@ -1597,6 +1599,42 @@ function normalizeSymbolInput(raw: string): { symbol: string | null; reason: str
   if (!symbol) return { symbol: null, reason: 'empty' };
   if (!SYMBOL_RE.test(symbol)) return { symbol: null, reason: 'symbols are letters/digits with . ^ - = only (e.g. AAPL, ^GSPC, BTC-USD)' };
   return { symbol, reason: null };
+}
+
+function NotificationsTab() {
+  const { data } = usePolled<AlertsDoc>('/api/alerts', 30_000);
+  const channels = data?.channels || [];
+  return (
+    <>
+      <p className="lede">
+        When something needs your attention — an unhealthy service, a degraded stack, a full disk — OpusHub raises an
+        alert on the <Link className="section-link" to="/activity">Activity page</Link>. Delivery channels will forward
+        those alerts elsewhere; the registry below is the plan, and every entry says plainly what exists today.
+      </p>
+      <Block title="Channels" aside={data ? <span className="stale-note">{data.alerts.length} active alert{data.alerts.length === 1 ? '' : 's'}</span> : undefined}>
+        {!data && <Loading what="notification channels" />}
+        <div className="editor-list">
+          {channels.map((c) => (
+            <div className="editor-item" key={c.id}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <b style={{ fontWeight: 560 }}>{c.label}</b>
+                <div className="stale-note">{c.blurb}</div>
+              </span>
+              <span className="chip">{c.configured ? 'Configured' : c.status === 'ready' ? 'Not configured' : 'Coming later'}</span>
+            </div>
+          ))}
+        </div>
+      </Block>
+      <Block title="How alerting works">
+        <Row label="Evaluation" desc="Alert conditions run over data OpusHub already holds — no extra polling of your engine, no external calls.">
+          <span className="stale-note">on each Activity visit</span>
+        </Row>
+        <Row label="Record" desc="Every firing and every recovery is written to the activity log, so the history survives restarts.">
+          <Link className="section-link" to="/activity">open the log →</Link>
+        </Row>
+      </Block>
+    </>
+  );
 }
 
 function IntegrationsTab() {

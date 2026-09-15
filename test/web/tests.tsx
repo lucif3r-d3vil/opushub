@@ -209,6 +209,25 @@ const storageDoc = {
     { id: 'zfs', label: 'ZFS', available: 'not-implemented', reason: 'ZFS integration is not implemented yet.', pools: [], datasets: [], at: Date.now() },
   ],
 };
+const alertsDoc = {
+  at: new Date().toISOString(),
+  alerts: [
+    {
+      id: 'service.unhealthy:Music/wave', signature: 'service.unhealthy:Music/wave', severity: 'warning',
+      title: 'Wave is unhealthy', detail: 'Its container healthcheck is failing.',
+      evidence: { state: 'running', health: 'unhealthy' },
+      links: [{ label: 'Open the service', href: '/services/Music/wave' }],
+      firedAt: Date.now() - 60_000, acknowledged: false, ackAt: null,
+    },
+  ],
+  counts: { critical: 0, warning: 1 },
+  channels: [
+    { id: 'webhook', label: 'Webhook', blurb: 'POST the alert as JSON to a URL you choose.', status: 'coming-later', configured: false },
+    { id: 'email', label: 'Email', blurb: 'Send alerts through your own SMTP server.', status: 'coming-later', configured: false },
+    { id: 'telegram', label: 'Telegram', blurb: 'Message a chat via a bot token you create.', status: 'coming-later', configured: false },
+    { id: 'slack', label: 'Slack', blurb: 'Post to a channel via an incoming webhook.', status: 'coming-later', configured: false },
+  ],
+};
 const waveHealth = {
   service: 'wave', displayName: 'Wave',
   health: { state: 'healthy', evidence: { container: 'running', healthcheck: 'healthy', http: '200' }, stack: 'Media', startedAt: new Date(Date.now() - 86_400_000).toISOString(), url: 'http://wave.lab.internal', urlSource: 'traefik', detail: 'Healthcheck passing.' },
@@ -279,6 +298,7 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
     '/api/resources': resourcesDoc,
     '/api/storage': storageDoc,
     '/api/services/Music/wave/health': waveHealth,
+    '/api/alerts': alertsDoc,
   };
 }
 
@@ -815,7 +835,7 @@ export async function runWebTests(): Promise<WebResult> {
 
     // the type and time selects change the query too
     const selects = qa('.tl-field select');
-    expect(selects.length === 2, 'the type and time selects are missing');
+    expect(selects.length === 4, `expected the type, area, severity and time selects, saw ${selects.length}`);
     const typeSelect = selects[0] as HTMLSelectElement;
     typeSelect.value = 'container';
     act(() => { typeSelect.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -1655,6 +1675,54 @@ export async function runWebTests(): Promise<WebResult> {
     await h.waitFor(() => text().includes('Healthcheck passing'), 'the unified verdict');
     expect(text().includes('HTTP 200'), 'the HTTP evidence is missing');
     expect(!/healthy merely|assumed/i.test(text()), 'the verdict overclaims');
+  });
+
+  /* 7E — active alerts surface above the log, and the area/severity filters narrow the query */
+  await test('activity shows active alerts with evidence and ack', async (h) => {
+    let lastQuery = '';
+    h.setRoutes({
+      ...stubRoutes(),
+      '/api/activity': (_body, path) => {
+        lastQuery = path;
+        return {
+          items: [
+            { id: 'a1', t: Date.now() - 60_000, iso: new Date().toISOString(), source: 'docker', type: 'container.health', subject: 'wave', message: 'health: unhealthy', severity: 'warning', category: 'docker' },
+          ],
+          total: 120, matched: 1, watchingSince: Date.now() - 86_400_000,
+        };
+      },
+    });
+    await h.mount(<MemoryRouter initialEntries={['/activity']}><ActivityPage /></MemoryRouter>);
+    await h.waitFor(() => text().includes('Wave is unhealthy'), 'the active alert');
+    expect(text().includes('healthcheck is failing'), 'the alert detail is missing');
+    expect(!!q('.alerts-strip .alert-card'), 'the alert card is missing');
+    expect(text().includes('Acknowledge'), 'the ack action is missing');
+    expect(!!q('.sev-dot'), 'the severity dot is missing');
+
+    // the new selects narrow the server query
+    const selects = qa('.tl-scope select');
+    expect(selects.length >= 4, 'area/severity selects are missing');
+    const area = selects[1] as HTMLSelectElement;
+    area.value = 'docker';
+    area.dispatchEvent(new Event('change', { bubbles: true }));
+    await h.flush(60);
+    expect(lastQuery.includes('category=docker'), `the area filter never reached the API (${lastQuery})`);
+    const sev = selects[2] as HTMLSelectElement;
+    sev.value = 'warning';
+    sev.dispatchEvent(new Event('change', { bubbles: true }));
+    await h.flush(60);
+    expect(lastQuery.includes('severity=warning'), `the severity filter never reached the API (${lastQuery})`);
+  });
+
+  /* 7E — the notifications tab names the channels and their honest status */
+  await test('settings notifications names the channels as coming later', async (h) => {
+    await h.mount(<TestApp entry="/settings/notifications"><Hub /></TestApp>);
+    await h.waitFor(() => text().includes('Webhook'), 'the channels list');
+    for (const name of ['Webhook', 'Email', 'Telegram', 'Slack']) {
+      expect(text().includes(name), `${name} is not listed`);
+    }
+    expect(text().includes('Coming later'), 'the honest status is missing');
+    expect(text().includes('1 active alert'), 'the active-alert count is missing');
   });
 
   for (const r of results) {
