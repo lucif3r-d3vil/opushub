@@ -154,12 +154,23 @@ export async function handleApi(req, res, url) {
     // First-run presentation choice. `detected` writes nothing (the default); `template` applies one
     // of the built-in templates, whose ids are a fixed server-side list. Validated *before* the
     // account is created, so a bad choice cannot leave a half-finished install behind.
-    const pres = body?.presentation && typeof body.presentation === 'object' ? body.presentation : null;
+    // An unauthenticated route reads this field, so its *shape* is part of the contract: an object
+    // or nothing. A scalar, an array or a nested document is refused rather than coerced — the
+    // coercion is what let `['balanced']` select a template, which is not a write primitive (the id
+    // still has to name one of the six built-ins) but is exactly the kind of type confusion an
+    // unauthenticated field should not be able to negotiate.
+    const rawPres = body?.presentation;
+    if (rawPres != null && (typeof rawPres !== 'object' || Array.isArray(rawPres))) {
+      return send(res, 400, { error: 'presentation must be an object', code: 'bad_presentation' });
+    }
+    const pres = rawPres || null;
     let template = null;
     if (pres && pres.mode && pres.mode !== 'detected') {
       if (pres.mode !== 'template') return send(res, 400, { error: 'presentation.mode must be detected or template', code: 'bad_presentation' });
-      if (!templateIds().includes(String(pres.template))) return send(res, 400, { error: `unknown template: ${String(pres.template).slice(0, 40)}`, code: 'unknown_template' });
-      template = String(pres.template);
+      if (typeof pres.template !== 'string' || !templateIds().includes(pres.template)) {
+        return send(res, 400, { error: `unknown template: ${String(pres.template).slice(0, 40)}`, code: 'unknown_template' });
+      }
+      template = pres.template;
     }
     const user = await auth.createAdmin({ username: body?.username, password: body?.password });
     if (template) {
