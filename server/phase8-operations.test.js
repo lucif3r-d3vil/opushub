@@ -740,3 +740,47 @@ test('the operations API is inert: no route runs anything on its own', async () 
   // reading the operations surface never touches the engine in a mutating way
   assert.deepEqual(wirePosts(), []);
 });
+
+/* --------------------- 14. the command palette is not a trigger ----------- */
+
+test('search offers operations only to an account that may run them', async () => {
+  ENGINE.reset();
+  const mine = await get('/api/search?q=restart');
+  assert.equal(mine.status, 200);
+  const ops = mine.json.results.filter((r) => r.kind === 'operation');
+  assert.ok(ops.length > 0, 'an administrator sees operations in the palette');
+  for (const r of ops) {
+    assert.ok(registry.ACTIONS[r.operation.action], `the palette offered an unregistered action: ${r.operation.action}`);
+    assert.equal(r.operation.target.type, 'service');
+    assert.ok(r.operation.target.id, 'an operation result does not name its target');
+  }
+  // a running container is offered Restart/Stop; a stopped one is offered Start
+  const offered = new Map();
+  for (const r of ops) offered.set(r.operation.target.id, [...(offered.get(r.operation.target.id) || []), r.operation.action]);
+  for (const [name, actions] of offered) {
+    for (const action of actions) {
+      const allowed = registry.ACTIONS[action].offerWhen;
+      const state = (await get('/api/services')).json.services.find((s) => s.name === name)?.container?.state?.status;
+      if (state) assert.ok(allowed.includes(state), `${action} was offered for ${name} in state ${state}`);
+    }
+  }
+  // and offering them is not doing them
+  assert.deepEqual(wirePosts(), [], 'search touched the engine');
+
+  const viewer = await get('/api/search?q=restart', null, VIEWER_COOKIE);
+  assert.deepEqual(viewer.json.results.filter((r) => r.kind === 'operation'), [], 'a viewer was offered operations');
+});
+
+test('an operation search result carries no endpoint, method or container id as one', async () => {
+  ENGINE.reset();
+  const r = await get('/api/search?q=restart');
+  const op = r.json.results.find((x) => x.kind === 'operation');
+  assert.ok(op, 'no operation result was returned');
+  const wire = JSON.stringify(op);
+  for (const forbidden of ['/containers/', 'v1.', 'POST', 'DELETE', 'http://', 'https://', '/var/run', 'exec', 'confirmed']) {
+    assert.ok(!wire.includes(forbidden), `the palette result leaks a request detail: ${forbidden}`);
+  }
+  assert.deepEqual(Object.keys(op.operation).sort(), ['action', 'confirmation', 'risk', 'target'], 'the result carries something beyond the action and its target');
+  // the target is a reference, never an address: 12/64-hex container ids must not appear
+  assert.ok(!/[0-9a-f]{12}/.test(JSON.stringify(op.operation.target)), 'the result carries a container id');
+});
