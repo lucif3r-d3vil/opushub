@@ -194,7 +194,9 @@ function inspectPayload(fx) {
     Config: { Image: fx.Image, Cmd: cmd, Entrypoint: ['/entrypoint.sh'], Env: ['MOCK_FIXTURE=true', 'SECRET_SHOULD_NEVER_LEAVE_SERVER=hunter2'], Labels: fx.Labels },
     State: {
       Status: fx.State, Running: running, Paused: fx.State === 'paused',
-      StartedAt: running || fx.State === 'paused' ? '2026-09-06T08:00:00.000000000Z' : '0001-01-01T00:00:00Z',
+      StartedAt: running || fx.State === 'paused'
+        ? (fx.StartedAtOverride ? new Date(fx.StartedAtOverride).toISOString() : '2026-09-06T08:00:00.000000000Z')
+        : '0001-01-01T00:00:00Z',
       FinishedAt: !running && fx.State !== 'paused' && fx.State !== 'created' ? '2026-09-11T21:00:00.000000000Z' : '0001-01-01T00:00:00Z',
       ExitCode: fx.State === 'exited' ? (fx.Status.includes('137') ? 137 : 0) : 0,
       OOMKilled: false,
@@ -335,6 +337,43 @@ export function createHandler({ log = null } = {}) {
       }
       return send(200, frameLogs(lines, timestamps), 'application/vnd.docker.multiplexed-stream');
     }
+    // ---- Phase 8: the three lifecycle operations, and only these three --------------------
+    // Nothing else in this mock accepts POST. That is the point: a test can assert that the
+    // engine was never asked for anything outside this list, because the engine cannot answer
+    // anything outside this list.
+    m = p.match(/^\/containers\/([^/]+)\/(start|stop|restart)$/);
+    if (req.method === 'POST' && m) {
+      const op = m[2];
+      const fx = findRef(decodeURIComponent(m[1]));
+      const reply = () => {
+        if (!fx) return send(404, { message: 'No such container' });
+        if (process.env.OPUSHUB_MOCK_OP_DENIED) return send(403, { message: 'permission denied (mock fault)' });
+        if (process.env.OPUSHUB_MOCK_OP_CONFLICT) return send(409, { message: 'conflict (mock fault)' });
+        if (process.env.OPUSHUB_MOCK_OP_FAIL) return send(500, { message: 'mock engine failure' });
+        if (process.env.OPUSHUB_MOCK_OP_NOSTATE) return send(204, ''); // accepted, state unchanged
+        if (op === 'start') {
+          if (fx.State === 'running') return send(304, '');
+          fx.State = 'running';
+          fx.StartedAtOverride = Date.now() - 1000;
+          fx.Status = 'Up 1 second';
+        } else if (op === 'stop') {
+          if (fx.State === 'exited') return send(304, '');
+          fx.State = 'exited';
+          fx.Status = 'Exited (0) 1 second ago';
+        } else {
+          // restart: the container runs again with a NEW start time — that change is what
+          // verification checks, so a restart cannot be reported on the strength of "running"
+          fx.State = 'running';
+          fx.StartedAtOverride = Date.now() - 1000;
+          fx.Status = 'Up 1 second';
+        }
+        return send(204, '');
+      };
+      const delay = Number(process.env.OPUSHUB_MOCK_OP_DELAY || 0);
+      if (delay > 0) { setTimeout(reply, delay); return; }
+      return reply();
+    }
+
     if (req.method === 'GET' && p === '/events') {
       const since = Number(url.searchParams.get('since')) || 0;
       const until = Number(url.searchParams.get('until')) || Number.MAX_SAFE_INTEGER;

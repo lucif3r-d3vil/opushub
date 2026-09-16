@@ -34,6 +34,9 @@ const CATEGORY_BY_TYPE = new Map(Object.entries({
   container: 'docker', provider: 'docker', stack: 'stack', service: 'service', alert: 'system',
   auth: 'security', settings: 'config', layout: 'config', services: 'config', stacks: 'config',
   groups: 'config', bookmarks: 'config', custom: 'config', icons: 'config', app: 'system',
+  // Phase 8: an operation is something a person did to a service, so it belongs beside the
+  // service it happened to — not buried in "configuration" or lost in "docker".
+  operation: 'service',
 }));
 
 /** Classify an event for filtering and display. Pure — also applied to pre-7E log lines on read. */
@@ -52,6 +55,10 @@ export function classifyEvent({ source = null, type = null, meta = null } = {}) 
   else if (t === 'container.health' && meta && meta.to === 'unhealthy') severity = 'warning';
   else if (t === 'container.died_unhealthy') severity = 'warning';
   else if (t === 'app.boot' || t === 'provider.recovered' || t === 'alert.resolved') severity = 'notice';
+  // Phase 8: an operation that did not happen as asked is worth noticing; a successful one is
+  // worth recording without alarm. Cancelled is a person changing their mind, not a problem.
+  else if (t === 'operation.failed' || t === 'operation.timeout' || t === 'operation.rejected') severity = 'warning';
+  else if (t === 'operation.succeeded') severity = 'notice';
   return { severity, category };
 }
 

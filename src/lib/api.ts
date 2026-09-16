@@ -6,7 +6,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) { super(message); this.status = status; }
+  /** The parsed response body when there was one — operations answer a refusal with the
+   *  operation record, and the UI needs it to say *why* rather than just *no*. */
+  body: unknown;
+  constructor(message: string, status: number, body: unknown = null) { super(message); this.status = status; this.body = body; }
 }
 
 const etags = new Map<string, string>();
@@ -28,7 +31,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     // One place announces an expired or revoked session, so every page drops to the login screen
     // instead of rendering a half-empty shell of unavailable panels.
     if (res.status === 401 && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('opushub:unauthorized'));
-    throw new ApiError(msg, res.status);
+    throw new ApiError(msg, res.status, json);
   }
   const et = res.headers.get('etag');
   if (et) etags.set(path, et);

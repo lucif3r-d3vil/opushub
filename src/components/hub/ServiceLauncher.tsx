@@ -17,6 +17,10 @@ import { Icon } from '../Icon';
 import { StatusDot, Menu, MenuButton, type MenuItem } from '../ui';
 import { Sortable } from '../Sortable';
 import { DockerOffNote } from '../../lib/dockerStatus';
+import {
+  allowedActions, requestOperation, useOperationsCapabilities, wordsFor,
+  type OperationAction, type OperationTargetRef,
+} from '../../lib/operations';
 import { WidgetEmpty } from './WidgetFrame';
 
 export interface LauncherProps {
@@ -48,9 +52,28 @@ function LaunchItem({ svc, groupName, handle, detailed }: { svc: Service; groupN
     window.open(svc.url, '_blank', 'noreferrer');
   }, [svc.url, detail, settings?.behavior?.logLaunches]);
 
+  // operations as menu items — offered only when this session may run them and the engine is
+  // reachable, and never as primary buttons on the face of the Hub
+  const { can, available } = useOperationsCapabilities();
+  const target: OperationTargetRef = { type: 'service', id: svc.name, group: groupName };
+  const offered = allowedActions(svc.container?.state);
+  const ops: MenuItem[] = !available ? [] : (['container.start', 'container.restart', 'container.stop'] as OperationAction[])
+    .filter((a) => can(a) && offered[a])
+    .map((a) => {
+      const w = wordsFor(a);
+      return {
+        label: `${w.imperative} ${svc.displayName}`,
+        action: () => requestOperation(a, target),
+        ...(a === 'container.stop' ? { danger: true } : {}),
+      };
+    });
+
   const items: MenuItem[] = [
     ...(svc.url ? [{ label: 'Open in new tab', action: launch } as MenuItem] : []),
     { label: 'Service details', href: detail },
+    // operations live in the same menu, after navigation: the Hub is a launch surface, and a
+    // lifecycle action is something you go looking for, not something you click by accident
+    ...(ops.length ? [{ sep: true } as unknown as MenuItem, ...ops] : []),
     ...(svc.url ? [{ label: 'Copy URL', action: () => void navigator.clipboard?.writeText(svc.url || '').catch(() => undefined) } as MenuItem] : []),
     { label: 'Customize name, icon, group…', href: `/settings/services?container=${encodeURIComponent(svc.name)}` },
   ];

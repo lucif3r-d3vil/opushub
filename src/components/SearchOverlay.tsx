@@ -1,28 +1,40 @@
 // The command/search overlay. `/` or ⌘K opens it anywhere; results group like a real command
 // interface, keyboard-native, and everything comes from already-configured OpusHub data.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, invalidateShared, post } from '../lib/api';
 import { groupBy, type SearchEntry } from '../lib/search';
 import { useSettings } from '../lib/theme';
 import { Icon } from './Icon';
 import { STATUS_WORDS, StatusDot } from './ui';
+import { requestOperation, type OperationAction, type OperationTargetRef } from '../lib/operations';
 
-interface ServerResult extends SearchEntry { group?: string; status?: string }
+interface ServerResult extends SearchEntry {
+  group?: string;
+  status?: string;
+  /**
+   * Phase 8 — a lifecycle operation this result can *offer*, never perform. The server attaches
+   * only an action id and a target reference; the palette's job on selection is to hand them to
+   * the confirmation flow, which asks the engine to evaluate the request before anything runs.
+   */
+  operation?: { action: OperationAction; target: OperationTargetRef; confirmation?: string; risk?: string };
+}
 
 const KIND_LABEL: Record<string, string> = {
   action: 'Actions', page: 'Pages', service: 'Services', stack: 'Stacks', setting: 'Settings',
   // Phase 6: a *thing you can configure* (a service's presentation, a group) is a different kind of
   // result from a page about configuring things — it opens the editor on that row.
   config: 'Configuration', activity: 'Recent activity', bookmark: 'Bookmarks', news: 'News',
-  alert: 'Alerts', infra: 'Infrastructure',
+  // Phase 8: operations are destinations, not triggers — selecting one opens the confirmation.
+  alert: 'Alerts', infra: 'Infrastructure', operation: 'Operations',
 };
-const ORDER = ['Actions', 'Alerts', 'Services', 'Stacks', 'Infrastructure', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
+const ORDER = ['Actions', 'Operations', 'Alerts', 'Services', 'Stacks', 'Infrastructure', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
 
 const KIND_ICON: Record<string, string> = {
   page: 'lucide:house', stack: 'lucide:layers', bookmark: 'lucide:bookmark', news: 'lucide:newspaper',
   action: 'lucide:command', setting: 'lucide:sliders-horizontal', activity: 'lucide:activity',
   config: 'lucide:settings-2', alert: 'lucide:triangle-alert', infra: 'lucide:server',
+  operation: 'lucide:power',
 };
 
 /** ⌘K on a Mac, Ctrl K everywhere else — the overlay should not teach the wrong muscle memory. */
@@ -129,6 +141,22 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
 
   const flat = useMemo(() => groups.flatMap(([, items]) => items), [groups]);
 
+  /**
+   * What selecting a result does. Operations go through `requestOperation`, which opens the
+   * confirmation dialog — there is no path from here that executes anything, and deliberately no
+   * "confirmed" fast-lane: the server has to agree twice, once to evaluate and once to run.
+   */
+  const choose = useCallback((it: ServerResult | undefined) => {
+    if (!it) return;
+    if (it.operation) { requestOperation(it.operation.action, it.operation.target); onClose(); return; }
+    if (it.action) it.action();
+    else if (it.href) {
+      if (it.external || /^https?:\/\//i.test(it.href || '')) window.open(it.href, '_blank', 'noreferrer');
+      else nav(it.href);
+    }
+    onClose();
+  }, [nav, onClose]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -137,20 +165,12 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
       if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
       if (e.key === 'Enter') {
         e.preventDefault();
-        const it = flat[active];
-        if (it) {
-          if (it.action) it.action();
-          else if (it.href) {
-            if (it.external || /^https?:\/\//i.test(it.href || '')) window.open(it.href, '_blank', 'noreferrer');
-            else nav(it.href!);
-          }
-        }
-        onClose();
+        choose(flat[active]);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, flat, active, onClose, nav]);
+  }, [open, flat, active, choose]);
 
   useEffect(() => {
     listRef.current?.querySelector(`[data-idx="${active}"]`)?.scrollIntoView({ block: 'nearest' });
@@ -202,14 +222,7 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
                     data-idx={mine}
                     data-active={mine === active || undefined}
                     onMouseEnter={() => setActive(mine)}
-                    onClick={() => {
-                      if (it.action) it.action();
-                      else if (it.href) {
-                        if (it.external || /^https?:\/\//i.test(it.href || '')) window.open(it.href!, '_blank', 'noreferrer');
-                        else nav(it.href!);
-                      }
-                      onClose();
-                    }}
+                    onClick={() => choose(it)}
                   >
                     {it.kind === 'service' || it.kind === 'stack'
                       ? <Icon ref={it.icon} name={it.title} size={22} />
@@ -218,6 +231,7 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
                     <span className="s">
                       {it.status && <StatusDot state={it.status} title={STATUS_WORDS[it.status] || it.status} />}
                       {it.subtitle}
+                      {it.operation && <span className="op-chip">asks first</span>}
                     </span>
                   </button>
                 );

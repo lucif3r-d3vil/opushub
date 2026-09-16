@@ -27,6 +27,7 @@ import { GroupNameField } from '../../src/components/GroupNameField';
 import { MenuButton } from '../../src/components/ui';
 import { AreaChart } from '../../src/components/Charts';
 import { createHarness, click, key, q, qa, text, type, type Harness } from './harness';
+import { OperationsHost } from '../../src/components/Operations';
 import {
   activityDoc, bookmarksDoc, catalogue, layoutWith, marketDoc, newsDoc, servicesDoc, stacksDoc,
   systemSnapshot, weatherDoc,
@@ -313,12 +314,105 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
   };
 }
 
+
+/* ------------------------------------------------------------------------
+   Phase 8 fixtures — an operations engine that answers the way the real one
+   does: an overview of what is permitted, a dry-run that evaluates and
+   returns a token, and an execution that spends it.
+   ------------------------------------------------------------------------ */
+
+const OP_ACTIONS = [
+  { id: 'container.start', label: 'Start container', permission: 'operations.container.start', risk: 'low', confirmation: 'normal', summary: 'Start a stopped container.', timeoutMs: 10_000, verifyMs: 15_000, enabled: true },
+  { id: 'container.restart', label: 'Restart container', permission: 'operations.container.restart', risk: 'medium', confirmation: 'normal', summary: 'Restart a running container.', timeoutMs: 25_000, verifyMs: 20_000, enabled: true },
+  { id: 'container.stop', label: 'Stop container', permission: 'operations.container.stop', risk: 'high', confirmation: 'strong', summary: 'Stop a running container. It stays stopped until you start it again.', timeoutMs: 15_000, verifyMs: 15_000, enabled: true },
+];
+
+/** The overview the engine returns — `permitted` is the server's decision, not the browser's. */
+function opsOverview({ permitted = OP_ACTIONS.map((a) => a.id), docker = true, role = 'admin' as string } = {}) {
+  return {
+    at: Date.now(),
+    actor: { username: 'nora', role, roleLabel: role === 'admin' ? 'Admin' : 'Viewer', description: 'Fixture account.', permissions: permitted.map((id) => `operations.${id}`) },
+    actions: OP_ACTIONS.map((a) => ({ ...a, permitted: permitted.includes(a.id) })),
+    docker: { read: true, operations: docker, channel: 'shared' as const },
+    counts: { running: 0, failed: 0, recent: 0 },
+    running: [], failed: [], recent: [],
+  };
+}
+
+/** What the server says when it evaluates an operation and executes nothing. */
+function opsDryRun(action: string, { ready = true, permission = true, error = null as null | { code: string; reason: string } } = {}) {
+  const meta = OP_ACTIONS.find((a) => a.id === action) || OP_ACTIONS[0];
+  return {
+    operation: { id: 'op-fixture', action, target: { type: 'service', id: 'wave', label: 'Wave', group: 'Music', service: 'wave', stack: 'media', containerName: 'wave', state: 'running' }, actor: 'nora', status: 'awaiting_confirmation', requestedAt: Date.now(), startedAt: null, completedAt: null, durationMs: null, result: null, error, verification: null, confirmation: { required: true, mode: meta.confirmation, consumed: false }, auditId: 'aud-1' },
+    dryRun: {
+      ready: ready && permission && !error,
+      action: { id: meta.id, label: meta.label, risk: meta.risk, verb: meta.id.split('.')[1], timeoutMs: meta.timeoutMs },
+      target: { label: 'Wave', containerName: 'wave', state: 'running', health: 'healthy', group: 'Music', stack: 'media', self: false },
+      permission, risk: meta.risk, docker: true,
+      engineAction: `POST /containers/<id>/${meta.id.split('.')[1]}`,
+      confirmation: { required: true, mode: meta.confirmation },
+      checks: [
+        { key: 'action', label: 'Registered action', ok: true, detail: meta.id },
+        { key: 'permission', label: `Needs ${meta.permission}`, ok: permission, detail: permission ? 'granted for this account' : 'not granted for this account' },
+        { key: 'target', label: 'Target resolves to a container', ok: true, detail: 'wave' },
+        { key: 'docker', label: 'Engine reachable', ok: true, detail: 'connected' },
+      ],
+      error,
+    },
+    confirmation: {
+      required: true, mode: meta.confirmation, token: 'tok-fixture', expiresAt: Date.now() + 120_000, ttlMs: 120_000,
+      prompt: {
+        title: `${meta.label.replace(' container', '')} Wave?`,
+        body: `This runs ${meta.id} against the container “wave”. Nothing else on the host is touched.`,
+        acknowledge: meta.confirmation === 'strong' ? 'I understand the service will be unavailable until I start it again.' : null,
+        confirmLabel: meta.label.replace(' container', ''), cancelLabel: 'Cancel', risk: meta.risk, self: false, selfNote: null,
+      },
+    },
+  };
+}
+
+/** An operation record in a terminal state, as the engine reports it after polling. */
+function opsRecord(status: string, { action = 'container.restart', state = 'running', error = null as null | { code: string; reason: string } } = {}) {
+  return {
+    id: 'op-fixture', action,
+    target: { type: 'service', id: 'wave', label: 'Wave', group: 'Music', service: 'wave', stack: 'media', containerName: 'wave', state },
+    actor: 'nora', status, requestedAt: Date.now() - 4000, startedAt: Date.now() - 3800,
+    completedAt: status === 'running' ? null : Date.now() - 2000,
+    durationMs: status === 'running' ? null : 1800,
+    result: status === 'succeeded' ? { state, health: 'healthy' } : null,
+    error,
+    verification: { state, health: { state: 'healthy', detail: null, measured: true }, startedAt: new Date().toISOString(), verified: status === 'succeeded', note: null },
+    confirmation: { required: true, mode: 'normal', consumed: true },
+    auditId: 'aud-1',
+  };
+}
+
+/** Every Phase 8 route, wired so a test can watch what the browser actually sent. */
+function opsRoutes(overview = opsOverview(), { action = 'container.restart', dry = opsDryRun(action), finalStatus = 'succeeded' } = {}) {
+  let polls = 0;
+  return {
+    '/api/v1/operations': (body: unknown) => (body ? { operation: opsRecord('running', { action }) } : overview),
+    '/api/v1/operations/dry-run': () => dry,
+    '/api/v1/operations/op-fixture': () => {
+      // the first poll sees it running; the second sees it settled — a real engine looks like this
+      polls += 1;
+      return { operation: polls < 2 ? opsRecord('running', { action }) : opsRecord(finalStatus, { action }) };
+    },
+    '/api/v1/operations?service=wave': { ...overview, operations: [] },
+  };
+}
+
+/** The confirm button in whichever dialog is open. */
+const confirmButton = () => qa('.modal-foot button').find((b) => /^(Start|Restart|Stop)$/.test(text(b).trim()));
+
 /** The Hub, inside the providers it actually runs with, plus routes to observe navigation. */
 function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: string }) {
   return (
     <MemoryRouter initialEntries={[entry]}>
       <SettingsProvider>
         <LayoutProvider>
+          {/* Phase 8 — the one confirmation flow, mounted for every tree these checks render */}
+          <OperationsHost />
           <Routes>
             <Route path="/" element={children} />
             <Route path="/settings/:tab" element={<Settings />} />
@@ -1758,6 +1852,112 @@ export async function runWebTests(): Promise<WebResult> {
     expect(text().includes('0.2.0 available'), 'the newest release is not shown');
     expect(text().includes('never checks on its own'), 'the no-phone-home promise is missing');
     expect(!h.calls.some((c) => c.path === '/api/updates/check'), 'the page checked without being asked');
+  });
+
+
+  /* ==================================================================
+     Phase 8 — the operations flow, as a person meets it
+     ================================================================== */
+
+  await test('operations: the service page asks first, and only a confirmed operation runs', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...opsRoutes() });
+    await h.mount(<TestApp entry="/services/Music/wave"><ServiceDetail /></TestApp>);
+    await h.waitFor(() => text().includes('Operations'), 'the operations section');
+    const restart = qa('button').find((b) => text(b).trim() === 'Restart');
+    expect(!!restart, 'no Restart control was offered for a running container');
+    click(restart!);
+    await h.flush(60);
+    // asking is a dry-run: it evaluates, and it is the only request made so far
+    await h.waitFor(() => !!h.lastCall('POST', '/api/v1/operations/dry-run'), 'the dry-run request');
+    expect(!h.lastCall('POST', '/api/v1/operations'), 'clicking the button executed something before confirmation');
+    const asked = h.lastCall('POST', '/api/v1/operations/dry-run')!.body as { action: string; target: { id: string } };
+    expect(asked.action === 'container.restart' && asked.target.id === 'wave', 'the request named the wrong action or target');
+    expect(Object.keys(asked).sort().join(',') === 'action,target', `the request carried unexpected fields: ${Object.keys(asked).join(',')}`);
+    // the dialog shows the server's own checks before it offers to run anything
+    await h.waitFor(() => text().includes('Registered action'), 'the dry-run checks');
+    expect(text().includes('Wave'), 'the dialog does not name the target');
+    click(q('.modal-foot button')!);                       // Cancel
+    await h.flush(20);
+    expect(!h.lastCall('POST', '/api/v1/operations'), 'cancelling ran the operation anyway');
+    // confirmed: the token the server issued is what gets spent, and nothing else
+    click(qa('button').find((b) => text(b).trim() === 'Restart')!);
+    await h.waitFor(() => !!confirmButton(), 'the confirm button');
+    click(confirmButton()!);
+    await h.waitFor(() => !!h.lastCall('POST', '/api/v1/operations'), 'the execute request');
+    const sent = h.lastCall('POST', '/api/v1/operations')!.body as Record<string, unknown>;
+    expect(sent.confirmationToken === 'tok-fixture', 'the execution did not spend the token the server issued');
+    expect(!('confirmed' in sent), 'the browser sent a “confirmed” flag — the server must decide that');
+    expect(Object.keys(sent).sort().join(',') === 'action,confirmationToken,operationId,target', `unexpected execute fields: ${Object.keys(sent).join(',')}`);
+    // and the result is the state the engine reported back, not an assumption
+    await h.waitFor(() => /verified running|Restarted/i.test(text()), 'the verified outcome');
+    expect(!/unproven/i.test(text()), 'a verified operation reported an unproven outcome');
+  });
+
+  await test('operations: a refusal is shown as a refusal, and nothing is sent afterwards', async (h) => {
+    const refusal = { code: 'not_permitted', reason: 'Your account is not allowed to stop containers.' };
+    // the server answers a refused dry-run with a non-200 that still carries the operation record
+    h.setRoutes({
+      ...stubRoutes(),
+      '/api/v1/operations': (body: unknown) => (body ? { operation: opsRecord('running') } : opsOverview({ permitted: ['container.start'] })),
+      '/api/v1/operations/dry-run': { $status: 403, body: { operation: opsRecord('rejected', { action: 'container.stop', error: refusal }), error: refusal.reason, code: refusal.code } },
+      '/api/v1/operations/op-fixture': () => ({ operation: opsRecord('rejected', { action: 'container.stop', error: refusal }) }),
+    });
+    await h.mount(<TestApp entry="/services/Music/wave"><ServiceDetail /></TestApp>);
+    await h.waitFor(() => !!qa('button').find((b) => text(b).trim() === 'Stop'), 'a Stop control');
+    click(qa('button').find((b) => text(b).trim() === 'Stop')!);
+    await h.waitFor(() => /not allowed to stop/i.test(text()), 'the refusal reason');
+    expect(text().includes('Nothing was changed'), 'the dialog does not say that nothing happened');
+    expect(!h.lastCall('POST', '/api/v1/operations'), 'a refused operation was executed anyway');
+    expect(!confirmButton(), 'a refused operation still offers a confirm button');
+  });
+
+  await test('operations: a viewer is offered no controls and is told why', async (h) => {
+    h.setRoutes({ ...stubRoutes(), '/api/v1/operations': opsOverview({ permitted: [], role: 'viewer' }) });
+    await h.mount(<TestApp entry="/services/Music/wave"><ServiceDetail /></TestApp>);
+    await h.waitFor(() => text().includes('Operations'), 'the operations section');
+    await h.flush(60);
+    expect(!qa('button').some((b) => /^(Start|Restart|Stop)$/.test(text(b).trim())), 'a viewer was offered an operation control');
+    expect(/not allowed to run operations/i.test(text()), 'the page does not say why there are no controls');
+  });
+
+  await test('operations: a timeout is reported as unproven, never as a success', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...opsRoutes(opsOverview(), { finalStatus: 'timed_out' }) });
+    await h.mount(<TestApp entry="/services/Music/wave"><ServiceDetail /></TestApp>);
+    await h.waitFor(() => !!qa('button').find((b) => text(b).trim() === 'Restart'), 'a Restart control');
+    click(qa('button').find((b) => text(b).trim() === 'Restart')!);
+    await h.waitFor(() => !!confirmButton(), 'the confirm button');
+    click(confirmButton()!);
+    await h.waitFor(() => /unproven|timed out/i.test(text()), 'the unproven outcome');
+    expect(!/verified running/i.test(text()), 'a timed-out operation claimed a verified outcome');
+  });
+
+  await test('operations: the command palette opens a confirmation instead of running anything', async (h) => {
+    const search = [
+      { title: 'Restart Wave', subtitle: 'Operation · Restart a running container.', href: '/services/Music/wave', kind: 'operation', operation: { action: 'container.restart', target: { type: 'service', id: 'wave', group: 'Music' }, confirmation: 'normal', risk: 'medium' } },
+    ];
+    h.setRoutes({ ...stubRoutes(), ...opsRoutes(), '/api/search': { query: '', results: search } });
+    await h.mount(<TestApp><SearchHost /></TestApp>);
+    key(window, '/');
+    await h.flush(40);
+    await type(searchInput()!, 'restart wave');
+    await h.waitFor(() => text().includes('Restart Wave'), 'the operation result');
+    await h.flush(260);
+    expect(text().includes('Operations'), 'operation results are not grouped under Operations');
+    key(window, 'Enter');
+    await h.waitFor(() => !!h.lastCall('POST', '/api/v1/operations/dry-run'), 'the dry-run request');
+    expect(!h.lastCall('POST', '/api/v1/operations'), 'choosing a palette result executed the operation');
+    await h.waitFor(() => text().includes('Registered action'), 'the confirmation dialog');
+  });
+
+  await test('settings: the operations pane reports the engine and offers no switch', async (h) => {
+    h.setRoutes({ ...stubRoutes(), '/api/v1/operations': opsOverview() });
+    await h.mount(<TestApp entry="/settings/operations"><Settings /></TestApp>);
+    await h.waitFor(() => text().includes('engine reachable'), 'the engine status');
+    expect(text().includes('Restart') && text().includes('Stop'), 'the pane does not list the registered actions');
+    expect(/audit/i.test(text()), 'the pane never mentions the audit trail');
+    expect(!qa('input[type=checkbox]').length, 'the operations pane offers a toggle — none of this is configurable');
+    expect(/no shell or command execution/i.test(text()), 'the boundaries are not stated in plain words');
+    expect(/no Docker API passthrough/i.test(text()), 'the passthrough boundary is not stated');
   });
 
   for (const r of results) {

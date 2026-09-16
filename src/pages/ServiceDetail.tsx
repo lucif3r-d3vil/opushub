@@ -1,8 +1,10 @@
-// Service Detail — a complete READ-ONLY view of one service.
+// Service Detail — the complete view of one service.
 //
 // What it answers: what is this, is it running, for how long, is it healthy, where does it come
 // from, how is it reached, what is it using, what relates to it, what changed recently.
-// What it never does: restart, exec, create, delete, update, deploy. Observation only.
+// What it can DO: start, restart or stop this one container — through the Operations Engine,
+// after a server-side dry-run and a confirmation, with the result verified and recorded.
+// What it never does: exec, create, delete, update, deploy, or anything else Docker can do.
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, usePolled } from '../lib/api';
@@ -14,6 +16,8 @@ import { AreaChart, MeterBar, Sparkline } from '../components/Charts';
 import { Freshness, Loading, OpenLink, ProviderNote, SectionHead, StatusLine } from '../components/ui';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
+import { ServiceActions, RecentOperations } from '../components/ServiceActions';
+import { useOperationsCapabilities } from '../lib/operations';
 
 interface InspectedContainer {
   id: string; name: string; image: string | null; imageId?: string | null;
@@ -80,6 +84,12 @@ export default function ServiceDetail() {
   const history = usePolled<ServiceHistoryDoc>(data?.service ? `${basePath}/history?limit=12` : null, 60_000);
   const activity = usePolled<{ items: ActivityEvent[] }>(`/api/activity?limit=40`, 60_000);
   const sys = usePolled<SystemSnapshot>('/api/system', 10_000);
+  // operations for THIS service, as the server recorded them (bounded, newest first)
+  const ops = usePolled<{ operations: { id: string; action: string; status: string; at: number; actor: string | null }[] }>(
+    `/api/v1/operations?service=${encodeURIComponent(name)}`, 0,
+  );
+  const opsCap = useOperationsCapabilities();
+  const opsHistory = ops.data?.operations ?? [];
 
   if (loading && !data) return <div style={{ padding: 'var(--sp-12) 0' }}><Loading what="this service" note="from the engine and the presentation overlay" /></div>;
   if (error && !data) return <ProviderNote status="error" reason={error} fixHref="/services" fixLabel="Back to Services →" />;
@@ -145,6 +155,42 @@ export default function ServiceDetail() {
 
       <div className="detail-grid">
         <div>
+          {/* ── operations: the only thing on this page that changes anything ── */}
+          <section className="detail-block" aria-labelledby="ops-head">
+            <SectionHead
+              id="ops-head"
+              title="Operations"
+              right={<span className="stale-note">confirmed, executed and verified server-side</span>}
+            />
+            {!data.dockerAvailable ? (
+              <p className="stale-note">
+                Docker is not connected, so no operation can run. Everything else on this page still shows the last state OpusHub saw.
+              </p>
+            ) : !c ? (
+              <p className="stale-note">This container is no longer on the engine, so there is nothing to operate on.</p>
+            ) : opsCap.overview && opsCap.permitted.size === 0 ? (
+              <p className="stale-note">
+                Your account ({opsCap.overview.actor.roleLabel.toLowerCase()}) is not allowed to run operations. Everything below is still yours to read.
+              </p>
+            ) : (
+              <>
+                <ServiceActions name={s.name} group={s.group} state={c.state.status} dockerAvailable={data.dockerAvailable} />
+                <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>
+                  Each one asks first: OpusHub checks permission, target and Docker, shows you what it would do,
+                  and only then runs. The result is verified against the engine and recorded in Activity.
+                </p>
+                {opsHistory.length > 0 && (
+                  <div style={{ marginTop: 'var(--sp-5)' }}>
+                    <span className="micro-label">Recent operations</span>
+                    <RecentOperations
+                      rows={opsHistory.map((r) => ({ id: r.id, action: r.action, status: r.status, at: r.at, actor: r.actor }))}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
           {/* ── runtime: the honest facts about right now ─────────────────── */}
           <section className="detail-block" aria-labelledby="rt-head">
             <SectionHead id="rt-head" title="Runtime" right={data.dockerAvailable ? <Freshness at={sys.fetchedAt} /> : undefined} />
