@@ -366,6 +366,12 @@ test('no server module outside the Docker client opens a socket to the engine', 
           assert.ok(!text.includes('docker'), 'the generic network helper mentions docker');
           continue;
         }
+        // Phase 8: server/providers/dockerOperations.js is the second — and last — module allowed
+        // to open a socket to the engine. It exists so the read provider can stay GET-only, and
+        // its endpoint set is enumerated mechanically in server/phase8-proof.test.js. Listing it
+        // here is not an exemption from that proof: it is the acknowledgement that a second
+        // client exists at all, so a third one cannot appear unnoticed.
+        if (/providers[/\\]dockerOperations\.js$/.test(p)) continue;
         offenders.push(path.relative(process.cwd(), p));
       }
     }
