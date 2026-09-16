@@ -6,6 +6,9 @@
 import { readBookmarks, readServices, getInventory, getLayout, getInfra } from './model.js';
 import { readEvents } from './activity.js';
 import { getActiveAlerts } from './alerts.js';
+import { ACTIONS, ACTION_IDS } from './operations/registry.js';
+import { describeActor } from './operations/permissions.js';
+import * as dockerOps from './providers/dockerOperations.js';
 
 const PAGES = [
   { title: 'Hub', href: '/', hint: 'Your digital home', kind: 'page', keywords: ['home', 'start', 'dashboard'] },
@@ -76,12 +79,22 @@ export function scoreMatch(needle, ...fields) {
 const score = scoreMatch;
 
 /** Category weights — services and stacks rank highest: they are the point of the index. */
-const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, page: 0.92, config: 0.9, setting: 0.88, infra: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75 };
+const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, page: 0.92, config: 0.9, setting: 0.88, operation: 0.86, infra: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75 };
+
+/**
+ * Which registered operations make sense to offer for a container in this state.
+ *
+ * The list comes from the registry itself — this file names no action of its own — filtered by the
+ * registry's own `offerWhen`. The palette is for finding things, not for offering every button
+ * everywhere: a running service offers Restart and Stop, a stopped one offers Start. Whatever is
+ * offered still goes through the same confirmation, and the server re-decides if it is allowed.
+ */
+const operationsForState = (state) => ACTION_IDS.filter((id) => (ACTIONS[id].offerWhen || []).includes(state));
 
 /** Docker subjects whose events are worth offering as destinations — the same names the pages use. */
 const ACTIVITY_WINDOW_MS = 7 * 24 * 3600_000;
 
-export async function searchAll(q, { newsItems = [] } = {}) {
+export async function searchAll(q, { newsItems = [], actor = null } = {}) {
   const needle = String(q || '').toLowerCase().trim().slice(0, 80);
   const out = [];
   const add = (item, s, weight = 1) => { if (s > 8) out.push({ ...item, _s: s * weight }); };
@@ -102,6 +115,40 @@ export async function searchAll(q, { newsItems = [] } = {}) {
         href: `/services/${encodeURIComponent(s.group || 'Other')}/${encodeURIComponent(s.name)}`,
         kind: 'service', group: s.group, icon: s.icon, status: s.status, url: s.url,
       }, score(needle, s.displayName, s.name, s.container.composeService, s.container.image, s.description, s.app, ...(s.keywords || []), s.group), KIND_WEIGHT.service);
+    }
+    /**
+     * Phase 8 — operations, as destinations that open a confirmation.
+     *
+     * These results carry an action id and a target reference and nothing else. Selecting one
+     * does not run anything: the palette hands it to the confirmation flow, which asks the server
+     * to evaluate it first. There is no such thing as a dynamic command here — every entry is a
+     * registered action against a container the engine actually has.
+     */
+    const perms = new Set(describeActor(actor).permissions);
+    const opsAvailable = dockerOps.operationsAvailability().ok;
+    if (opsAvailable && perms.size) {
+      for (const s of inv.services) {
+        if (s.hidden) continue;
+        for (const actionId of operationsForState(s.container?.state)) {
+          const a = ACTIONS[actionId];
+          if (!a || !perms.has(a.permission)) continue;
+          add({
+            title: `${a.imperative} ${s.displayName}`,
+            subtitle: `Operation · ${a.summary}`,
+            href: `/services/${encodeURIComponent(s.group || 'Other')}/${encodeURIComponent(s.name)}`,
+            kind: 'operation',
+            icon: s.icon,
+            // the payload the confirmation flow needs — an action id and a reference, never an
+            // endpoint, a method or a container id used as one
+            operation: {
+              action: a.id,
+              target: { type: 'service', id: s.name, group: s.group || null },
+              confirmation: a.confirmation,
+              risk: a.risk,
+            },
+          }, score(needle, `${a.imperative} ${s.displayName}`, a.verb, s.displayName, s.name, 'restart start stop operation'), KIND_WEIGHT.operation);
+        }
+      }
     }
     for (const st of inv.stacks) {
       add({

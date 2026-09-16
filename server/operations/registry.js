@@ -56,6 +56,9 @@ export const ACTIONS = Object.freeze({
     auditCategory: 'service',
     // which adapter method this maps to — read by the engine's static switch only
     adapter: 'start',
+    // Container states in which offering this action makes sense. This is *presentation*: it
+    // decides what the UI offers, never what it may do — the engine re-checks the state itself.
+    offerWhen: Object.freeze(['exited', 'created', 'dead']),
     summary: 'Start a stopped container.',
   }),
   'container.restart': Object.freeze({
@@ -74,6 +77,7 @@ export const ACTIONS = Object.freeze({
     expect: 'running',
     auditCategory: 'service',
     adapter: 'restart',
+    offerWhen: Object.freeze(['running']),
     summary: 'Restart a running container.',
   }),
   'container.stop': Object.freeze({
@@ -92,6 +96,7 @@ export const ACTIONS = Object.freeze({
     expect: 'exited',
     auditCategory: 'service',
     adapter: 'stop',
+    offerWhen: Object.freeze(['running']),
     summary: 'Stop a running container. It stays stopped until you start it again.',
   }),
 });

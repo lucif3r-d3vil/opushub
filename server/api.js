@@ -152,6 +152,7 @@ export async function handleApi(req, res, url) {
       p, method,
       send: (status, obj) => send(res, status, obj),
       jsonBody,
+      query: url.searchParams,
       actor: session?.username ?? null,
       // the session *handle*, never the token: enough to bind a confirmation to a session,
       // useless as a credential
@@ -852,8 +853,12 @@ export async function handleApi(req, res, url) {
 
   // ---------- search ----------
   if (route === 'GET /api/search') {
+    // the actor shapes which operations are offered at all — a viewer's palette is quieter
     const q = (url.searchParams.get('q') || '').slice(0, 80);
-    return send(res, 200, { query: q, results: await searchAll(q, { newsItems: lastNews.items || [] }) });
+    return send(res, 200, {
+      query: q,
+      results: await searchAll(q, { newsItems: lastNews.items || [], actor: session?.username ?? null }),
+    });
   }
 
   // ---------- icons ----------

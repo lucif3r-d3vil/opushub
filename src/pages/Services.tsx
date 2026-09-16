@@ -9,6 +9,7 @@ import { LastKnownNote, OpenLink, ProviderNote, StatusLine } from '../components
 import { Sortable } from '../components/Sortable';
 import { PageHero } from '../components/ui';
 import { LogsDrawer } from '../lib/dockerStatus';
+import { ServiceActionMenu } from '../components/ServiceActions';
 
 const hostOf = (url: string) => url.replace(/^https?:\/\/(?:[^@/]*@)?([^/:]+)/, '$1');
 
@@ -218,6 +219,16 @@ function ServiceRow({ service: s }: { service: Service }) {
           }}
         />
         <Link className="btn btn-sm" to={href}>Details</Link>
+        {/* operations stay behind a menu: this page is for finding a service, not for
+            running the whole fleet from a list of buttons */}
+        <ServiceActionMenu
+          name={s.name}
+          group={s.group}
+          state={s.container.state}
+          url={s.url}
+          detailHref={href}
+          label={`Actions for ${s.displayName}`}
+        />
       </div>
     </div>
   );

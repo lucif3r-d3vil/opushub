@@ -15,6 +15,16 @@ export function humanEvent(e: ActivityEvent): string {
     return e.message || e.type;
   }
   if (e.source === 'user' && e.type === 'service.launch') return e.message || 'opened';
+  /**
+   * Phase 8 — an operation is something a person did to a named service. Activity does not repeat
+   * the subject for `user` events (the subject *is* the service, and the row would read
+   * "restarted wave wave"), so the wording carries it here instead.
+   */
+  if (e.type === 'operation.succeeded') return `${e.message || 'completed'} ${e.subject || 'a service'}`;
+  if (e.type === 'operation.cancelled') return `${e.subject || 'an operation'} was cancelled before it ran`;
+  if (e.type === 'operation.failed') return `${e.subject || 'an operation'}: ${e.message || 'failed'}`;
+  if (e.type === 'operation.timeout') return `${e.subject || 'an operation'}: ${e.message || 'outcome unproven'}`;
+  if (e.type === 'operation.rejected') return `${e.subject || 'an operation'}: ${e.message || 'refused'}`;
   const map: Record<string, string> = {
     'app.boot': 'OpusHub started',
     'app.shutdown': 'OpusHub stopped',

@@ -19,6 +19,8 @@ const TYPES = [
   { value: 'auth', label: 'Authentication' },
   { value: 'settings', label: 'Settings' },
   { value: 'layout', label: 'Layout' },
+  // Phase 8 — operations are the first thing OpusHub can *do*, so they are worth filtering for
+  { value: 'operation', label: 'Operations' },
 ];
 
 const CATEGORIES: { value: '' | EventCategory; label: string }[] = [

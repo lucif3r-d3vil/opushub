@@ -47,14 +47,18 @@ function readOperationBody(body) {
  * @returns {Promise<boolean>} true when the route was one of ours (and answered), false so the
  * rest of the API dispatch can carry on.
  */
-export async function handleOperations({ p, method, send, jsonBody, actor, sessionId }) {
+export async function handleOperations({ p, method, send, jsonBody, actor, sessionId, query = null }) {
   const base = p === '/api/operations' || p === '/api/v1/operations';
   const m = p.match(/^\/api\/(?:v1\/)?operations\/([^/]+)$/);
   const sub = p.match(/^\/api\/(?:v1\/)?operations\/([^/]+)\/(trail|cancel)$/);
 
   // ---- capabilities + recent operations ----
   if (method === 'GET' && base) {
-    send(200, await engine.operationsOverview({ actor, limit: 40 }));
+    const doc = await engine.operationsOverview({ actor, limit: 40 });
+    // ?service=<container or service name> narrows it to one service's history — used by the
+    // "Recent operations" list on Service Detail. Filtering happens here, not in the browser.
+    const service = query?.get('service');
+    send(200, service ? { ...doc, operations: engine.operationsForTarget(String(service).slice(0, 128), { limit: 8 }) } : doc);
     return true;
   }
 

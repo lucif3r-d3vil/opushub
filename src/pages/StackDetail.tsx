@@ -9,6 +9,7 @@ import { AreaChart, MeterBar } from '../components/Charts';
 import { Loading, PageHero, ProviderNote, SectionHead, StatusLine } from '../components/ui';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
+import { ServiceActionMenu } from '../components/ServiceActions';
 
 interface StackRollup {
   containers: number; running: number; stopped: number; unhealthy: number; reporting: number;
@@ -213,7 +214,10 @@ export default function StackDetailPage() {
       )}
 
       <section className="detail-block">
-        <SectionHead title="Containers" right={<span className="mono-meta">{data.project ? `${data.members.length} container(s) in project ${data.project}` : 'grouped by overlay'}</span>} />
+        <SectionHead
+          title="Containers"
+          right={<span className="mono-meta">{data.project ? `${data.members.length} container(s) in project ${data.project}` : 'grouped by overlay'} · one at a time, never in bulk</span>}
+        />
         <ul style={{ listStyle: 'none' }}>
           {data.members.map((m) => (
             <li key={m.containerName} style={{ borderTop: '1px solid var(--hair)' }}>
@@ -238,6 +242,18 @@ export default function StackDetailPage() {
                   {m.container && <button className="icon-btn accent-on-hover" title="Container logs" onClick={() => setLogsFor(m.container!.name)}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 5h14M5 10h14M5 15h9" strokeLinecap="round" /></svg>
                   </button>}
+                  {/* per-container, never bulk: a stack is a group of containers, and restarting
+                      all of them at once is a much larger thing to be wrong about */}
+                  {m.container && data.live && (
+                    <ServiceActionMenu
+                      name={m.containerName}
+                      group={m.group}
+                      state={m.container.state}
+                      url={m.url}
+                      detailHref={`/services/${encodeURIComponent(m.group || 'Other')}/${encodeURIComponent(m.containerName)}`}
+                      label={`Actions for ${m.service}`}
+                    />
+                  )}
                 </div>
               </div>
               {!!(m.ports?.length || m.mounts?.length || m.networks?.length) && (
