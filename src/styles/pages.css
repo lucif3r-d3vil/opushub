@@ -732,3 +732,180 @@
 .alert-meta { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); color: var(--c-muted); font-size: 12px; margin-top: var(--sp-2); }
 .alert-link { color: var(--c-accent); text-decoration: none; }
 .alert-link:hover { text-decoration: underline; }
+
+/* Phase 8 — operations ----------------------------------------------------------
+   One visual language for every operations surface: the confirmation dialog, the row
+   lists on Service Detail and Activity, the service menus and the Settings pane.
+   Deliberately quiet. An operation changes the state of something real, so the interface
+   around it is text, state and one emphasised confirm — never a wall of coloured buttons.
+   Every animation here is decorative and is turned off under prefers-reduced-motion.       */
+
+.op-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: var(--r-pill);
+  border: 1px solid var(--hair); background: var(--surface-2);
+  color: var(--ink-2); font-size: var(--fs-micro); line-height: 1.5;
+  white-space: nowrap;
+}
+.op-chip--ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.op-chip--mid { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.op-chip--warn { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 35%, transparent); background: color-mix(in srgb, var(--fail) 12%, transparent); }
+.op-chip--quiet { border-style: dashed; color: var(--ink-3); background: transparent; }
+.op-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* the confirmation dialog ------------------------------------------------------- */
+.op-inline {
+  border: 1px solid var(--hair); border-radius: var(--r-md);
+  background: var(--surface-2); overflow: hidden;
+}
+.op-inline-head { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--hair); }
+.op-inline-head h3 { margin: 0; font-size: var(--fs-section); }
+.op-inline-body { padding: var(--sp-4); }
+.op-inline-foot {
+  display: flex; gap: var(--sp-2); justify-content: flex-end; align-items: center;
+  padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--hair); background: var(--sunken);
+}
+
+.op-prompt { margin: 0 0 var(--sp-4); color: var(--ink-2); line-height: var(--lh-body); }
+.op-note {
+  display: flex; align-items: center; gap: var(--sp-2);
+  margin: var(--sp-3) 0 0; color: var(--ink-2); font-size: var(--fs-meta);
+}
+.op-note--ok { color: var(--ok); }
+.op-note--bad { color: var(--fail); }
+.op-warn {
+  margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-radius: var(--r-sm); background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--ink-2); font-size: var(--fs-meta);
+}
+.op-quiet { color: var(--ink-3); font-size: var(--fs-meta); }
+
+.op-target {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-3); margin-bottom: var(--sp-3);
+  border: 1px solid var(--hair); border-radius: var(--r-sm); background: var(--sunken);
+}
+.op-target-name { font-weight: 600; margin-top: 2px; }
+.op-risk { flex: none; font-size: var(--fs-micro); padding: 2px 8px; border-radius: var(--r-pill); border: 1px solid var(--hair); color: var(--ink-2); }
+.op-risk--high { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 40%, transparent); background: color-mix(in srgb, var(--fail) 12%, transparent); }
+.op-risk--medium { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.op-risk--low { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+
+/* the dry-run checks — the server's own verdict, listed as it gave it */
+.op-checks { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: grid; gap: 1px; }
+.op-checks li {
+  display: grid; grid-template-columns: 18px minmax(90px, auto) 1fr; gap: var(--sp-2);
+  align-items: baseline; padding: 5px 0; font-size: var(--fs-meta);
+  border-bottom: 1px solid var(--hair);
+}
+.op-checks li:last-child { border-bottom: 0; }
+.op-check-mark { color: var(--fail); text-align: center; }
+.op-checks li[data-ok] .op-check-mark { color: var(--ok); }
+.op-check-label { color: var(--ink-2); }
+.op-check-detail { color: var(--ink-3); }
+
+.op-ack {
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  margin-top: var(--sp-4); padding: var(--sp-3);
+  border: 1px solid var(--hair-strong); border-radius: var(--r-sm);
+  background: var(--sunken); color: var(--ink-2); font-size: var(--fs-meta);
+  cursor: pointer;
+}
+.op-ack input { margin-top: 2px; accent-color: var(--accent); }
+
+.op-refused .op-reason { color: var(--fail); }
+.op-reason { margin: 0 0 var(--sp-2); font-weight: 600; }
+.op-refused p:last-child { margin-bottom: 0; }
+
+.op-progress { display: flex; gap: var(--sp-3); align-items: flex-start; }
+.op-progress-line { font-weight: 600; }
+.op-spinner {
+  width: 14px; height: 14px; flex: none; margin-top: 3px;
+  border-radius: 50%; border: 2px solid var(--hair-strong); border-top-color: var(--accent);
+  animation: op-spin 900ms linear infinite;
+}
+@keyframes op-spin { to { transform: rotate(360deg); } }
+
+.op-result { display: grid; gap: var(--sp-2); }
+.op-result--ok .op-reason { color: var(--ok); }
+.op-result--warn .op-reason { color: var(--warn); }
+.op-result--bad .op-reason { color: var(--fail); }
+
+/* rows — an operation as one line, wherever it is listed ------------------------- */
+.op-row {
+  display: flex; align-items: center; gap: var(--sp-3); width: 100%;
+  padding: var(--sp-2) var(--sp-3); text-align: left;
+  border: 1px solid var(--hair); border-radius: var(--r-sm);
+  background: var(--surface); color: inherit; font: inherit; cursor: pointer;
+}
+.op-row:hover { border-color: var(--hair-strong); }
+.op-row-text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.op-row-title { font-size: var(--fs-body); }
+.op-row-sub { color: var(--ink-3); font-size: var(--fs-meta); }
+.op-row-dur { color: var(--ink-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+.op-mark { flex: none; width: 16px; text-align: center; color: var(--ink-3); }
+.op-mark--succeeded { color: var(--ok); }
+.op-mark--failed, .op-mark--rejected { color: var(--fail); }
+.op-mark--timed_out { color: var(--warn); }
+.op-mark--running, .op-mark--authorized { color: var(--accent); }
+.op-row--succeeded { border-left: 2px solid var(--ok); }
+.op-row--failed, .op-row--rejected { border-left: 2px solid var(--fail); }
+.op-row--timed_out { border-left: 2px solid var(--warn); }
+
+.op-recent { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.op-recent-row {
+  display: flex; align-items: center; gap: var(--sp-3); width: 100%;
+  padding: 0; border: 0; background: none; color: inherit; font: inherit;
+  text-align: left; cursor: pointer;
+}
+.op-recent-text { display: grid; gap: 2px; font-size: var(--fs-meta); }
+
+/* the Settings pane ------------------------------------------------------------- */
+.op-list { display: grid; gap: var(--sp-3); }
+.op-list--bullets { margin: 0; padding-left: var(--sp-5); color: var(--ink-2); font-size: var(--fs-meta); display: grid; gap: 6px; }
+.op-list-item { border-left: 2px solid var(--hair-strong); padding-left: var(--sp-3); }
+.op-list-title { font-weight: 600; }
+.op-list-body { color: var(--ink-2); font-size: var(--fs-meta); margin-top: 2px; }
+
+.op-settings-row { border: 1px solid var(--hair); border-radius: var(--r-sm); background: var(--surface); }
+.op-settings-summary {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  width: 100%; padding: var(--sp-3); border: 0; background: none; color: inherit;
+  font: inherit; text-align: left; cursor: pointer;
+}
+.op-settings-title { display: flex; align-items: baseline; gap: var(--sp-2); font-weight: 600; }
+.op-settings-title code { font-size: var(--fs-micro); color: var(--ink-3); }
+.op-settings-detail { padding: 0 var(--sp-3) var(--sp-3); }
+.op-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--sp-2) var(--sp-4); margin: 0; }
+.op-facts div { display: grid; gap: 2px; }
+.op-facts dt { color: var(--ink-3); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.04em; }
+.op-facts dd { margin: 0; font-size: var(--fs-meta); }
+
+.op-line {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: var(--sp-3);
+  align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--hair); font-size: var(--fs-meta);
+}
+.op-line:last-child { border-bottom: 0; }
+.op-line-main { color: var(--ink); }
+.op-line-meta { color: var(--ink-3); }
+.op-line-state { grid-column: 2 / -1; color: var(--ink-2); }
+.op-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); align-self: center; }
+.op-dot--succeeded { background: var(--ok); }
+.op-dot--failed, .op-dot--rejected { background: var(--fail); }
+.op-dot--timed_out { background: var(--warn); }
+.op-dot--running, .op-dot--authorized, .op-dot--awaiting_confirmation { background: var(--accent); }
+
+/* small screens: chips and rows stack instead of overflowing */
+@media (max-width: 720px) {
+  .op-checks li { grid-template-columns: 18px 1fr; }
+  .op-check-detail { grid-column: 2; }
+  .op-line { grid-template-columns: 16px 1fr; }
+  .op-line-meta, .op-line-state { grid-column: 2; }
+  .op-settings-summary { flex-direction: column; align-items: flex-start; }
+}
+
+/* motion is decoration here; the state is carried by text and colour, never by movement */
+@media (prefers-reduced-motion: reduce) {
+  .op-spinner { animation: none; border-top-color: var(--accent); opacity: 0.9; }
+}

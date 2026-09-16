@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-
 import { LayoutProvider, SettingsProvider, useSettings } from './lib/theme';
 import { AuthProvider, useAuth } from './lib/auth';
 import { SearchOverlay, useGlobalSearchHotkey } from './components/SearchOverlay';
+import { OperationsHost } from './components/Operations';
 import { Freshness } from './components/ui';
 import { LogoMark } from './components/Logo';
 import { BackgroundImage } from './components/BackgroundImage';
@@ -129,6 +130,8 @@ function Shell() {
       </nav>
 
       <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
+      {/* operations: one confirmation flow, mounted once, opened from anywhere */}
+      <OperationsHost />
       <SaveIndicator />
       <CustomAssets />
     </>
