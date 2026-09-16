@@ -173,6 +173,19 @@ history.start(async () => {
   }
 }
 
+// Operations that were still running when this process last stopped can never be completed by
+// it, and their Docker call may or may not have reached the engine. Record that honestly once at
+// boot instead of leaving an operation that looks like it is running forever (Phase 8).
+{
+  try {
+    const { recoverInterrupted } = await import('./operations/engine.js');
+    const recovered = recoverInterrupted();
+    if (recovered.length) {
+      console.log(`│ operations: ${recovered.length} interrupted by the last shutdown — recorded with an unknown outcome`);
+    }
+  } catch { /* the operations engine must never stop the server from starting */ }
+}
+
 const HEALTH_IN_STATUS = /\((healthy|unhealthy|starting)\)\s*$/i;
 let lastDockerSnapshot = null; // id → { state, health, project }
 let lastProjects = null;       // Set<project>

@@ -37,6 +37,7 @@ import { lintCss, lintJs, LIMITS } from './configSchema.js';
 import { makeWidget, defaultWidgets, WIDGET_TYPES } from './widgets.js';
 import { templateList, templateIds } from './templates.js';
 import { hostDocument } from './host.js';
+import { handleOperations } from './operationsApi.js';
 import { describeStorage } from './providers/storage.js';
 import { versionInfo } from './version.js';
 
@@ -140,6 +141,24 @@ export async function handleApi(req, res, url) {
     }
   }
   const secure = auth.isSecureRequest(req);
+
+  // ---------- operations (Phase 8) ----------
+  // Handled here, immediately after the session and CSRF gates and before every other route, so
+  // that the answer to "is the operations surface authenticated?" is: it cannot be reached
+  // unauthenticated, because it is inside the same gate as everything else. The handler is a
+  // separate module — this file only decides *where* it sits in the request path.
+  if (p.startsWith('/api/operations') || p.startsWith('/api/v1/operations')) {
+    const handled = await handleOperations({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      actor: session?.username ?? null,
+      // the session *handle*, never the token: enough to bind a confirmation to a session,
+      // useless as a credential
+      sessionId: activeToken ? auth.sessionHandle(activeToken) : null,
+    });
+    if (handled) return;
+  }
 
   // ---------- setup (bootstrap; refuses to run twice) ----------
   if (route === 'GET /api/setup/status') {
@@ -1611,6 +1630,9 @@ export function markBoot(t) { bootAt = t; }
 const V1_ROUTES = new Set([
   '/host', '/docker', '/networks', '/volumes', '/images', '/storage', '/version', '/resources',
   '/services', '/stacks', '/system', '/discovery', '/providers',
+  // Phase 8 — the canonical operations routes; the /:id and /:id/trail forms keep their v1
+  // prefix because they are patterns, not fixed paths, and are matched by the handler itself.
+  '/operations', '/operations/dry-run',
 ]);
 
 export function rewriteV1(pathname) {
