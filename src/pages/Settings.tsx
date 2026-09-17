@@ -17,6 +17,7 @@ import { Sortable } from '../components/Sortable';
 import { Block, Row } from './settings/parts';
 import { ConfigurationTab, ExportTab, HistoryTab, ImportTab } from './settings/Configuration';
 import { OperationsSettingsTab } from './settings/Operations';
+import ConnectionsTab from './settings/Connections';
 import { HubPreview } from '../components/hub/HubPreview';
 import {
   addWidget, configSummary, hiddenWidgets, moveWidget, removeWidget, setSpacing, setWidget, visibleInZone,
@@ -54,6 +55,8 @@ const TABS = [
   { id: 'bookmarks', label: 'Bookmarks', section: 'Content' },
   { id: 'integrations', label: 'Integrations', section: 'Connections' },
   { id: 'notifications', label: 'Notifications', section: 'Connections' },
+  // Phase 9 — the OpusGrid providers: what is connected, what it can do, and what it cannot
+  { id: 'connections', label: 'Connections', section: 'Connections' },
   { id: 'import', label: 'Import & migration', section: 'Configuration' },
   { id: 'history', label: 'History', section: 'Configuration' },
   { id: 'export', label: 'Export', section: 'Configuration' },
@@ -126,6 +129,7 @@ export default function SettingsPage() {
           {tab === 'bookmarks' && <BookmarksTab />}
           {tab === 'integrations' && <IntegrationsTab />}
           {tab === 'notifications' && <NotificationsTab />}
+          {tab === 'connections' && <ConnectionsTab />}
           {tab === 'authentication' && <AuthenticationTab />}
           {tab === 'environment' && <EnvironmentTab />}
           {tab === 'operations' && <OperationsSettingsTab />}
