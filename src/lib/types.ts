@@ -220,7 +220,7 @@ export interface SystemSnapshot {
 export interface HistoryPoint { t: number; cpu: number | null; memUsedPct: number | null; load: number | null; rx: number | null; tx: number | null; temp: number | null; procs: number | null }
 
 export type EventSeverity = 'info' | 'notice' | 'warning' | 'critical';
-export type EventCategory = 'service' | 'stack' | 'docker' | 'system' | 'security' | 'config';
+export type EventCategory = 'service' | 'stack' | 'docker' | 'system' | 'security' | 'config' | 'storage' | 'network' | 'power' | 'provider';
 export interface ActivityEvent {
   id: string; t: number; iso: string;
   source: 'system' | 'config' | 'user' | 'docker' | string;
@@ -289,7 +289,13 @@ export interface SettingsDoc {
     markets: { symbols: string[] };
   };
   behavior: { logLaunches: boolean; refresh: { system: number; services: number } };
-  infrastructure: { hostAddress: string | null; entrypointPorts: Record<string, string> };
+  infrastructure: {
+    hostAddress: string | null;
+    entrypointPorts: Record<string, string>;
+    /** Phase 9 — non-secret connection settings only. Credentials are never stored here. */
+    opnsense?: { url: string | null };
+    power?: { ups: { enabled: boolean }; pdu: { enabled: boolean } };
+  };
   advanced: { customCss: boolean; customJs: boolean };
   _raw?: unknown;
   _text?: string;
@@ -638,8 +644,285 @@ export interface LastKnownSummary {
   engine: { version: string | null; apiVersion: string | null } | null;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 9 — the OpusGrid infrastructure model
+// ---------------------------------------------------------------------------
+/** Every provider state OpusHub will ever report. `not-configured` is an answer, not a failure. */
+export type ProviderState = 'connected' | 'available' | 'degraded' | 'unavailable' | 'not-configured' | 'unknown';
+export type ProviderType = 'compute' | 'storage' | 'network' | 'firewall' | 'power' | 'host';
+export type DomainStatus = 'healthy' | 'degraded' | 'unavailable' | 'not-configured' | 'unknown';
+export type GridDomain = 'compute' | 'storage' | 'network' | 'power' | 'external';
+
+export interface ProviderDoc {
+  id: string;
+  type: ProviderType;
+  name: string;
+  domain: GridDomain;
+  optional: boolean;
+  description: string | null;
+  status: ProviderState;
+  statusLabel: string;
+  capabilities: string[];
+  active: string[];
+  planned: string[];
+  version: string | null;
+  lastChecked: number | null;
+  error: { code: string; reason: string | null } | null;
+}
+
+export interface DomainHealthDoc {
+  domain: GridDomain;
+  label: string;
+  status: DomainStatus;
+  reasons: string[];
+  providers: string[];
+  alerts: number;
+}
+
+export interface InfrastructureHealthDoc {
+  status: DomainStatus;
+  domains: Record<string, DomainHealthDoc>;
+  counts: { healthy: number; degraded: number; unavailable: number; notConfigured: number; unknown: number };
+  note: string;
+}
+
+/** A mount the kernel reports — a filesystem, distinct from a ZFS pool or dataset. */
+export interface FilesystemMount {
+  mount: string; device: string; fs: string;
+  total: number; used: number; free: number; usedPct: number | null;
+}
+
+/** A ZFS pool, exactly as `zpool list` reported it. Nulls mean "ZFS did not say". */
+export interface ZfsPool {
+  name: string;
+  size: number | null;
+  allocated: number | null;
+  free: number | null;
+  fragmentationPct: number | null;
+  capacityPct: number | null;
+  health: string | null;
+  usedPct: number | null;
+}
+
+/** A ZFS dataset. Every field is null until ZFS reports it — never a zero standing in for one. */
+export interface ZfsDataset {
+  name: string;
+  pool: string;
+  used: number | null;
+  available: number | null;
+  referenced: number | null;
+  mountpoint: string | null;
+  compression: string | null;
+  recordsize: number | null;
+  quota: number | null;
+  quotaUsedPct: number | null;
+}
+
+export interface ZfsVdev {
+  name: string; pathHidden: boolean; depth: number;
+  size: number | null; allocated: number | null; free: number | null;
+  fragmentationPct: number | null; capacityPct: number | null;
+  health: string | null;
+  children: ZfsVdev[];
+}
+
+export interface StorageDomainDoc {
+  at: number;
+  providers: string[];
+  filesystems: {
+    status: ProviderState | 'unknown';
+    available: boolean;
+    reason: string | null;
+    mounts: FilesystemMount[];
+    mountCount: number;
+    totals: { mounts: number; total: number; used: number; free: number } | null;
+    truncated: boolean;
+  };
+  zfs: {
+    status: ProviderState | 'unknown';
+    available: boolean;
+    reason: string | null;
+    pools: ZfsPool[];
+    poolCount: number;
+    datasets: ZfsDataset[];
+    datasetCount: number;
+    truncated: boolean;
+    empty: boolean;
+  };
+}
+
+export interface PoolDetailDoc extends ZfsPool {
+  at: number;
+  topology: { available: boolean; reason: string | null; vdevs: ZfsVdev[] };
+  datasets: ZfsDataset[];
+}
+
+export interface DatasetDetailDoc extends ZfsDataset { at: number }
+
+export interface NetworkAddressDoc { address: string; family: 'ipv4' | 'ipv6'; scope: string; prefixLength: number | null }
+
+export interface NetworkInterfaceDoc {
+  name: string;
+  kind: string;
+  state: string;
+  up: boolean;
+  mtu: number | null;
+  speedMbps: number | null;
+  addresses: NetworkAddressDoc[];
+  rx: { bytes: number; packets: number; errors: number; dropped: number } | null;
+  tx: { bytes: number; packets: number; errors: number; dropped: number } | null;
+}
+
+export interface NetworkDomainDoc {
+  at: number;
+  providers: string[];
+  status: ProviderState | 'unknown';
+  reason: string | null;
+  interfaces: NetworkInterfaceDoc[];
+  interfaceCount: number | null;
+  counts: { interfaces: number; up: number; withAddress: number } | null;
+  routes: {
+    defaultRoute: { via: string | null; iface: string; protocol: string } | null;
+    defaultRoutes: { via: string | null; iface: string; protocol: string }[];
+    routeCount: number | null;
+    routeCount6: number | null;
+    tableAvailable: boolean;
+    note: string | null;
+  } | null;
+  dns: {
+    available: boolean;
+    nameservers: string[];
+    search: string[];
+    source: string;
+    viaStubResolver: boolean;
+    note: string | null;
+  } | null;
+  scope: 'host' | 'container' | null;
+  scopeNote: string | null;
+  docker: {
+    live: boolean;
+    networks: { name: string | null; driver: string | null; scope: string | null; containerCount: number; internal: boolean; attachable: boolean }[];
+    networkCount: number | null;
+    reason: string | null;
+  };
+  summaryOnly?: boolean;
+}
+
+export interface PowerDeviceDoc {
+  status: ProviderState | 'unknown';
+  reason: string | null;
+  device: null;
+  fields: Record<string, null>;
+  planned?: string[];
+  refused?: string[];
+  note?: string | null;
+  at?: number;
+}
+
+export interface PowerDomainDoc {
+  at: number;
+  providers: string[];
+  ups: PowerDeviceDoc | null;
+  pdu: PowerDeviceDoc | null;
+  note: string;
+  summaryOnly?: boolean;
+}
+
+export interface OpnsenseCapability { id: string; label: string; status: string; reason: string | null }
+
+export interface OpnsenseDoc {
+  status: ProviderState | 'unknown';
+  configured: boolean;
+  url: string | null;
+  credentialSource: string;
+  credentialPresent: boolean;
+  version: string | null;
+  reason: string | null;
+  capabilities: OpnsenseCapability[];
+  planned: string[];
+  system: { hostname: string | null; version: string | null; product: string | null; platform: string | null; uptime: string | null; load: (number | string)[] | null } | null;
+  interfaces: { name: string | null; device: string | null; status: string | null; enabled: boolean | null; address: string | null }[] | null;
+  gateways: { name: string | null; address: string | null; status: string | null; loss: string | number | null; delay: string | number | null }[] | null;
+  dns: { enabled: boolean | null; port: number | string | null; dnssecEnabled: boolean | null } | null;
+}
+
+export interface ExternalDomainDoc { at: number; providers: string[]; opnsense: OpnsenseDoc | Partial<OpnsenseDoc>; summaryOnly?: boolean }
+
+export interface ComputeDomainDoc {
+  at: number;
+  providers: string[];
+  docker: {
+    status: ProviderState | 'unknown';
+    version: string | null;
+    reason: string | null;
+    live: boolean;
+    counts: { containers: number | null; running: number | null; stopped: number | null; stacks: number | null } | null;
+    lastKnown: LastKnownSummary | null;
+  };
+}
+
+export interface OpusGridDoc {
+  at: number;
+  health: InfrastructureHealthDoc;
+  providers: ProviderDoc[];
+  domains: {
+    compute: ComputeDomainDoc;
+    storage: StorageDomainDoc;
+    network: NetworkDomainDoc;
+    power: PowerDomainDoc;
+    external: ExternalDomainDoc;
+  };
+}
+
+/** A topology object. `source` is never 'inferred' — there is no inferred source in the model. */
+export interface TopologyNode {
+  id: string;
+  label: string;
+  sub: string | null;
+  kind: string;
+  layer: 'physical' | 'network' | 'compute' | 'storage' | 'services';
+  source: 'discovered' | 'configured';
+  state: string | null;
+  href: string | null;
+  note: string | null;
+}
+
+export interface TopologyEdge {
+  from: string;
+  to: string;
+  source: 'discovered' | 'configured';
+  kind: string | null;
+  label: string | null;
+}
+
+export interface TopologyDoc {
+  at: number;
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+  layers: Record<string, number>;
+  sources: { discovered: number; configured: number };
+  physical: { available: boolean; configured: boolean; reason: string | null; nodes: number; links: number };
+  rule: string;
+}
+
+export interface InfrastructureProvidersDoc { at: number; providers: ProviderDoc[]; count: number }
+
+export interface PhysicalTopologyDoc {
+  available: boolean;
+  configured: boolean;
+  nodes: { id: string; label: string; kind: string; layer: string; note: string | null }[];
+  links: { from: string; to: string; label: string | null; source: string }[];
+  reason: string | null;
+  error: string | null;
+  file: string;
+  at: number;
+}
+
 export interface HostDoc {
   at: number;
+  /** Phase 9: the provider picture, because the host is the parent context for infrastructure. */
+  providers?: ProviderDoc[];
+  health?: InfrastructureHealthDoc;
   host: { hostname: string | null; os: string | null; kernel: string | null; arch: string | null; model: string | null; uptimeSec: number | null; bootAt: string | null };
   cpu: { model: string | null; cores: number | null; threads: number | null; mhz: number | null };
   memory: { total: number | null };

@@ -48,12 +48,29 @@ test('filesystem provider reports real mounts with totals', async () => {
   assert.ok(doc.totals && doc.totals.total >= doc.totals.used);
 });
 
-test('zfs provider reports not-implemented rather than borrowing numbers', async () => {
+// Phase 9 implements ZFS (see server/providers/zfs.js). The provider no longer answers
+// 'not-implemented': it either read pools and datasets from `zpool`/`zfs`, or it says plainly
+// that it could not. What must never change is the second half of the old guarantee — a ZFS
+// document is only ever built from ZFS's own output, never from filesystem statistics.
+test('zfs provider answers from ZFS or says it could not, and never borrows filesystem numbers', async () => {
   const p = new ZFSProvider();
   const doc = await p.describe();
-  assert.equal(doc.available, 'not-implemented');
-  assert.deepEqual(doc.pools, []);
-  assert.match(doc.reason, /not implemented/i);
+  assert.ok(['boolean'].includes(typeof doc.available), 'available is a boolean, never a guess');
+  assert.ok(Array.isArray(doc.pools) && Array.isArray(doc.datasets));
+  if (doc.available) {
+    // real ZFS output: every pool has a name, and every dataset belongs to a pool it reported
+    assert.ok(doc.pools.every((x) => typeof x.name === 'string' && x.name));
+    for (const d of doc.datasets) assert.ok(doc.pools.some((x) => x.name === d.pool));
+  } else {
+    // unavailable: a reason in words, and no numbers pretending to be ZFS measurements
+    assert.match(doc.reason || '', /\S/);
+    assert.deepEqual(doc.pools, []);
+    assert.deepEqual(doc.datasets, []);
+  }
+  // the filesystem provider's mounts are never presented as ZFS datasets
+  const fs = await new LinuxFilesystemProvider().describe();
+  const fsMounts = new Set((fs.mounts || []).map((m) => m.mount));
+  for (const d of doc.datasets) assert.ok(!fsMounts.has(d.name), `${d.name} came from /proc/mounts`);
 });
 
 test('describeStorage aggregates every provider without throwing', async () => {

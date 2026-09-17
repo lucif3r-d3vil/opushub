@@ -15,6 +15,12 @@ const PAGES = [
   { title: 'Services', href: '/services', hint: 'Everything you run', kind: 'page', keywords: ['apps', 'containers'] },
   { title: 'Stacks', href: '/stacks', hint: 'Groups of containers', kind: 'page', keywords: ['compose', 'projects'] },
   { title: 'Infrastructure', href: '/infrastructure', hint: 'Engine, networks, volumes, images, topology', kind: 'page', keywords: ['docker', 'network', 'volume', 'image', 'topology', 'host', 'engine'] },
+  // Phase 9 — the OpusGrid infrastructure surfaces are destinations in their own right.
+  { title: 'Host', href: '/host', hint: 'The machine OpusGrid runs on', kind: 'page', keywords: ['machine', 'server', 'node', 'cpu', 'memory', 'kernel', 'os', 'provider'] },
+  { title: 'Storage', href: '/infrastructure?tab=storage', hint: 'Filesystems, ZFS pools and datasets', kind: 'page', keywords: ['disk', 'zfs', 'pool', 'dataset', 'mount', 'quota', 'capacity'] },
+  { title: 'Network', href: '/infrastructure?tab=network', hint: 'Interfaces, routing, DNS, OPNsense', kind: 'page', keywords: ['interface', 'eth', 'route', 'gateway', 'dns', 'resolver', 'opnsense', 'firewall'] },
+  { title: 'Power', href: '/infrastructure?tab=power', hint: 'UPS and PDU', kind: 'page', keywords: ['ups', 'pdu', 'battery', 'outlet', 'electric'] },
+  { title: 'Topology', href: '/infrastructure?tab=topology', hint: 'How the OpusGrid fits together', kind: 'page', keywords: ['graph', 'map', 'layers', 'physical', 'relationship'] },
   { title: 'System', href: '/system', hint: 'Host vitals', kind: 'page', keywords: ['cpu', 'memory', 'disk', 'network', 'uptime'] },
   { title: 'Activity', href: '/activity', hint: 'What happened, when', kind: 'page', keywords: ['events', 'history', 'log'] },
   { title: 'Icon browser', href: '/icons', hint: 'Find an icon and apply it', kind: 'page', keywords: ['logo', 'glyph', 'symbol'] },
@@ -35,6 +41,8 @@ const SETTINGS = [
   { title: 'Notifications', href: '/settings/notifications', hint: 'Alert channels: webhook, email, Telegram, Slack', keywords: ['alerts', 'notify', 'webhook', 'email', 'telegram', 'slack', 'channels'] },
   { title: 'General', href: '/settings/general', hint: 'Name, greeting, this install', keywords: ['identity', 'title', 'name', 'greeting', 'app', 'about'] },
   { title: 'Environment', href: '/settings/environment', hint: 'Engine status, URL sources, Homepage-compatible files', keywords: ['docker', 'engine', 'socket', 'discovery', 'unmatched', 'env', 'paths', 'homepage', 'overlay'] },
+  // Phase 9 — provider connections: status and capabilities, never credentials.
+  { title: 'Connections', href: '/settings/connections', hint: 'Provider status, capabilities and the OPNsense address', keywords: ['provider', 'opnsense', 'ups', 'pdu', 'zfs', 'connect', 'capability', 'credential'] },
   { title: 'Account & sessions', href: '/settings/authentication', hint: 'Password, signed-in browsers, revocation', keywords: ['password', 'change password', 'sessions', 'sign out', 'security', 'login', 'revoke'] },
   { title: 'Advanced', href: '/settings/advanced', hint: 'Custom CSS & JS, refresh intervals, launch logging', keywords: ['custom css', 'custom js', 'theme.css', 'app.js', 'advanced', 'refresh', 'poll', 'launch log'] },
   // Phase 6 — the configuration surfaces themselves are destinations worth searching for.
@@ -207,6 +215,70 @@ export async function searchAll(q, { newsItems = [], actor = null } = {}) {
       }, score(needle, tag, ...(img.tags || []), 'image'), KIND_WEIGHT.infra);
     }
   } catch { /* infra is optional — search still answers without it */ }
+
+  /**
+   * Phase 9 — infrastructure objects, and only the ones a provider actually proved.
+   *
+   * A pool, dataset, filesystem or interface is offered because it was measured. OPNsense, UPS and
+   * PDU are offered as *destinations* with their real status in the subtitle, because a pane that
+   * says "Not configured" is a legitimate place to navigate to. Nothing here invents an object.
+   */
+  try {
+    const infra = await import('./infrastructure/opusgrid.js');
+    const [storage, network, external, power] = await Promise.all([
+      infra.storageDocument({ detail: true }).catch(() => null),
+      infra.networkDocument().catch(() => null),
+      infra.externalDocument().catch(() => null),
+      infra.powerDocument().catch(() => null),
+    ]);
+    for (const m of (storage?.filesystems?.mounts || []).slice(0, 20)) {
+      add({
+        title: m.mount,
+        subtitle: `Filesystem · ${m.fs}${m.usedPct != null ? ` · ${Math.round(m.usedPct)}% used` : ''}`,
+        href: '/infrastructure?tab=storage', kind: 'infra',
+      }, score(needle, m.mount, m.fs, 'filesystem', 'mount'), KIND_WEIGHT.infra);
+    }
+    if (storage?.zfs?.available) {
+      for (const p of (storage.zfs.pools || []).slice(0, 20)) {
+        add({
+          title: p.name,
+          subtitle: `ZFS pool · ${p.health || 'health unknown'}${p.capacityPct != null ? ` · ${p.capacityPct}% used` : ''}`,
+          href: `/infrastructure?tab=storage&pool=${encodeURIComponent(p.name)}`, kind: 'infra',
+        }, score(needle, p.name, 'zfs', 'pool'), KIND_WEIGHT.infra);
+      }
+      for (const d of (storage.zfs.datasets || []).slice(0, 30)) {
+        add({
+          title: d.name,
+          subtitle: `ZFS dataset · ${d.pool}${d.mountpoint ? ` · ${d.mountpoint}` : ''}`,
+          href: `/infrastructure?tab=storage&dataset=${encodeURIComponent(d.name)}`, kind: 'infra',
+        }, score(needle, d.name, 'zfs', 'dataset'), KIND_WEIGHT.infra);
+      }
+    }
+    for (const i of (network?.interfaces || []).slice(0, 20)) {
+      add({
+        title: i.name,
+        subtitle: `Interface · ${i.kind} · ${i.state}${(i.addresses || [])[0] ? ` · ${i.addresses[0].address}` : ''}`,
+        href: '/infrastructure?tab=network', kind: 'infra',
+      }, score(needle, i.name, i.kind, 'interface', 'network'), KIND_WEIGHT.infra);
+    }
+    // Optional providers: destinations that state their own status.
+    if (external?.opnsense) {
+      add({
+        title: 'OPNsense',
+        subtitle: `External · ${external.opnsense.status === 'not-configured' ? 'Not configured' : (external.opnsense.status || 'unknown')}`,
+        href: '/infrastructure?tab=network', kind: 'infra',
+      }, score(needle, 'opnsense', 'firewall', 'router', 'gateway'), KIND_WEIGHT.infra);
+    }
+    if (power) {
+      for (const [label, device] of [['UPS', power.ups], ['PDU', power.pdu]]) {
+        add({
+          title: label,
+          subtitle: `Power · ${device?.status === 'not-configured' ? 'Not configured' : (device?.status || 'unknown')}`,
+          href: '/infrastructure?tab=power', kind: 'infra',
+        }, score(needle, label, 'power', 'ups', 'pdu'), KIND_WEIGHT.infra);
+      }
+    }
+  } catch { /* the infrastructure surface is optional — search still answers without it */ }
 
   try {
     const { overlays, groups } = readServices();

@@ -36,7 +36,15 @@ export const DEFAULT_SETTINGS = {
   // Infrastructure access + the two optional knobs the URL resolver can't read off Docker itself.
   // hostAddress: the name/port a browser should use for published ports (else auto-detected).
   // entrypointPorts: only needed when Traefik's entrypoint is not on 80/443, e.g. { web: '8080' }.
-  infrastructure: { hostAddress: null, entrypointPorts: {} },
+  // Phase 9: optional infrastructure *connections*. Deliberately non-secret — the OPNsense address
+  // may be configured here, its API key and secret may not (they come from the environment only,
+  // so no configuration file, snapshot, export or history version can ever carry one).
+  infrastructure: {
+    hostAddress: null,
+    entrypointPorts: {},
+    opnsense: { url: null },
+    power: { ups: { enabled: false }, pdu: { enabled: false } },
+  },
   advanced: { customCss: false, customJs: false },
 };
 
@@ -700,6 +708,40 @@ function sanitizeSettings(s) {
       }
       infra.entrypointPorts = clean;
     } else infra.entrypointPorts = {};
+
+    // Phase 9 — connection settings. Every value here is a NON-secret: an address, or a flag.
+    // Anything credential-shaped is refused rather than stored, because the only safe place for a
+    // provider credential in OpusHub is the environment (see server/providers/opnsenseConfig.js).
+    const opn = infra.opnsense;
+    if (opn && typeof opn === 'object' && !Array.isArray(opn)) {
+      const url = str(opn.url, 200);
+      if (!url) infra.opnsense = { url: null };
+      else {
+        let parsed = null;
+        try { parsed = new URL(url); } catch { parsed = null; }
+        const bad = !parsed
+          || !/^https?:$/.test(parsed.protocol)
+          || !parsed.hostname
+          || parsed.username || parsed.password
+          || parsed.search || parsed.hash
+          || (parsed.pathname && parsed.pathname !== '/');
+        if (bad) {
+          rejected.push('infrastructure.opnsense.url must be a plain http(s) address with no path, query, fragment or credentials');
+          infra.opnsense = { url: null };
+        } else {
+          // stored normalized to the origin: the endpoint table owns the path, always
+          infra.opnsense = { url: parsed.origin };
+        }
+      }
+    } else infra.opnsense = { url: null };
+
+    const power = infra.power;
+    const cleanPower = {};
+    for (const id of ['ups', 'pdu']) {
+      const entry = power && power[id];
+      cleanPower[id] = { enabled: entry && entry.enabled === true };
+    }
+    infra.power = cleanPower;
   }
   out._rejected = rejected;
   return out;

@@ -39,6 +39,11 @@ import { templateList, templateIds } from './templates.js';
 import { hostDocument } from './host.js';
 import { handleOperations } from './operationsApi.js';
 import { describeStorage } from './providers/storage.js';
+// Phase 9 — the OpusGrid infrastructure surface and its health aggregation
+import { handleInfrastructure } from './infrastructureApi.js';
+import { describeProviders } from './infrastructure/registry.js';
+import { aggregateHealth } from './infrastructure/health.js';
+import { storageDocument, networkDocument } from './infrastructure/opusgrid.js';
 import { versionInfo } from './version.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
@@ -159,6 +164,19 @@ export async function handleApi(req, res, url) {
       sessionId: activeToken ? auth.sessionHandle(activeToken) : null,
     });
     if (handled) return;
+  }
+
+  // ---------- OpusGrid infrastructure (Phase 9) ----------
+  // Sits inside the same session and CSRF gate as everything else, so the answer to "is the
+  // infrastructure surface authenticated?" is the same as for the rest of the API. The handler
+  // owns every /api/infrastructure/* route and exposes GETs only — see server/infrastructureApi.js.
+  if (p.startsWith('/api/infrastructure')) {
+    await handleInfrastructure({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      query: url.searchParams,
+    });
+    return;
   }
 
   // ---------- setup (bootstrap; refuses to run twice) ----------
@@ -676,7 +694,13 @@ export async function handleApi(req, res, url) {
   // ---------- host & infrastructure (Phase 7 canonical inventory) ----------
   if (route === 'GET /api/host') {
     const inv = await model.getInventory();
-    return send(res, 200, await hostDocument({ inventory: inv }));
+    // Phase 9: the host is the parent context for infrastructure, so the host document carries
+    // the provider picture alongside it. The host facts themselves are unchanged.
+    const [doc, providers] = await Promise.all([
+      hostDocument({ inventory: inv }),
+      describeProviders(),
+    ]);
+    return send(res, 200, { ...doc, providers, health: aggregateHealth({ providers, alerts: getActiveAlerts() }) });
   }
   if (route === 'GET /api/docker') {
     const [inv, infra, dockerProv] = await Promise.all([
@@ -815,10 +839,15 @@ export async function handleApi(req, res, url) {
   // bounded system sample, the auth-failure count). Transitions log to activity inside
   // refreshAlerts, so GET here can append exactly two kinds of honest events.
   if (route === 'GET /api/alerts') {
-    const [servicesView, stacksDoc, system] = await Promise.all([
+    const [servicesView, stacksDoc, system, storage, network, providers] = await Promise.all([
       model.getServicesView().catch(() => null),
       model.getStacksDoc().catch(() => null),
       collectSystem().catch(() => null),
+      // Phase 9: infrastructure evidence. Provider answers are cached and single-flighted by the
+      // registry, so this adds no polling — a provider is asked at most once per its TTL.
+      storageDocument({ detail: true }).catch(() => null),
+      networkDocument().catch(() => null),
+      describeProviders().catch(() => []),
     ]);
     const services = servicesView?.services || [];
     const stacks = (stacksDoc?.stacks || []).map((st) => ({
@@ -829,6 +858,7 @@ export async function handleApi(req, res, url) {
       dockerAvailable: servicesView ? servicesView.live !== false : true,
       services, stacks, system,
       authFailures: countRecentAuthFailures(),
+      storage, network, providers,
     });
     return send(res, 200, {
       at: new Date().toISOString(), alerts,
@@ -1635,6 +1665,11 @@ export function markBoot(t) { bootAt = t; }
 const V1_ROUTES = new Set([
   '/host', '/docker', '/networks', '/volumes', '/images', '/storage', '/version', '/resources',
   '/services', '/stacks', '/system', '/discovery', '/providers',
+  // Phase 9 — the OpusGrid infrastructure namespace (unversioned aliases work as before)
+  '/infrastructure', '/infrastructure/providers', '/infrastructure/storage',
+  '/infrastructure/storage/pool', '/infrastructure/storage/dataset', '/infrastructure/network',
+  '/infrastructure/power', '/infrastructure/opnsense', '/infrastructure/topology',
+  '/infrastructure/physical', '/infrastructure/provider',
   // Phase 8 — the canonical operations routes; the /:id and /:id/trail forms keep their v1
   // prefix because they are patterns, not fixed paths, and are matched by the handler itself.
   '/operations', '/operations/dry-run',

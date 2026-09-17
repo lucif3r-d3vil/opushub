@@ -212,9 +212,171 @@ const storageDoc = {
   at: Date.now(),
   providers: [
     { id: 'filesystem', label: 'Filesystems', available: true, reason: null, mounts: [{ mount: '/', device: '/dev/sda1', fs: 'ext4', total: 100_000_000_000, used: 40_000_000_000, free: 60_000_000_000, usedPct: 40 }], totals: { mounts: 1, total: 100_000_000_000, used: 40_000_000_000, free: 60_000_000_000 }, at: Date.now() },
-    { id: 'zfs', label: 'ZFS', available: 'not-implemented', reason: 'ZFS integration is not implemented yet.', pools: [], datasets: [], at: Date.now() },
+    { id: 'zfs', label: 'ZFS', available: false, reason: 'The ZFS command-line tools are not available to OpusHub.', pools: [], datasets: [], empty: false, at: Date.now() },
   ],
 };
+
+/* ------------------------------------------------------------------------
+   Phase 9 fixtures — the OpusGrid infrastructure surface.
+   Deliberately a *mixed* install: Docker and filesystems work, ZFS works,
+   the host network answers, and OPNsense / UPS / PDU are not configured.
+   That is the interesting case: everything optional being absent must read
+   as "not configured", never as unhealthy.
+   ------------------------------------------------------------------------ */
+
+const infraProviders = [
+  { id: 'docker', type: 'compute', name: 'Docker', domain: 'compute', optional: false, description: null, status: 'connected', statusLabel: 'Connected', capabilities: ['containers', 'networks', 'volumes', 'images'], active: ['containers', 'networks', 'volumes', 'images'], planned: [], version: '26.1.0', lastChecked: Date.now(), error: null },
+  { id: 'filesystem', type: 'storage', name: 'Filesystems', domain: 'storage', optional: false, description: null, status: 'available', statusLabel: 'Available', capabilities: ['filesystems'], active: ['filesystems'], planned: [], version: null, lastChecked: Date.now(), error: null },
+  { id: 'zfs', type: 'storage', name: 'ZFS', domain: 'storage', optional: true, description: null, status: 'available', statusLabel: 'Available', capabilities: ['pools', 'datasets'], active: ['pools', 'datasets'], planned: [], version: null, lastChecked: Date.now(), error: null },
+  { id: 'network', type: 'network', name: 'Host network', domain: 'network', optional: false, description: null, status: 'available', statusLabel: 'Available', capabilities: ['interfaces', 'routes', 'dns'], active: ['interfaces', 'routes', 'dns'], planned: [], version: null, lastChecked: Date.now(), error: null },
+  { id: 'opnsense', type: 'firewall', name: 'OPNsense', domain: 'external', optional: true, description: null, status: 'not-configured', statusLabel: 'Not configured', capabilities: ['system', 'interfaces', 'gateways', 'dns'], active: [], planned: ['dhcp', 'firewall'], version: null, lastChecked: Date.now(), error: { code: 'not_configured', reason: 'No OPNsense address is configured.' } },
+  { id: 'ups', type: 'power', name: 'UPS', domain: 'power', optional: true, description: null, status: 'not-configured', statusLabel: 'Not configured', capabilities: [], active: [], planned: ['status', 'batteryChargePct', 'runtimeSec'], version: null, lastChecked: Date.now(), error: { code: 'not_configured', reason: 'No UPS provider is configured.' } },
+  { id: 'pdu', type: 'power', name: 'PDU', domain: 'power', optional: true, description: null, status: 'not-configured', statusLabel: 'Not configured', capabilities: [], active: [], planned: ['outletCount', 'outletStatus'], version: null, lastChecked: Date.now(), error: { code: 'not_configured', reason: 'No PDU provider is configured.' } },
+];
+
+const infraStorageDoc = {
+  at: Date.now(),
+  providers: ['filesystem', 'zfs'],
+  filesystems: {
+    status: 'available', available: true, reason: null,
+    mounts: [
+      { mount: '/', device: '/dev/sda1', fs: 'ext4', total: 100_000_000_000, used: 40_000_000_000, free: 60_000_000_000, usedPct: 40 },
+      { mount: '/tank', device: 'tank', fs: 'zfs', total: 8_000_000_000_000, used: 3_200_000_000_000, free: 4_800_000_000_000, usedPct: 40 },
+    ],
+    mountCount: 2,
+    totals: { mounts: 2, total: 8_100_000_000_000, used: 3_240_000_000_000, free: 4_860_000_000_000 },
+    truncated: false,
+  },
+  zfs: {
+    status: 'available', available: true, reason: null,
+    pools: [
+      { name: 'tank', size: 8_000_000_000_000, allocated: 3_200_000_000_000, free: 4_800_000_000_000, fragmentationPct: 4, capacityPct: 40, health: 'ONLINE', usedPct: 40 },
+      { name: 'backup', size: 2_000_000_000_000, allocated: 1_900_000_000_000, free: 100_000_000_000, fragmentationPct: 12, capacityPct: 95, health: 'DEGRADED', usedPct: 95 },
+    ],
+    poolCount: 2,
+    datasets: [
+      { name: 'tank', pool: 'tank', used: 3_200_000_000_000, available: 4_800_000_000_000, referenced: 256_000_000, mountpoint: '/tank', compression: 'lz4', recordsize: 131072, quota: null, quotaUsedPct: null },
+      { name: 'tank/media', pool: 'tank', used: 2_000_000_000_000, available: 4_800_000_000_000, referenced: 2_000_000_000_000, mountpoint: '/tank/media', compression: 'lz4', recordsize: 1048576, quota: 3_000_000_000_000, quotaUsedPct: 66 },
+    ],
+    datasetCount: 2,
+    truncated: false,
+    empty: false,
+  },
+};
+
+const infraNetworkDoc = {
+  at: Date.now(),
+  providers: ['network', 'docker'],
+  status: 'available', reason: null,
+  interfaces: [
+    { name: 'eth0', kind: 'ethernet', state: 'up', up: true, mtu: 1500, speedMbps: 1000,
+      addresses: [{ address: '198.51.100.20', family: 'ipv4', scope: 'global', prefixLength: 24 }],
+      rx: { bytes: 40_000_000_000, packets: 30_000_000, errors: 0, dropped: 0 },
+      tx: { bytes: 12_000_000_000, packets: 9_000_000, errors: 0, dropped: 0 } },
+    { name: 'docker0', kind: 'bridge', state: 'up', up: true, mtu: 1500, speedMbps: null,
+      addresses: [{ address: '172.17.0.1', family: 'ipv4', scope: 'global', prefixLength: 16 }],
+      rx: { bytes: 1_000_000, packets: 2_000, errors: 0, dropped: 0 },
+      tx: { bytes: 2_000_000, packets: 3_000, errors: 0, dropped: 0 } },
+  ],
+  interfaceCount: 2,
+  counts: { interfaces: 2, up: 2, withAddress: 2 },
+  routes: { defaultRoute: { via: '198.51.100.1', iface: 'eth0', protocol: 'ipv4' }, defaultRoutes: [{ via: '198.51.100.1', iface: 'eth0', protocol: 'ipv4' }], routeCount: 4, routeCount6: 1, tableAvailable: false, note: 'Only the default route is shown. The full routing table is not exposed.' },
+  dns: { available: true, nameservers: ['127.0.0.53'], search: ['lan'], source: 'resolv.conf', viaStubResolver: true, note: null },
+  scope: 'container', scopeNote: 'OpusHub is reading the network namespace it runs in.',
+  docker: { live: true, networks: [{ name: 'proxy', driver: 'bridge', scope: 'local', containerCount: 2, internal: false, attachable: true }], networkCount: 2, reason: null },
+};
+
+const infraOpnsenseDoc = {
+  at: Date.now(),
+  providers: ['opnsense'],
+  opnsense: {
+    status: 'not-configured', configured: false, url: null, credentialSource: 'environment',
+    credentialPresent: false, version: null, reason: 'No OPNsense address is configured.',
+    capabilities: [
+      { id: 'system', label: 'System status', status: 'unavailable', reason: null },
+      { id: 'interfaces', label: 'Interfaces', status: 'unavailable', reason: null },
+      { id: 'gateways', label: 'Gateways', status: 'unavailable', reason: null },
+      { id: 'dns', label: 'DNS resolver', status: 'unavailable', reason: null },
+      { id: 'dhcp', label: 'DHCP leases', status: 'planned', reason: 'Planned for a later phase.' },
+      { id: 'firewall', label: 'Firewall state', status: 'planned', reason: 'Planned for a later phase.' },
+    ],
+    planned: ['dhcp', 'firewall'], system: null, interfaces: null, gateways: null, dns: null,
+  },
+};
+
+const infraPowerDoc = {
+  at: Date.now(),
+  providers: ['ups', 'pdu'],
+  ups: { status: 'not-configured', reason: 'No UPS provider is configured. OpusHub does not detect power hardware on its own.', device: null, fields: { status: null, batteryChargePct: null, runtimeSec: null }, planned: ['status', 'batteryChargePct', 'runtimeSec'], refused: ['ups.shutdown', 'ups.test.battery'], note: 'Read-only when implemented.' },
+  pdu: { status: 'not-configured', reason: 'No PDU provider is configured. OpusHub does not detect power hardware on its own.', device: null, fields: { outletCount: null, outletStatus: null }, planned: ['outletCount', 'outletStatus'], refused: ['pdu.outlet.on', 'pdu.outlet.off', 'pdu.outlet.cycle'], note: 'Read-only when implemented.' },
+  note: 'Power devices are read-only when implemented. Outlet switching and UPS shutdown are not part of OpusHub.',
+};
+
+const infraTopologyDoc = {
+  at: Date.now(),
+  nodes: [
+    { id: 'host', label: 'opusgrid', sub: 'host', kind: 'host', layer: 'compute', source: 'discovered', state: null, href: '/host', note: null },
+    { id: 'docker', label: 'Docker', sub: 'container engine', kind: 'docker', layer: 'compute', source: 'discovered', state: null, href: null, note: null },
+    { id: 'net:proxy', label: 'proxy', sub: 'bridge · 2 attached', kind: 'network', layer: 'network', source: 'discovered', state: null, href: null, note: null },
+    { id: 'iface:eth0', label: 'eth0', sub: 'up · 198.51.100.20', kind: 'interface', layer: 'network', source: 'discovered', state: 'up', href: null, note: null },
+    { id: 'pool:tank', label: 'tank', sub: 'ONLINE · 40% used', kind: 'pool', layer: 'storage', source: 'discovered', state: 'online', href: '/infrastructure?tab=storage&pool=tank', note: null },
+    { id: 'ds:tank/media', label: 'tank/media', sub: '/tank/media', kind: 'dataset', layer: 'storage', source: 'discovered', state: null, href: '/infrastructure?tab=storage&dataset=tank/media', note: null },
+    { id: 'svc:wave', label: 'Wave', sub: 'Music', kind: 'service', layer: 'services', source: 'discovered', state: 'running', href: '/services/Music/wave', note: null },
+  ],
+  edges: [
+    { from: 'host', to: 'docker', source: 'discovered', kind: 'runs', label: null },
+    { from: 'docker', to: 'net:proxy', source: 'discovered', kind: 'provides', label: null },
+    { from: 'host', to: 'iface:eth0', source: 'discovered', kind: 'has', label: null },
+    { from: 'host', to: 'pool:tank', source: 'discovered', kind: 'has', label: null },
+    { from: 'pool:tank', to: 'ds:tank/media', source: 'discovered', kind: 'contains', label: null },
+    { from: 'net:proxy', to: 'svc:wave', source: 'discovered', kind: 'attaches', label: null },
+  ],
+  layers: { physical: 0, network: 2, compute: 2, storage: 2, services: 1 },
+  sources: { discovered: 6, configured: 0 },
+  physical: { available: false, configured: false, reason: 'No physical topology is configured.', nodes: 0, links: 0 },
+  rule: 'Every link is either proven by a provider or configured by you. Nothing is inferred.',
+};
+
+const gridDoc = {
+  at: Date.now(),
+  health: {
+    status: 'degraded',
+    domains: {
+      compute: { domain: 'compute', label: 'Compute', status: 'healthy', reasons: [], providers: ['docker'], alerts: 0 },
+      storage: { domain: 'storage', label: 'Storage', status: 'healthy', reasons: [], providers: ['filesystem', 'zfs'], alerts: 0 },
+      network: { domain: 'network', label: 'Network', status: 'healthy', reasons: [], providers: ['network'], alerts: 0 },
+      power: { domain: 'power', label: 'Power', status: 'not-configured', reasons: ['UPS: not configured', 'PDU: not configured'], providers: ['ups', 'pdu'], alerts: 0 },
+      external: { domain: 'external', label: 'External', status: 'not-configured', reasons: ['OPNsense: No OPNsense address is configured.'], providers: ['opnsense'], alerts: 0 },
+    },
+    counts: { healthy: 3, degraded: 0, unavailable: 0, notConfigured: 2, unknown: 0 },
+    note: 'Optional providers that are not configured are excluded from the overall verdict.',
+  },
+  providers: infraProviders,
+  domains: {
+    compute: { at: Date.now(), providers: ['docker'], docker: { status: 'connected', version: '26.1.0', reason: null, live: true, counts: { containers: 3, running: 2, stopped: 1, stacks: 1 }, lastKnown: null } },
+    storage: infraStorageDoc,
+    network: { ...infraNetworkDoc, interfaces: [], summaryOnly: true },
+    power: { at: Date.now(), providers: ['ups', 'pdu'], ups: infraPowerDoc.ups, pdu: infraPowerDoc.pdu, summaryOnly: true },
+    external: { at: Date.now(), providers: ['opnsense'], opnsense: infraOpnsenseDoc.opnsense, summaryOnly: true },
+  },
+};
+
+const poolDetailDoc = {
+  at: Date.now(), name: 'tank', size: 8_000_000_000_000, allocated: 3_200_000_000_000, free: 4_800_000_000_000,
+  fragmentationPct: 4, capacityPct: 40, health: 'ONLINE', usedPct: 40,
+  topology: {
+    available: true, reason: null,
+    vdevs: [
+      { name: 'mirror-0', pathHidden: false, depth: 1, size: 4_000_000_000_000, allocated: 1_600_000_000_000, free: 2_400_000_000_000, fragmentationPct: 4, capacityPct: 40, health: 'ONLINE', children: [
+        { name: 'sda', pathHidden: true, depth: 2, size: null, allocated: null, free: null, fragmentationPct: null, capacityPct: null, health: 'ONLINE', children: [] },
+      ] },
+    ],
+  },
+  datasets: [infraStorageDoc.zfs.datasets[1]],
+};
+
+const datasetDetailDoc = { at: Date.now(), ...infraStorageDoc.zfs.datasets[1] };
+
 const alertsDoc = {
   at: new Date().toISOString(),
   alerts: [
@@ -311,6 +473,17 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
     '/api/services/Music/wave/health': waveHealth,
     '/api/alerts': alertsDoc,
     '/api/updates': updatesDoc,
+    // Phase 9 — the OpusGrid surface
+    '/api/infrastructure': gridDoc,
+    '/api/infrastructure/providers': { at: Date.now(), providers: infraProviders, count: infraProviders.length },
+    '/api/infrastructure/storage': infraStorageDoc,
+    '/api/infrastructure/network': infraNetworkDoc,
+    '/api/infrastructure/opnsense': infraOpnsenseDoc,
+    '/api/infrastructure/power': infraPowerDoc,
+    '/api/infrastructure/topology': infraTopologyDoc,
+    '/api/infrastructure/storage/pool': poolDetailDoc,
+    '/api/infrastructure/storage/dataset': datasetDetailDoc,
+    '/api/infrastructure/physical': { available: false, configured: false, nodes: [], links: [], reason: 'No physical topology is configured.', error: null, file: 'topology.yaml', at: Date.now() },
   };
 }
 
@@ -1754,7 +1927,7 @@ export async function runWebTests(): Promise<WebResult> {
     await h.waitFor(() => text().includes('26.1.0'), 'the engine version');
     expect(text().includes('opusgrid'), 'the hostname is missing');
     expect(text().includes('Intel N100'), 'the CPU model is missing');
-    for (const tab of ['Docker', 'Networks', 'Volumes', 'Images', 'Topology']) {
+    for (const tab of ['Docker', 'Storage', 'Network', 'Power', 'Docker networks', 'Volumes', 'Images', 'Topology']) {
       expect(text().includes(tab), `the ${tab} tab is missing`);
     }
     const vols = qa('button, a').find((el) => text(el).trim() === 'Volumes');
