@@ -28,7 +28,12 @@ const listeners = new Set();
 const recentSignatures = new Map();
 
 export const SEVERITIES = ['info', 'notice', 'warning', 'critical'];
-export const CATEGORIES = ['service', 'stack', 'docker', 'system', 'security', 'config'];
+// Phase 9 adds the infrastructure areas. `provider` stays mapped to `docker` in the derived table
+// below: `provider.unavailable` has always meant "the Docker provider went away", and re-filing
+// six phases of history under a new heading would be a change nobody asked for. New Phase-9
+// events name their category explicitly instead.
+export const CATEGORIES = ['service', 'stack', 'docker', 'system', 'security', 'config',
+  'storage', 'network', 'power', 'provider'];
 
 const CATEGORY_BY_TYPE = new Map(Object.entries({
   container: 'docker', provider: 'docker', stack: 'stack', service: 'service', alert: 'system',
@@ -37,6 +42,10 @@ const CATEGORY_BY_TYPE = new Map(Object.entries({
   // Phase 8: an operation is something a person did to a service, so it belongs beside the
   // service it happened to — not buried in "configuration" or lost in "docker".
   operation: 'service',
+  // Phase 9: infrastructure domains.
+  zfs: 'storage', storage: 'storage', dataset: 'storage',
+  network: 'network',
+  ups: 'power', pdu: 'power', power: 'power',
 }));
 
 /** Classify an event for filtering and display. Pure — also applied to pre-7E log lines on read. */
