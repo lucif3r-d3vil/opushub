@@ -909,3 +909,79 @@
 @media (prefers-reduced-motion: reduce) {
   .op-spinner { animation: none; border-top-color: var(--accent); opacity: 0.9; }
 }
+
+/* =========================================================================
+   Phase 9 — OpusGrid infrastructure
+   The same restraint as the rest of the design system: proportional bars for
+   quantities (never decorative charts), words for status, and one quiet
+   surface per concept. Nothing here animates for its own sake.
+   ========================================================================= */
+
+/* the compact global infrastructure status */
+.infra-strip {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 1px; background: var(--hair); border: 1px solid var(--hair);
+  border-radius: var(--r-lg); overflow: hidden; margin-bottom: var(--sp-8);
+}
+.infra-strip > div { background: var(--surface); padding: 10px var(--sp-5); display: flex; align-items: center; gap: 9px; min-width: 0; }
+.infra-strip .k { color: var(--ink-3); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.infra-strip .v { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: var(--fs-meta); white-space: nowrap; }
+
+/* storage */
+.storage-total { display: flex; align-items: baseline; gap: var(--sp-2) var(--sp-5); flex-wrap: wrap; margin-bottom: var(--sp-4); }
+.storage-total .num { font-size: var(--fs-big-num); font-weight: 620; letter-spacing: var(--track-display); color: var(--ink); }
+.storage-total .of { color: var(--ink-3); font-size: var(--fs-meta); }
+
+.cap-bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--ink) 10%, transparent); overflow: hidden; margin: 8px 0 4px; }
+.cap-bar > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.cap-bar.warn > i { background: var(--warn); }
+.cap-bar.fail > i { background: var(--fail); }
+.cap-legend { display: flex; gap: var(--sp-4); flex-wrap: wrap; color: var(--ink-3); font-size: var(--fs-meta); }
+
+.pool-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--sp-5); }
+.pool-card {
+  display: block; width: 100%; text-align: left; border: 1px solid var(--hair); border-radius: var(--r-lg);
+  background: var(--surface); padding: var(--sp-5); transition: border-color var(--t-fast), background var(--t-fast);
+}
+.pool-card:hover { border-color: var(--hair-strong); background: var(--surface-2); }
+.pool-card .pool-name { font-size: 16px; font-weight: 620; letter-spacing: var(--track-tight); }
+.pool-card .pool-health { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-meta); color: var(--ink-2); margin-top: 2px; }
+
+.ds-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 90px; gap: var(--sp-4); align-items: center; padding: 11px var(--sp-2); border-bottom: 1px solid var(--hair); width: 100%; text-align: left; }
+.ds-row:last-child { border-bottom: 0; }
+.ds-row:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+@media (max-width: 720px) { .ds-row { grid-template-columns: minmax(0, 1fr) 90px; } .ds-row .ds-avail { display: none; } }
+
+.vdev { padding: 6px 0 6px var(--sp-4); border-left: 1px solid var(--hair); margin-left: 4px; }
+.vdev-row { display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; padding: 3px 0; }
+.vdev-row .nm { font-weight: 560; }
+.vdev-row .meta { color: var(--ink-3); font-size: var(--fs-meta); }
+.vdev-redacted { color: var(--ink-3); font-size: var(--fs-micro); }
+
+/* network */
+.if-row { display: grid; grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--sp-4); align-items: center; padding: 12px var(--sp-2); border-bottom: 1px solid var(--hair); }
+.if-row:last-child { border-bottom: 0; }
+.if-row .if-name { font-weight: 560; display: flex; align-items: center; gap: 8px; }
+.if-row .if-state { font-size: var(--fs-meta); color: var(--ink-3); }
+@media (max-width: 860px) { .if-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .if-row .if-traffic { display: none; } }
+
+/* topology layers */
+.topo-bar { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-4); }
+.topo-bar .seg { flex-wrap: wrap; }
+.topo-search { max-width: 260px; }
+.topo-legend { display: flex; gap: var(--sp-5); flex-wrap: wrap; color: var(--ink-3); font-size: var(--fs-meta); margin-top: var(--sp-4); }
+.topo-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.topo-line { fill: none; stroke-width: 1.4; stroke: var(--hair); }
+.topo-line.discovered { stroke: var(--hair-strong); }
+.topo-line.configured { stroke-dasharray: 5 4; stroke: color-mix(in srgb, var(--accent) 60%, var(--hair)); }
+.topo-line.hot { stroke: var(--accent); stroke-width: 2; }
+.topo-node.dim, .topo-line.dim { opacity: 0.25; }
+.topo-box.physical { stroke-dasharray: 4 3; }
+.topo-list-layer { color: var(--ink-3); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin: var(--sp-6) 0 var(--sp-2); }
+
+/* host detail */
+.host-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 var(--sp-12); }
+
+/* the topology legend's own little line samples */
+.topo-legend i.topo-legend-line { display: inline-block; width: 22px; height: 0; border-top: 1.5px solid var(--hair-strong); }
+.topo-legend i.topo-legend-line.configured { border-top-style: dashed; border-color: color-mix(in srgb, var(--accent) 60%, var(--hair)); }

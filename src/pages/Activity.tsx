@@ -31,6 +31,10 @@ const CATEGORIES: { value: '' | EventCategory; label: string }[] = [
   { value: 'system', label: 'System' },
   { value: 'security', label: 'Security' },
   { value: 'config', label: 'Configuration' },
+  { value: 'storage', label: 'Storage' },
+  { value: 'network', label: 'Network' },
+  { value: 'power', label: 'Power' },
+  { value: 'provider', label: 'Providers' },
 ];
 
 const SEVERITIES: { value: '' | EventSeverity; label: string }[] = [

@@ -81,6 +81,15 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     { title: 'Go Activity', subtitle: 'What happened, when', kind: 'action', href: '/activity', keywords: ['events', 'timeline', 'history', 'log'] },
     { title: 'Go Settings', subtitle: 'Everything you can change', kind: 'action', href: '/settings/appearance', keywords: ['preferences', 'config'] },
     { title: 'Go Icons', subtitle: 'Icon browser', kind: 'action', href: '/icons', keywords: ['glyphs', 'logos'] },
+    // Phase 9 — infrastructure navigation. Destinations only: the palette opens a page, it never
+    // operates on anything.
+    { title: 'Open Infrastructure', subtitle: 'Engine, storage, network, power, topology', kind: 'action', href: '/infrastructure', keywords: ['docker', 'engine', 'infrastructure', 'opusgrid'] },
+    { title: 'Open Host', subtitle: 'The machine OpusGrid runs on', kind: 'action', href: '/host', keywords: ['machine', 'server', 'node', 'identity', 'providers'] },
+    { title: 'Open Storage', subtitle: 'Filesystems, ZFS pools and datasets', kind: 'action', href: '/infrastructure?tab=storage', keywords: ['disk', 'zfs', 'pool', 'dataset', 'mount', 'capacity'] },
+    { title: 'Open Network', subtitle: 'Interfaces, routing, DNS, OPNsense', kind: 'action', href: '/infrastructure?tab=network', keywords: ['interface', 'route', 'gateway', 'dns', 'opnsense'] },
+    { title: 'Open Power', subtitle: 'UPS and PDU', kind: 'action', href: '/infrastructure?tab=power', keywords: ['ups', 'pdu', 'battery', 'outlet'] },
+    { title: 'Open Topology', subtitle: 'How the OpusGrid fits together', kind: 'action', href: '/infrastructure?tab=topology', keywords: ['graph', 'map', 'layers', 'physical'] },
+    { title: 'Open Connections', subtitle: 'Provider status and capabilities', kind: 'action', href: '/settings/connections', keywords: ['provider', 'opnsense', 'ups', 'pdu', 'zfs', 'capability'] },
     // presentation — no infrastructure mutation, ever
     {
       title: settings?.appearance.theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode',

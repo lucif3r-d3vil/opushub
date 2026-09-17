@@ -7,14 +7,24 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { usePolled } from '../lib/api';
 import { bytes, pct, relTime, uptime } from '../lib/format';
 import { useSettings } from '../lib/theme';
-import type { DockerDoc, HostDoc, ImagesDoc, NetworksDoc, ResourcesDoc, ServicesDoc, StorageDoc, VolumesDoc } from '../lib/types';
+import type {
+  DockerDoc, ExternalDomainDoc, HostDoc, ImagesDoc, NetworksDoc, OpusGridDoc, PowerDomainDoc,
+  ResourcesDoc, ServicesDoc, StorageDoc, StorageDomainDoc, TopologyDoc, VolumesDoc,
+} from '../lib/types';
 import { Loading, PageHero, ProviderNote, StatusLine } from '../components/ui';
-import { Topology } from '../components/Topology';
+import { OpusGridTopology } from '../components/OpusGridTopology';
+import { InfraStatusStrip } from '../components/InfraStatusStrip';
+import { StoragePanel } from '../components/infrastructure/StoragePanel';
+import { NetworkPanel } from '../components/infrastructure/NetworkPanel';
+import { PowerPanel } from '../components/infrastructure/PowerPanel';
 
-type Tab = 'docker' | 'networks' | 'volumes' | 'images' | 'topology';
+type Tab = 'docker' | 'storage' | 'network' | 'power' | 'networks' | 'volumes' | 'images' | 'topology';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'docker', label: 'Docker' },
-  { id: 'networks', label: 'Networks' },
+  { id: 'storage', label: 'Storage' },
+  { id: 'network', label: 'Network' },
+  { id: 'power', label: 'Power' },
+  { id: 'networks', label: 'Docker networks' },
   { id: 'volumes', label: 'Volumes' },
   { id: 'images', label: 'Images' },
   { id: 'topology', label: 'Topology' },
@@ -48,6 +58,11 @@ export default function InfrastructurePage() {
   const tab = (params.get('tab') as Tab) || 'docker';
   const active: Tab = TABS.some((t) => t.id === tab) ? tab : 'docker';
   const setTab = (t: Tab) => setParams(t === 'docker' ? {} : { tab: t }, { replace: true });
+  // Storage detail is a URL of its own, so a pool or a dataset can be linked to and reloaded.
+  const pool = params.get('pool');
+  const dataset = params.get('dataset');
+  const selectPool = (name: string | null) => setParams(name ? { tab: 'storage', pool: name } : { tab: 'storage' }, { replace: true });
+  const selectDataset = (name: string | null) => setParams(name ? { tab: 'storage', dataset: name } : { tab: 'storage' }, { replace: true });
   const poll = (settings?.behavior?.refresh?.services ?? 30) * 1000;
 
   const host = usePolled<HostDoc>('/api/host', poll);
@@ -58,10 +73,19 @@ export default function InfrastructurePage() {
   const res = usePolled<ResourcesDoc>('/api/resources', poll);
   const stor = usePolled<StorageDoc>('/api/storage', poll);
   const svc = usePolled<ServicesDoc>('/api/services', poll);
+  // Phase 9 — the OpusGrid picture. The summary is always fetched (it carries the health strip);
+  // the heavy domains are fetched only for the tab that shows them, which is what keeps a
+  // poll of this page from asking for ZFS and OPNsense on every tick.
+  const grid = usePolled<OpusGridDoc>('/api/infrastructure', poll);
+  const storage = usePolled<StorageDomainDoc>(active === 'storage' ? '/api/infrastructure/storage' : null, Math.max(poll, 60_000));
+  const network = usePolled<import('../lib/types').NetworkDomainDoc>(active === 'network' ? '/api/infrastructure/network' : null, poll);
+  const external = usePolled<ExternalDomainDoc>(active === 'network' ? '/api/infrastructure/opnsense' : null, Math.max(poll, 60_000));
+  const power = usePolled<PowerDomainDoc>(active === 'power' ? '/api/infrastructure/power' : null, Math.max(poll, 300_000));
+  const topology = usePolled<TopologyDoc>(active === 'topology' ? '/api/infrastructure/topology' : null, Math.max(poll, 60_000));
 
   const live = eng.data?.live ?? nets.data?.live ?? true;
   const staleAt = eng.data?.lastKnown?.at ?? nets.data?.stale?.staleAt ?? null;
-  const retry = () => { host.refresh(); eng.refresh(); nets.refresh(); vols.refresh(); imgs.refresh(); res.refresh(); stor.refresh(); svc.refresh(); };
+  const retry = () => { host.refresh(); eng.refresh(); nets.refresh(); vols.refresh(); imgs.refresh(); res.refresh(); stor.refresh(); svc.refresh(); grid.refresh(); storage.refresh(); network.refresh(); external.refresh(); power.refresh(); topology.refresh(); };
 
   const volumeBytes = useMemo(() => {
     const list = vols.data?.volumes || [];
@@ -89,10 +113,13 @@ export default function InfrastructurePage() {
             <span>{counts?.volumes ?? '—'} volumes</span><span className="sep">·</span>
             <span>{counts?.images ?? '—'} images</span><span className="sep">·</span>
             <span>{eng.error ? 'refresh failed' : `updated ${relTime(eng.fetchedAt || Date.now())}`}</span>
+            <Link className="btn btn-quiet btn-sm" to="/host">Host →</Link>
             <button className="btn btn-quiet btn-sm" onClick={retry}>Retry</button>
           </>
         }
       />
+
+      <InfraStatusStrip health={grid.data?.health} providers={grid.data?.providers} />
 
       {!live && <StaleBanner at={staleAt} onRetry={retry} />}
       {loading && <Loading what="infrastructure" note="Reading the engine and the host." />}
@@ -170,9 +197,25 @@ export default function InfrastructurePage() {
         </div>
       )}
 
+      {active === 'storage' && (
+        <StoragePanel
+          storage={storage.data || grid.data?.domains.storage || null}
+          pool={pool}
+          dataset={dataset}
+          onSelectPool={selectPool}
+          onSelectDataset={selectDataset}
+        />
+      )}
+
+      {active === 'network' && (
+        <NetworkPanel network={network.data || null} external={external.data || null} />
+      )}
+
+      {active === 'power' && <PowerPanel power={power.data || null} />}
+
       {active === 'networks' && (
         <section className="sys-band">
-          <div className="sys-band-head"><h2>Networks</h2><span className="hint">{nets.data?.count ?? '—'} on this engine</span></div>
+          <div className="sys-band-head"><h2>Docker networks</h2><span className="hint">{nets.data?.count ?? '—'} on this engine</span></div>
           {!nets.data?.live && nets.data?.statusReason && <ProviderNote status="unavailable" reason={nets.data.statusReason} compact />}
           {(nets.data?.networks || []).map((n) => (
             <div className="disk-row" key={String(n.name)}>
@@ -238,12 +281,16 @@ export default function InfrastructurePage() {
       {active === 'topology' && (
         <>
           {!nets.data?.live && nets.data?.statusReason && <ProviderNote status="unavailable" reason={nets.data.statusReason} compact />}
-          {(nets.data?.networks?.length || svc.data?.services?.length) ? (
-            <Topology networks={nets.data?.networks || []} services={svc.data?.services || []} hostname={host.data?.host.hostname || null} />
-          ) : (
-            !loading && <ProviderNote status="unavailable" reason="Topology needs the engine's network map." compact />
+          {topology.data
+            ? <OpusGridTopology doc={topology.data} />
+            : !loading && <ProviderNote status="unavailable" reason="Topology needs at least one provider to answer." compact />}
+          {topology.data && !topology.data.physical.available && (
+            <ProviderNote
+              status="unconfigured"
+              reason="No physical topology is configured. The Physical layer stays empty until you describe it in config/topology.yaml — OpusHub will not guess what your rack looks like."
+              compact
+            />
           )}
-          <p className="stale-note" style={{ marginTop: 'var(--sp-4)' }}>Every link is a daemon-reported network attachment. Drag to pan, scroll to zoom, click a container to open it.</p>
         </>
       )}
     </>
