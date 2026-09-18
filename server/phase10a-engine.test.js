@@ -25,17 +25,21 @@ const httpMonitor = (name, extra = {}) => engine.createMonitor(
   {},
 );
 
-const clocked = (results) => {
-  let next = Date.now();
-  return { deps: { checkHttp: async () => { const r = results.shift(); next += 1000; return typeof r === 'function' ? r(next) : { ...r, at: next }; } } };
-};
+/**
+ * The synthetic clock for drive(): seeded from the real clock once, then moved forward by the
+ * checks themselves and never re-seeded. Sampling Date.now() at the start of every drive() let
+ * consecutive drives overlap or land on the same millisecond on a fast host, and the incident's
+ * duration then collapsed to exactly 0 (startedAt and recoveredAt clamped onto the same tick).
+ * One clock for the whole file also keeps check timestamps monotonic across tests.
+ */
+const synthetic = { at: Date.now() };
 
 /** Drive a monitor through a list of results, through the engine's own recording path. */
 async function drive(monitor, results) {
   let out = null;
-  let at = Date.now();
   for (const r of results) {
-    at += 1000;
+    synthetic.at += 1000;
+    const at = synthetic.at;
     out = await engine.runCheck(monitor, { at, deps: { checkHttp: async () => ({ ...r, at }) } });
   }
   return out;
