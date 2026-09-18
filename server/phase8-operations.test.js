@@ -527,14 +527,25 @@ test('a verified timeout reports the state it actually observed', async () => {
 /* -------------------------------- 8. failures ------------------------------ */
 
 test('docker unavailable: the operation is rejected, not queued', async () => {
-  const saved = process.env.OPUSHUB_DOCKER_SOCKET;
-  delete process.env.OPUSHUB_DOCKER_SOCKET;
+  // "Unavailable" must be created, not assumed: deleting OPUSHUB_DOCKER_SOCKET alone falls back to
+  // /var/run/docker.sock, which exists — and answers — on any host with a live daemon (a
+  // self-hosted runner, the OpusGrid host, a developer laptop). Pointing the socket at a path
+  // that is guaranteed not to exist produces the same refusal on every machine.
+  const saved = {
+    OPUSHUB_DOCKER_SOCKET: process.env.OPUSHUB_DOCKER_SOCKET,
+    DOCKER_HOST: process.env.DOCKER_HOST,
+  };
+  process.env.OPUSHUB_DOCKER_SOCKET = '/tmp/opushub-p8-no-such-engine.sock';
+  delete process.env.DOCKER_HOST;
   try {
     const r = await dryRun('container.restart', { type: 'service', id: 'jellyfin' });
     assert.equal(r.status, 503);
     assert.equal(r.json.operation.error.code, 'docker_unavailable');
   } finally {
-    process.env.OPUSHUB_DOCKER_SOCKET = saved;
+    if (saved.OPUSHUB_DOCKER_SOCKET === undefined) delete process.env.OPUSHUB_DOCKER_SOCKET;
+    else process.env.OPUSHUB_DOCKER_SOCKET = saved.OPUSHUB_DOCKER_SOCKET;
+    if (saved.DOCKER_HOST === undefined) delete process.env.DOCKER_HOST;
+    else process.env.DOCKER_HOST = saved.DOCKER_HOST;
   }
 });
 
