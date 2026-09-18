@@ -372,6 +372,15 @@ test('no server module outside the Docker client opens a socket to the engine', 
         // here is not an exemption from that proof: it is the acknowledgement that a second
         // client exists at all, so a third one cannot appear unnoticed.
         if (/providers[/\\]dockerOperations\.js$/.test(p)) continue;
+        // Phase 10A: the monitoring checks open sockets to *monitored endpoints* — that is the
+        // feature, not a second Docker client. They are named here rather than pattern-matched, and
+        // the exemption is paid for: server/phase10a-proof.test.js proves mechanically that neither
+        // file can build a Docker request (no socketPath, no /v<version> path, no container
+        // endpoint, no DOCKER_HOST) and that the TCP check connects to exactly one address.
+        if (/monitoring[/\\]checks[/\\](http|tcp)\.js$/.test(p)) {
+          assert.ok(!/socketPath|DOCKER_HOST|\/containers|docker/i.test(text), `${entry.name} mentions Docker`);
+          continue;
+        }
         offenders.push(path.relative(process.cwd(), p));
       }
     }
