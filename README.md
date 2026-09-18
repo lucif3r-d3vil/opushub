@@ -58,9 +58,10 @@ During development: `npm run dev:web` (vite build --watch) in one terminal and `
 | **Service page** (`/services/:group/:name`) | Identity, runtime stats (real, from Docker), infrastructure (ports/networks/volumes), related activity, Open/Logs actions only where actually implemented |
 | **Stacks** (`/stacks`) | Compose projects as Docker reports them (`com.docker.compose.project`), with their member containers, plus standalone containers; aggregate status |
 | **Stack page** (`/stacks/:name`) | Member containers with stats, ports, networks, volumes, logs drawer |
+| **Monitoring** (`/monitoring`) | OpusHub's own uptime engine: monitors over services (HTTP status, a TCP endpoint, Docker state), an honest state machine (`up` / `degraded` / `down` / `recovering` / `paused` / no verdict), incidents with real durations, bounded check history and uptime, and a monitor list grouped the way your services are. It detects and records — it never restarts anything |
 | **System** (`/system`) | CPU / memory / storage / network / host — oversized numerals, per-core grid, charts from a real 5s sample history, honest `Unavailable` where the kernel offers nothing |
 | **Activity** (`/activity`) | Timeline of real events: config writes, launches, app lifecycle, Docker state changes |
-| **Settings** (`/settings/…`) | Appearance (theme, accent, density), Background, Hub layout (composition presets + a live preview of the real Hub), Widgets, Templates, Services (customization overlay + icon picker), Groups, Bookmarks, Integrations, System (paths, discovery) and Advanced (custom CSS/JS, refresh intervals) |
+| **Settings** (`/settings/…`) | Appearance (theme, accent, density), Background, Hub layout (composition presets + a live preview of the real Hub), Widgets, Templates, Services (customization overlay + icon picker), Groups, Bookmarks, Integrations, Monitoring (check defaults, retention, internal targets, discovery), System (paths, discovery) and Advanced (custom CSS/JS, refresh intervals) |
 | **Icons** (`/icons`) | Bundled Lucide + Material Design Icons + Simple Icons (resolve offline), Iconify when online, your own files in `config/icons/`, monogram fallback by design |
 
 ## Configuration & `.env` discovery
@@ -182,6 +183,22 @@ index-addressed name field, a measured 1:1 chart region). The image is published
 compose file that installs it cleanly. Authentication is a door, not a control plane: nothing about
 the read-only boundary changed — no restart, exec, pull or deploy anywhere.
 
+**Phase 10A — the monitoring engine.** OpusHub now answers "is it up?" with its own engine: a
+monitor is a validated target (a service reference with a resolved endpoint, one explicit TCP
+host + port, or a canonical service reference for Docker state), checked from a single bounded
+scheduler with one timer and a bounded worker pool, evaluated by a documented state machine (three
+consecutive failures to call something down, two successes to call it back, `recovering` in
+between so a flapping service is visible rather than instant), and recorded as incidents with real
+durations, bounded check history and uptime that can never invent a check. It is provider-agnostic —
+a discovered endpoint can come from Traefik, a published port or your own override, and the monitor
+follows the service rather than freezing today's URL. Monitoring **detects and records only**: no
+notification of any kind, no container start/stop/restart, no shell, no Docker operation, no AI,
+and the Phase 8 operations engine is never invoked. Private, CGNAT and ULA targets are a deliberate,
+bounded capability (the homelab is *supposed* to be watched); loopback, link-local/metadata,
+multicast and friends are always refused, every resolved address and every redirect hop is
+re-checked, and a refused address is "no verdict" — never an outage. See
+`docs/12-phase-10a.md`.
+
 Run it on the LAN or behind a VPN — see `docs/07-distribution.md` for why, and `docs/06-auth.md` for
 what the login does and does not protect against.
 
@@ -189,22 +206,28 @@ what the login does and does not protect against.
 
 ```
 npm run check               # tsc + production build
-npm test                    # 240 tests: label grammar, URL precedence, the discovery join, layout v2
+npm test                    # 797 tests: label grammar, URL precedence, the discovery join, layout v2
                             # normalisation and templates, model integration (with and without
                             # overlays), provider, env, API boundary, the offline contract, the
                             # Phase 3 contract (detail/stats/logs/history/activity/stacks/security),
                             # and Phase 4 (password hashing/sessions/CSRF/throttle, the API door,
-                            # generic grouping, labels and packaging) — all against the mock engine
-npm run test:web            # 26 DOM interaction checks in jsdom: search hotkeys/arrows/Enter, widget
+                            # generic grouping, labels and packaging), and Phase 10A (the monitor
+                            # model, the state machine, the checks, the scheduler, the engine, the
+                            # monitoring API and the static security proofs) — all against the mock
+                            # engine
+npm run test:web            # 67 DOM interaction checks in jsdom: search hotkeys/arrows/Enter, widget
                             # menus writing the layout, keyboard reordering, preview inertness,
                             # shared-data request counts, the setup/login gate, the group-name
-                            # contract (service and bookmark groups), the anchored menu's placement
-                            # and the measured chart region (needs the jsdom devDependency)
+                            # contract (service and bookmark groups), the anchored menu's placement,
+                            # the measured chart region, and the monitoring pages (needs the jsdom
+                            # devDependency)
 npm run verify              # the whole API surface against a *scratch* config dir on its own port:
                             # empty config, overlay, hidden/reordered services, templates, search,
-                            # detail pages, provider-unavailable paths. Safe on a live host — your
-                            # config/ is never touched. OPUSHUB_DOCKER_SOCKET=/var/run/docker.sock
-                            # npm run verify points it at the real engine
+                            # detail pages, provider-unavailable paths, and the monitoring surface
+                            # incl. every target refusal (68 checks without a Docker engine, 110
+                            # with one). Safe on a live host — your config/ is never touched.
+                            # OPUSHUB_DOCKER_SOCKET=/var/run/docker.sock npm run verify points it
+                            # at the real engine
 npm run smoke               # server-render checks: every route renders; the Hub under thirteen data
                             # states (empty, docker off, providers down, unconfigured, hidden,
                             # reordered, unknown widget type, preview, loading, stacks rollup,
