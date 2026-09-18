@@ -9,7 +9,7 @@ export const STATUS_WORDS: Record<string, string> = {
   up: 'Online', down: 'Offline', unhealthy: 'Unhealthy', unmanaged: 'Not linked',
   unavailable: 'Unavailable', restarting: 'Restarting', paused: 'Paused', created: 'Created',
   operational: 'Operational', degraded: 'Degraded', attention: 'Needs attention', unlinked: 'Unlinked',
-  stopped: 'Stopped', unknown: 'Unknown',
+  stopped: 'Stopped', unknown: 'Unknown', recovering: 'Recovering', pending: 'Not checked yet',
   ok: 'Available', error: 'Error', partial: 'Partial', unconfigured: 'Not configured', idle: 'Idle',
   available: 'Available', healthy: 'Healthy', unreachable: 'Unreachable', starting: 'Starting',
 };

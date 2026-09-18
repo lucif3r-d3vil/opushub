@@ -10,10 +10,11 @@ import { Link, useParams } from 'react-router-dom';
 import { api, usePolled } from '../lib/api';
 import { bytes, pct, relTime, uptime } from '../lib/format';
 import { useSettings } from '../lib/theme';
-import type { ActivityEvent, ContainerStats, ImageInfo, Service, ServiceHealthDoc, ServiceHistoryDoc, Stack, StatsSample, SystemSnapshot } from '../lib/types';
+import type { ActivityEvent, ContainerStats, ImageInfo, MonitoringOverview, Service, ServiceHealthDoc, ServiceHistoryDoc, Stack, StatsSample, SystemSnapshot } from '../lib/types';
 import { Icon } from '../components/Icon';
 import { AreaChart, MeterBar, Sparkline } from '../components/Charts';
 import { Freshness, Loading, OpenLink, ProviderNote, SectionHead, StatusLine } from '../components/ui';
+import { StateBadge, TargetLine, TypeChip, UptimeValue } from '../components/monitoring/parts';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
 import { ServiceActions, RecentOperations } from '../components/ServiceActions';
@@ -83,6 +84,12 @@ export default function ServiceDetail() {
   const health = usePolled<ServiceHealthDoc>(data?.service ? `${basePath}/health` : null, 60_000);
   const history = usePolled<ServiceHistoryDoc>(data?.service ? `${basePath}/history?limit=12` : null, 60_000);
   const activity = usePolled<{ items: ActivityEvent[] }>(`/api/activity?limit=40`, 60_000);
+  // Phase 10A — the monitors that watch *this* service. A filtered read of the monitoring store:
+  // this block never runs a check and never duplicates the engine.
+  const monitors = usePolled<MonitoringOverview>(
+    data?.service ? `/api/monitoring?service=${encodeURIComponent(group ? `${group}/${name}` : name)}` : null,
+    30_000,
+  );
   const sys = usePolled<SystemSnapshot>('/api/system', 10_000);
   // operations for THIS service, as the server recorded them (bounded, newest first)
   const ops = usePolled<{ operations: { id: string; action: string; status: string; at: number; actor: string | null }[] }>(
@@ -243,6 +250,23 @@ export default function ServiceDetail() {
             ) : (
               <DockerOffNote reason={s.statusReason || null} />
             )}
+          </section>
+
+          {/* ── monitoring: what OpusHub watches, read from the monitoring store ── */}
+          <section className="detail-block" aria-labelledby="mon-head">
+            <SectionHead
+              id="mon-head"
+              title="Monitoring"
+              right={<Link className="section-link" to="/monitoring">Open monitoring →</Link>}
+            />
+            <ServiceMonitors
+              doc={monitors.data}
+              error={monitors.error}
+              group={s.group}
+              name={s.name}
+              displayName={s.displayName}
+              hasEndpoint={!!s.url}
+            />
           </section>
 
           {/* ── resources: live readings + compact history, on demand only ── */}
@@ -460,6 +484,70 @@ export default function ServiceDetail() {
  * \"Healthy\" is only ever shown with the evidence that earned it; anything less says what is
  * missing instead of rounding up.
  */
+/**
+ * The per-service monitoring block.
+ *
+ * Three honest states: monitors exist (list them, with a way to open each one), none exist (offer
+ * to configure one — preferring the endpoint OpusHub already resolved for this service), or the
+ * monitoring engine is not reachable (say so, and leave the rest of the page alone).
+ */
+function ServiceMonitors({ doc, error, group, name, displayName, hasEndpoint }: {
+  doc: MonitoringOverview | null; error: string | null; group: string; name: string; displayName: string; hasEndpoint: boolean;
+}) {
+  const configureHref = `/monitoring?service=${encodeURIComponent(`${group || 'Other'}/${name}`)}&add=1`;
+  if (error && !doc) {
+    return (
+      <ProviderNote
+        compact
+        status="unavailable"
+        reason="Monitoring is unavailable right now, so what watches this service cannot be read. Service state above is unaffected."
+        fixHref="/monitoring"
+        fixLabel="Open monitoring →"
+      />
+    );
+  }
+  if (!doc) return <p className="stale-note">Reading monitors…</p>;
+  const list = doc.monitors;
+  if (!list.length) {
+    return (
+      <>
+        <p className="stale-note" style={{ marginTop: 0 }}>
+          Nothing watches {displayName} yet. A monitor checks it on its own schedule and records state,
+          latency and incidents — it never changes anything.
+        </p>
+        <div className="mon-actions">
+          <Link className="btn btn-quiet btn-sm" to={configureHref}>Configure a monitor</Link>
+          <Link className="btn btn-quiet btn-sm" to="/monitoring">Open monitoring</Link>
+          {!hasEndpoint && <span className="stale-note">No endpoint is known for this service, so a Docker or TCP monitor is the natural choice.</span>}
+        </div>
+      </>
+    );
+  }
+  const engineDown = doc.engine.state === 'stopped' || doc.engine.state === 'unavailable';
+  return (
+    <>
+      {engineDown && <p className="stale-note" role="status">Monitoring is {doc.engine.state} — the states below are the last recorded ones.</p>}
+      <div className="mon-list">
+        {list.map((m) => (
+          <div className="mon-row" key={m.id}>
+            <Link className="mon-row-main" to={`/monitoring/${m.id}`}>
+              <span className="mon-row-name">{m.name}</span>
+              <TypeChip monitor={m} />
+              <TargetLine monitor={m} />
+              <UptimeValue window={m.uptime ?? null} label="last 24h" />
+              <StateBadge state={m.enabled ? m.status : 'paused'} stale={m.stale} />
+            </Link>
+          </div>
+        ))}
+      </div>
+      <div className="mon-actions">
+        <Link className="btn btn-quiet btn-sm" to={configureHref}>Add another monitor</Link>
+        <Link className="btn btn-quiet btn-sm" to="/monitoring">Open monitoring</Link>
+      </div>
+    </>
+  );
+}
+
 function HealthStrip({ doc, uptime: up, onRefresh }: { doc: ServiceHealthDoc; uptime: string | null; onRefresh: () => void }) {
   const h = doc.health;
   const p = doc.probe;

@@ -996,3 +996,197 @@ export interface AlertsDoc {
   counts: { critical: number; warning: number };
   channels: AlertChannel[];
 }
+
+/* ------------------------------------------------------------------ */
+/* Monitoring (Phase 10A)                                              */
+/* ------------------------------------------------------------------ */
+
+/** The states a monitor can be in. `pending`/`unknown` are "no verdict yet", not health claims. */
+export type MonitorState = 'pending' | 'up' | 'degraded' | 'down' | 'recovering' | 'paused' | 'unknown';
+export type MonitorType = 'http' | 'tcp' | 'docker';
+export type MonitorProvenance = 'discovered' | 'configured' | 'imported';
+
+export interface MonitorTarget {
+  kind: MonitorType;
+  service: { group: string | null; name: string } | null;
+  url?: string | null;
+  host?: string;
+  port?: number;
+  /**
+   * Where the last check actually reached: `public`, `internal` (RFC1918/CGNAT/ULA) or `mixed`.
+   * `null`/absent means "not measured yet" — never "public". The server records it; the UI states it.
+   */
+  scope?: 'public' | 'internal' | 'mixed' | null;
+  scopeAt?: number | null;
+}
+
+/** Where a discovered endpoint came from. Descriptive only — nothing depends on a provider. */
+export interface MonitorSource { kind: string; provider: string | null; urlSource: string | null; note: string | null }
+
+export interface MonitorCheck {
+  at: number;
+  kind: 'ok' | 'degraded' | 'fail' | 'unknown';
+  statusCode: number | null;
+  latencyMs: number | null;
+  reason: string | null;
+  code?: string | null;
+  errorType?: string | null;
+  hops?: number;
+  evidence?: Record<string, unknown> | null;
+}
+
+export interface Monitor {
+  id: string;
+  name: string;
+  type: MonitorType;
+  target: MonitorTarget;
+  intervalMs: number;
+  timeoutMs: number;
+  enabled: boolean;
+  expected: { status: number | null; min: number | null; max: number | null };
+  provenance: MonitorProvenance;
+  source: MonitorSource | null;
+  description: string | null;
+  status: MonitorState;
+  storedStatus?: MonitorState;
+  /** set only when the monitor is inside a maintenance window right now */
+  maintenance?: { until: number; reason: string | null; startedAt: number } | null;
+  /** today's uptime, present when the list was asked for it (`?include=uptime`) */
+  uptime?: UptimeWindow | null;
+  latencyMs: number | null;
+  lastCheck: MonitorCheck | null;
+  nextCheck: number | null;
+  failureCount: number;
+  successCount: number;
+  consecutiveFailures: number;
+  consecutiveSuccesses: number;
+  targetStale: boolean;
+  createdAt: number;
+  updatedAt: number;
+  group?: string | null;
+  stale?: boolean;
+  downSince?: number | null;
+}
+
+export interface UptimeWindow {
+  windowMs: number;
+  from: number;
+  to: number;
+  checks: number;
+  ok: number;
+  degraded: number;
+  fail: number;
+  unknown: number;
+  judged: number;
+  uptimePct: number | null;
+  degradedPct: number | null;
+  avgLatencyMs: number | null;
+  minLatencyMs: number | null;
+  maxLatencyMs: number | null;
+  noData: boolean;
+  paused: boolean;
+  coverageFrom: number | null;
+  coverageTo: number | null;
+}
+
+export interface MonitorIncident {
+  id: string;
+  monitorId: string;
+  monitorName: string;
+  monitorType: MonitorType;
+  /** the monitor's type, repeated on the incident so a list needs no join */
+  type: MonitorType;
+  service: { group: string | null; name: string } | null;
+  startedAt: number;
+  detectedAt: number;
+  recoveredAt: number | null;
+  durationMs: number;
+  open: boolean;
+  status: 'open' | 'recovering' | 'resolved';
+  reason: string;
+  failureCount: number;
+  maintenance: boolean;
+  suppressed: boolean;
+  resolvedBy: string | null;
+}
+
+export interface MonitoringEngineHealth {
+  at: number;
+  state: 'unavailable' | 'stopped' | 'running' | 'idle';
+  reason: string | null;
+  startedAt: number | null;
+  stoppedAt: number | null;
+  lastTickAt: number | null;
+  lastCheckAt: number | null;
+  bootCount: number;
+  checksRun: number;
+  ticks: number;
+  checksRunning: number;
+  maxChecksRunning: number;
+  concurrency: number;
+  monitored: number;
+  active: number;
+  paused: number;
+  stale: boolean;
+  openIncidents: number;
+}
+
+export interface MonitoringCounts {
+  total: number; up: number; degraded: number; down: number; recovering: number;
+  pending: number; paused: number; unknown: number; stale: number; maintenance: number; suggested: number;
+}
+
+export interface MonitoringOverview {
+  at: number;
+  counts: MonitoringCounts;
+  monitors: Monitor[];
+  engine: MonitoringEngineHealth;
+}
+
+export interface MonitoringSeriesPoint { t: number; k: string; code: number | null; ms: number | null }
+
+export interface MonitoringDetail {
+  at: number;
+  monitor: Monitor;
+  stale?: boolean;
+  expected?: string;
+  uptime: { day: UptimeWindow; week: UptimeWindow; month: UptimeWindow };
+  series: MonitoringSeriesPoint[];
+  buckets: { h: number; ok: number; degraded: number; fail: number; unknown: number }[];
+  incidents: MonitorIncident[];
+  engine: MonitoringEngineHealth;
+}
+
+export interface MonitoringIncidentsDoc { at: number; incidents: MonitorIncident[]; open: number; total: number }
+
+export interface MonitoringSuggestion {
+  id: string;
+  type: MonitorType;
+  name: string;
+  reason: string;
+  provenance: MonitorProvenance;
+  target: MonitorTarget;
+  source: MonitorSource | null;
+}
+
+export interface MonitoringSuggestionsDoc {
+  at: number;
+  suggestions: MonitoringSuggestion[];
+  reason: string | null;
+  autoCreate: { enabled: boolean; max: number };
+}
+
+export interface MonitoringSettings {
+  intervalMs: number; timeoutMs: number; failureThreshold: number; recoveryThreshold: number;
+  retentionSamples: number; retentionHours: number; retentionIncidents: number;
+  maxMonitors: number; maxConcurrent: number; jitterMs: number;
+  /** when false, no monitor may resolve to a private, CGNAT or ULA address */
+  allowInternal: boolean;
+  autoCreate: { enabled: boolean; max: number };
+  updatedAt?: number;
+}
+
+export interface MonitoringSettingsDoc {
+  settings: MonitoringSettings;
+  bounds: Record<string, { min: number; max: number; step?: number; default: number; unit?: string; label?: string }>;
+}

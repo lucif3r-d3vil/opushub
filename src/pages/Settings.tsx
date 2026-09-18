@@ -17,6 +17,7 @@ import { Sortable } from '../components/Sortable';
 import { Block, Row } from './settings/parts';
 import { ConfigurationTab, ExportTab, HistoryTab, ImportTab } from './settings/Configuration';
 import { OperationsSettingsTab } from './settings/Operations';
+import { MonitoringSettingsTab } from './settings/Monitoring';
 import ConnectionsTab from './settings/Connections';
 import { HubPreview } from '../components/hub/HubPreview';
 import {
@@ -62,6 +63,8 @@ const TABS = [
   { id: 'export', label: 'Export', section: 'Configuration' },
   { id: 'configuration', label: 'Scope', section: 'Configuration' },
   { id: 'environment', label: 'Environment', section: 'This install' },
+  // Phase 10A — the monitoring defaults, their server-side bounds, and the monitors that exist
+  { id: 'monitoring', label: 'Monitoring', section: 'This install' },
   // Phase 8 — informational: what the operations engine is, what it may do, and what it refuses
   { id: 'operations', label: 'Operations', section: 'This install' },
   { id: 'authentication', label: 'Account & sessions', section: 'This install' },
@@ -132,6 +135,7 @@ export default function SettingsPage() {
           {tab === 'connections' && <ConnectionsTab />}
           {tab === 'authentication' && <AuthenticationTab />}
           {tab === 'environment' && <EnvironmentTab />}
+          {tab === 'monitoring' && <MonitoringSettingsTab />}
           {tab === 'operations' && <OperationsSettingsTab />}
           {tab === 'advanced' && <AdvancedTab />}
           {tab === 'import' && <ImportTab />}
