@@ -7,6 +7,9 @@ import { readBookmarks, readServices, getInventory, getLayout, getInfra } from '
 import { readEvents } from './activity.js';
 import { getActiveAlerts } from './alerts.js';
 import { ACTIONS, ACTION_IDS } from './operations/registry.js';
+// Phase 10A: monitors and incidents are destinations in their own right. The monitoring engine
+// answers with its own records only — search never triggers a check and never runs a monitor.
+import { searchEntries as monitoringSearchEntries } from './monitoring/engine.js';
 import { describeActor } from './operations/permissions.js';
 import * as dockerOps from './providers/dockerOperations.js';
 
@@ -87,7 +90,7 @@ export function scoreMatch(needle, ...fields) {
 const score = scoreMatch;
 
 /** Category weights — services and stacks rank highest: they are the point of the index. */
-const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, page: 0.92, config: 0.9, setting: 0.88, operation: 0.86, infra: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75 };
+const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, monitor: 0.98, incident: 0.99, page: 0.92, config: 0.9, setting: 0.88, operation: 0.86, infra: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75 };
 
 /**
  * Which registered operations make sense to offer for a container in this state.
@@ -109,6 +112,15 @@ export async function searchAll(q, { newsItems = [], actor = null } = {}) {
 
   for (const p of PAGES) add({ title: p.title, subtitle: p.hint, href: p.href, kind: 'page' }, score(needle, p.title, p.hint, ...(p.keywords || [])), KIND_WEIGHT.page);
   for (const st of SETTINGS) add({ title: st.title, subtitle: `Setting · ${st.hint}`, href: st.href, kind: 'setting' }, score(needle, st.title, st.hint, ...(st.keywords || [])), KIND_WEIGHT.setting);
+
+  // monitoring: real monitors and open incidents, from the engine's own records
+  try {
+    for (const entry of monitoringSearchEntries()) {
+      add({ title: entry.title, subtitle: entry.subtitle, href: entry.href, kind: entry.kind, status: entry.status },
+        score(needle, entry.title, entry.subtitle, ...(entry.keywords || [])),
+        entry.kind === 'incident' ? KIND_WEIGHT.incident : KIND_WEIGHT.monitor);
+    }
+  } catch { /* monitoring unavailable — search still answers everything else */ }
 
   // the one canonical inventory: containers, their resolved URLs, and their presentation overlay
   let inv = null;

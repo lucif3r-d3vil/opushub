@@ -39,6 +39,11 @@ function alert({ signature, severity, title, detail, evidence = null, links = []
  */
 export function evaluateAlerts({
   dockerAvailable = true, services = [], stacks = [], system = null, authFailures = 0,
+  // Phase 10A: the monitoring engine reports its own verdicts (state, reason, since). This function
+  // does not run checks, does not know what a monitor *is*, and never reads a monitor's history —
+  // it turns "this monitor says it is down" into the same kind of condition everything else here is.
+  // Monitors that are paused or inside a maintenance window are filtered out by the caller.
+  monitors = [],
   // Phase 9: infrastructure domains. All three are plain snapshots — this function stays pure and
   // never fetches anything, so the conditions below can only ever fire on real provider evidence.
   storage = null, network = null, providers = [],
@@ -140,6 +145,33 @@ export function evaluateAlerts({
       links: [{ label: 'Open Activity', href: '/activity' }],
     }));
   }
+  /* ---- Phase 10A: monitors -------------------------------------------- */
+  // One condition per monitor that says it is down or degraded. The incident is the monitoring
+  // engine's record of the outage; this is the alert *condition* over it, which is what the Alerts
+  // surface groups, sorts and acknowledges. Same signature → same dedupe → one event per transition.
+  for (const m of (monitors || []).slice(0, 40)) {
+    if (!m || (m.status !== 'down' && m.status !== 'degraded')) continue;
+    const down = m.status === 'down';
+    const since = Number.isFinite(Number(m.since)) ? Number(m.since) : null;
+    out.push(alert({
+      signature: `monitor.${m.status}:${m.id}`,
+      severity: down ? 'critical' : 'warning',
+      area: 'monitoring',
+      title: `${m.name} is ${down ? 'down' : 'degraded'}`,
+      detail: m.reason || (down ? 'The monitor is not getting the answer it expects.' : 'The monitor is getting an answer it did not expect.'),
+      evidence: { monitorId: m.id, type: m.type, status: m.status, since, latencyMs: m.latencyMs ?? null },
+      links: [{ label: 'Open the monitor', href: `/monitoring/${encodeURIComponent(m.id)}` }],
+    }));
+  }
+  if ((monitors || []).filter((m) => m?.status === 'down' || m?.status === 'degraded').length > 40) {
+    out.push(alert({
+      signature: 'monitor.overflow', severity: 'warning', area: 'monitoring',
+      title: `${(monitors || []).filter((m) => m?.status === 'down' || m?.status === 'degraded').length - 40} more monitors are not well`,
+      detail: 'The list is capped so one bad network cannot flood this page — the Monitoring page shows all of them.',
+      links: [{ label: 'Open Monitoring', href: '/monitoring' }],
+    }));
+  }
+
   /* ---- Phase 9: storage ------------------------------------------------ */
   // Only measurements are alerted on. A provider that cannot measure (no ZFS tools, no quota set)
   // produces no alert at all, because an alert for something that was never measured is noise
@@ -233,7 +265,7 @@ export function evaluateAlerts({
   return out.slice(0, MAX_ALERTS);
 }
 
-function hashInputs({ dockerAvailable, services, stacks, system, authFailures, storage, network, providers }) {
+function hashInputs({ dockerAvailable, services, stacks, system, authFailures, storage, network, providers, monitors }) {
   const svc = (services || []).map((s) => `${s.group}/${s.name}:${s.health}:${s.state}`).sort().join(',');
   const st = (stacks || []).map((x) => `${x.project}:${x.running}/${Array.isArray(x.services) ? x.services.length : 0}`).sort().join(',');
   const mem = Math.round(system?.memory?.pct ?? -1);
@@ -245,7 +277,10 @@ function hashInputs({ dockerAvailable, services, stacks, system, authFailures, s
   const quotas = (storage?.zfs?.datasets || []).filter((d) => d?.quotaUsedPct != null).map((d) => `${d.name}:${Math.round(d.quotaUsedPct)}`).sort().join(',');
   const ifaces = (network?.interfaces || []).map((i) => `${i.name}:${i.state}:${(i.addresses || []).length}`).sort().join(',');
   const provs = (providers || []).map((p) => `${p.id}:${p.status}`).sort().join(',');
-  return `${dockerAvailable}|${svc}|${st}|${mem}|${disk}|${authFailures}|${zfsPools}|${mounts}|${quotas}|${ifaces}|${provs}`;
+  // Phase 10A: monitor verdicts participate in the hash, so a monitor going down re-evaluates the
+  // alert set immediately instead of waiting out MIN_INTERVAL_MS.
+  const mons = (monitors || []).map((m) => `${m.id}:${m.status}`).sort().join(',');
+  return `${dockerAvailable}|${svc}|${st}|${mem}|${disk}|${authFailures}|${zfsPools}|${mounts}|${quotas}|${ifaces}|${provs}|${mons}`;
 }
 
 /**
