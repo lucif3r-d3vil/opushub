@@ -51,6 +51,15 @@ export const WIDGET_TYPES = {
     sizes: ['sm', 'md', 'lg'],
     config: {},
   },
+  monitoring: {
+    category: 'grid',
+    title: 'Monitoring',
+    description: 'What OpusHub watches, and anything that is not well — silent when everything is',
+    zone: 'main',
+    size: 'md',
+    sizes: ['sm', 'md'],
+    config: {},
+  },
   stacks: {
     category: 'grid',
     title: 'Stacks',

@@ -27,14 +27,17 @@ const KIND_LABEL: Record<string, string> = {
   config: 'Configuration', activity: 'Recent activity', bookmark: 'Bookmarks', news: 'News',
   // Phase 8: operations are destinations, not triggers — selecting one opens the confirmation.
   alert: 'Alerts', infra: 'Infrastructure', operation: 'Operations',
+  // Phase 10A: a monitor and an incident are different kinds of result — one is a thing being
+  // watched, the other is a thing that went wrong — and both are destinations.
+  monitor: 'Monitors', incident: 'Incidents',
 };
-const ORDER = ['Actions', 'Operations', 'Alerts', 'Services', 'Stacks', 'Infrastructure', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
+const ORDER = ['Actions', 'Operations', 'Alerts', 'Incidents', 'Monitors', 'Services', 'Stacks', 'Infrastructure', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
 
 const KIND_ICON: Record<string, string> = {
   page: 'lucide:house', stack: 'lucide:layers', bookmark: 'lucide:bookmark', news: 'lucide:newspaper',
   action: 'lucide:command', setting: 'lucide:sliders-horizontal', activity: 'lucide:activity',
   config: 'lucide:settings-2', alert: 'lucide:triangle-alert', infra: 'lucide:server',
-  operation: 'lucide:power',
+  operation: 'lucide:power', monitor: 'lucide:activity', incident: 'lucide:triangle-alert',
 };
 
 /** ⌘K on a Mac, Ctrl K everywhere else — the overlay should not teach the wrong muscle memory. */
@@ -76,6 +79,9 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     // navigation — every page is one keystroke away
     { title: 'Go Home', subtitle: 'The Hub', kind: 'action', href: '/', keywords: ['hub', 'home', 'start'] },
     { title: 'Go Services', subtitle: 'Everything you run', kind: 'action', href: '/services', keywords: ['apps', 'containers'] },
+    { title: 'Open Monitoring', subtitle: 'What OpusHub watches, and what it found', kind: 'action', href: '/monitoring', keywords: ['monitor', 'uptime', 'latency', 'checks', 'health', 'down'] },
+    { title: 'Open Incidents', subtitle: 'Outages that were recorded', kind: 'action', href: '/monitoring/incidents', keywords: ['incident', 'outage', 'downtime', 'failure'] },
+    { title: 'Configure monitoring defaults', subtitle: 'Interval, thresholds, retention, bounds', kind: 'action', href: '/settings/monitoring', keywords: ['monitor', 'interval', 'threshold', 'retention', 'settings'] },
     { title: 'Go Stacks', subtitle: 'Compose projects', kind: 'action', href: '/stacks', keywords: ['projects'] },
     { title: 'Go System', subtitle: 'Host vitals', kind: 'action', href: '/system', keywords: ['cpu', 'memory', 'host'] },
     { title: 'Go Activity', subtitle: 'What happened, when', kind: 'action', href: '/activity', keywords: ['events', 'timeline', 'history', 'log'] },

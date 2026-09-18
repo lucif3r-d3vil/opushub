@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type {
-  ActivityEvent, LayoutDoc, MarketItem, NewsDoc, Service, ServicesDoc, StacksDoc, SystemSnapshot,
+  ActivityEvent, LayoutDoc, MarketItem, Monitor, NewsDoc, Service, ServicesDoc, StacksDoc, SystemSnapshot,
   WeatherDoc, WidgetCatalogueEntry, WidgetInstance,
 } from '../../lib/types';
 import type { DeepPartial } from '../../lib/theme';
@@ -122,6 +122,93 @@ function StacksWidget({ widget, data, interactive }: WidgetProps) {
         <li><Link className="section-link" to="/stacks">+{doc.stacks.length - cap} more →</Link></li>
       )}
     </ul>
+  );
+}
+
+/* ---------------- monitoring: what is watched, and what is not well ---------------- */
+
+/**
+ * The Hub summary of the monitoring engine.
+ *
+ * Two properties matter here:
+ *   1. it is a *summary*, not a second monitoring page — the counts, then only the monitors that
+ *      are not up, each with how long it has been that way;
+ *   2. the Hub does not depend on monitoring being available. An engine that is stopped, a request
+ *      that failed, or a not-yet-created store all render as their own honest state, and the rest of
+ *      the Hub is untouched.
+ */
+function MonitoringWidget({ widget, data }: WidgetProps) {
+  const doc = data.monitoring?.data ?? null;
+  const err = data.monitoring?.error ?? null;
+  const cap = widget.size === 'sm' ? 3 : 6;
+  const engine = doc?.engine ?? null;
+  const monitors = doc?.monitors ?? [];
+
+  if (!doc) {
+    if (err) {
+      return (
+        <WidgetEmpty href="/monitoring" linkLabel="Open Monitoring →">
+          Monitoring is unavailable right now — the rest of the Hub is unaffected.
+        </WidgetEmpty>
+      );
+    }
+    return <div className="widget-quiet" role="status">Reading the monitor list…</div>;
+  }
+
+  const engineDown = engine?.state === 'stopped' || engine?.state === 'unavailable';
+  const counts = doc.counts;
+  // "not well" means a recorded bad state — never a paused monitor, never a pending one
+  const unwell: Monitor[] = monitors
+    .filter((m) => m.enabled && (m.status === 'down' || m.status === 'degraded' || m.status === 'recovering'))
+    .sort((a, b) => (a.status === 'down' ? -1 : 1) - (b.status === 'down' ? -1 : 1));
+
+  if (!counts.total) {
+    return (
+      <WidgetEmpty href="/monitoring" linkLabel="Set up monitoring →">
+        Nothing is being watched yet.
+      </WidgetEmpty>
+    );
+  }
+
+  return (
+    <div className="hub-monitoring">
+      {engineDown && (
+        <p className="hub-monitoring-engine" role="status">
+          Monitoring is {engine?.state === 'stopped' ? 'stopped' : 'unavailable'} — these are the last recorded states.
+        </p>
+      )}
+      <div className="hub-mon-counts">
+        <Link to="/monitoring" className="hub-mon-count" title="Every monitor">
+          <span className="v mono">{counts.total}</span><span className="k">Total</span>
+        </Link>
+        <Link to="/monitoring" className="hub-mon-count ok" title="Up"><span className="v mono">{counts.up}</span><span className="k">Up</span></Link>
+        <Link to="/monitoring" className="hub-mon-count warn" title="Answered, but not as expected"><span className="v mono">{counts.degraded + counts.recovering}</span><span className="k">Degraded</span></Link>
+        <Link to="/monitoring/incidents" className="hub-mon-count bad" title="Down"><span className="v mono">{counts.down}</span><span className="k">Down</span></Link>
+        <Link to="/monitoring" className="hub-mon-count quiet" title="Paused — not down"><span className="v mono">{counts.paused}</span><span className="k">Paused</span></Link>
+      </div>
+      {unwell.length ? (
+        <ul className="hub-attention">
+          {unwell.slice(0, cap).map((m) => (
+            <li key={m.id}>
+              <Link to={`/monitoring/${m.id}`} className="hub-attention-row">
+                <StatusDot state={m.status === 'down' ? 'down' : 'degraded'} title={m.status} />
+                <span className="grow">
+                  <span className="title">{m.name}</span>
+                  <span className="sub">
+                    {m.status === 'down' ? 'down' : m.status === 'recovering' ? 'recovering' : 'degraded'}
+                    {m.lastCheck?.at ? ` · ${relTime(m.lastCheck.at)}` : ''}
+                    {m.lastCheck?.reason ? ` · ${m.lastCheck.reason}` : ''}
+                  </span>
+                </span>
+              </Link>
+            </li>
+          ))}
+          {unwell.length > cap && <li><Link className="section-link" to="/monitoring">+{unwell.length - cap} more →</Link></li>}
+        </ul>
+      ) : (
+        <p className="hub-monitoring-quiet">Every monitor is answering as expected.</p>
+      )}
+    </div>
   );
 }
 
@@ -452,6 +539,7 @@ export const WIDGET_RENDERERS: Record<string, (props: WidgetProps) => ReactNode>
   ),
   system: SystemStrip,
   stacks: StacksWidget,
+  monitoring: MonitoringWidget,
   attention: AttentionWidget,
   clock: ClockWidget,
   weather: WeatherWidget,

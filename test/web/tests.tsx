@@ -18,9 +18,11 @@ import StackDetail from '../../src/pages/StackDetail';
 import SystemPage from '../../src/pages/System';
 import ActivityPage from '../../src/pages/Activity';
 import InfrastructurePage from '../../src/pages/Infrastructure';
+import MonitoringPage from '../../src/pages/Monitoring';
+import MonitorDetailPage from '../../src/pages/MonitorDetail';
 import { Loading } from '../../src/components/ui';
 import { GREETINGS, greetingFor } from '../../src/components/hub/HubHeader';
-import type { LayoutDoc, WidgetInstance } from '../../src/lib/types';
+import type { LayoutDoc, Monitor, UptimeWindow, WidgetInstance } from '../../src/lib/types';
 import type { HubData } from '../../src/lib/hubData';
 import App from '../../src/App';
 import { GroupNameField } from '../../src/components/GroupNameField';
@@ -578,6 +580,143 @@ function opsRoutes(overview = opsOverview(), { action = 'container.restart', dry
 /** The confirm button in whichever dialog is open. */
 const confirmButton = () => qa('.modal-foot button').find((b) => /^(Start|Restart|Stop)$/.test(text(b).trim()));
 
+/* ------------------------------------------------------------------ */
+/* Phase 10A — monitoring fixtures                                     */
+/* ------------------------------------------------------------------ */
+
+const now = Date.now();
+
+function uptimeWindow(over: Partial<UptimeWindow> = {}): UptimeWindow {
+  return {
+    windowMs: 24 * 3_600_000, from: now - 86_400_000, to: now, checks: 0, ok: 0, degraded: 0, fail: 0, unknown: 0, judged: 0,
+    uptimePct: null, degradedPct: null, avgLatencyMs: null, minLatencyMs: null, maxLatencyMs: null,
+    noData: true, paused: false, coverageFrom: null, coverageTo: null, ...over,
+  };
+}
+
+function monitorFixture(over: Partial<Monitor> = {}): Monitor {
+  return {
+    id: 'mon-fixture0001',
+    name: 'Jellyfin',
+    type: 'http',
+    target: { kind: 'http', service: { group: 'Media', name: 'jellyfin' }, url: 'http://10.0.0.12:8096', scope: 'internal', scopeAt: now - 60_000 },
+    intervalMs: 60_000,
+    timeoutMs: 5000,
+    enabled: true,
+    expected: { status: null, min: 200, max: 399 },
+    provenance: 'discovered',
+    source: { kind: 'reverse-proxy', provider: 'Traefik', urlSource: 'traefik', note: null },
+    description: null,
+    status: 'up',
+    storedStatus: 'up',
+    latencyMs: 42,
+    lastCheck: { at: now - 30_000, kind: 'ok', statusCode: 200, latencyMs: 42, reason: 'HTTP 200', code: null, errorType: null, hops: 0, evidence: null },
+    nextCheck: now + 30_000,
+    failureCount: 0,
+    successCount: 12,
+    consecutiveFailures: 0,
+    consecutiveSuccesses: 12,
+    targetStale: false,
+    maintenance: null,
+    createdAt: now - 86_400_000,
+    updatedAt: now - 30_000,
+    stale: false,
+    uptime: uptimeWindow({ uptimePct: 99.4, checks: 140, ok: 138, fail: 2, judged: 140, noData: false, avgLatencyMs: 44, minLatencyMs: 21, maxLatencyMs: 210, coverageFrom: now - 86_400_000, coverageTo: now }),
+    ...over,
+  };
+}
+
+const downMonitor = monitorFixture({
+  id: 'mon-fixture0002', name: 'Paperless', status: 'down', storedStatus: 'down', latencyMs: null,
+  target: { kind: 'tcp', host: '10.0.0.14', port: 8000, service: null, scope: 'internal', scopeAt: now - 60_000 },
+  lastCheck: { at: now - 20_000, kind: 'fail', statusCode: null, latencyMs: null, reason: 'No connection (refused).', code: null, errorType: 'refused', hops: 0, evidence: null },
+  consecutiveFailures: 5, uptime: uptimeWindow({ uptimePct: 88.2, checks: 120, ok: 105, fail: 15, judged: 120, noData: false, avgLatencyMs: 61, minLatencyMs: 30, maxLatencyMs: 900, coverageFrom: now - 86_400_000, coverageTo: now }),
+});
+
+const pausedMonitor = monitorFixture({ id: 'mon-fixture0003', name: 'Restart-loop container', type: 'docker', enabled: false, status: 'paused', storedStatus: 'up', uptime: uptimeWindow({ paused: true }) });
+
+const monitoringOverview = {
+  at: now,
+  engine: {
+    at: now, state: 'running', reason: null, startedAt: now - 3_600_000, stoppedAt: null, lastTickAt: now - 5_000, lastCheckAt: now - 30_000,
+    bootCount: 3, checksRun: 812, ticks: 240, checksRunning: 1, maxChecksRunning: 3, concurrency: 3,
+    monitored: 3, active: 2, paused: 1, stale: false, openIncidents: 1,
+  },
+  counts: { total: 3, up: 1, degraded: 0, down: 1, recovering: 0, pending: 0, paused: 1, unknown: 0, stale: 0, maintenance: 0, suggested: 0 },
+  monitors: [monitorFixture(), downMonitor, pausedMonitor],
+};
+
+const monitoringDetail = {
+  at: now,
+  monitor: downMonitor,
+  stale: false,
+  expected: 'HTTP 200–399',
+  uptime: {
+    day: uptimeWindow({ uptimePct: 88.2, checks: 120, ok: 105, fail: 15, judged: 120, noData: false, avgLatencyMs: 61, minLatencyMs: 30, maxLatencyMs: 900 }),
+    week: uptimeWindow({ uptimePct: 97.1, checks: 900, ok: 891, fail: 9, judged: 900, noData: false }),
+    month: uptimeWindow({ uptimePct: 99.0, checks: 3600, ok: 3564, fail: 36, judged: 3600, noData: false }),
+  },
+  series: [
+    { t: now - 120_000, k: 'ok', code: 200, ms: 40 },
+    { t: now - 60_000, k: 'fail', code: null, ms: null },
+    { t: now - 20_000, k: 'fail', code: null, ms: null },
+  ],
+  buckets: [],
+  incidents: [{
+    id: 'inc-fixture0001', monitorId: 'mon-fixture0002', monitorName: 'Paperless', monitorType: 'tcp', type: 'tcp',
+    service: null, startedAt: now - 5 * 60_000, detectedAt: now - 3 * 60_000, recoveredAt: null, durationMs: 5 * 60_000,
+    open: true, status: 'open', reason: 'No connection (refused).', failureCount: 5, maintenance: false, suppressed: false, resolvedBy: null,
+  }],
+  engine: monitoringOverview.engine,
+};
+
+const monitoringSettingsDoc = {
+  settings: {
+    intervalMs: 60_000, timeoutMs: 5000, failureThreshold: 3, recoveryThreshold: 2,
+    retentionSamples: 360, retentionHours: 336, retentionIncidents: 400, maxMonitors: 200, maxConcurrent: 3,
+    jitterMs: 5000, allowInternal: true, autoCreate: { enabled: false, max: 10 },
+  },
+  bounds: {
+    intervalMs: { min: 10_000, max: 86_400_000, default: 60_000 },
+    timeoutMs: { min: 500, max: 30_000, default: 5000 },
+    failureThreshold: { min: 1, max: 10, default: 3 },
+    recoveryThreshold: { min: 1, max: 10, default: 2 },
+    retentionSamples: { min: 30, max: 2000, default: 360 },
+    retentionHours: { min: 24, max: 2000, default: 336 },
+    retentionIncidents: { min: 20, max: 2000, default: 400 },
+    maxMonitors: { min: 1, max: 500, default: 200 },
+    maxConcurrent: { min: 1, max: 8, default: 3 },
+    jitterMs: { min: 0, max: 60_000, default: 5000 },
+    autoCreateMax: { min: 0, max: 100, default: 10 },
+  },
+};
+
+/** The monitoring endpoints, with create/check replayable so a test can see exactly what was sent. */
+function monitoringRoutes(over: Record<string, unknown | ((body: unknown, path: string) => unknown)> = {}) {
+  return {
+    // `?service=` narrows the document exactly as the server narrows it, so a service page sees
+    // only the monitors that watch *it*
+    '/api/monitoring': (_body: unknown, path: string) => {
+      const svc = new URLSearchParams(path.split('?')[1] || '').get('service');
+      if (!svc) return monitoringOverview;
+      const [group, ...rest] = svc.split('/');
+      const name = rest.join('/');
+      const monitors = monitoringOverview.monitors.filter((m) => m.target.service
+        && m.target.service.name.toLowerCase() === name.toLowerCase()
+        && (!m.target.service.group || m.target.service.group.toLowerCase() === (group || '').toLowerCase()));
+      return { ...monitoringOverview, monitors, counts: { ...monitoringOverview.counts, total: monitors.length } };
+    },
+    '/api/monitoring/settings': monitoringSettingsDoc,
+    '/api/monitoring/suggestions': { at: now, suggestions: [], reason: 'Nothing new to suggest.', autoCreate: { enabled: false, max: 10 } },
+    '/api/monitoring/incidents': { at: now, incidents: monitoringDetail.incidents, open: 1, total: 1 },
+    '/api/monitoring/monitors/mon-fixture0002': monitoringDetail,
+    '/api/monitoring/monitors': (body: unknown) => (
+      body ? { monitor: monitorFixture({ id: 'mon-created0001', name: (body as { monitor: { name: string } }).monitor.name }) } : monitoringOverview
+    ),
+    ...over,
+  };
+}
+
 /** The Hub, inside the providers it actually runs with, plus routes to observe navigation. */
 function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: string }) {
   return (
@@ -596,6 +735,9 @@ function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: strin
             <Route path="/system" element={<SystemPage />} />
             <Route path="/infrastructure" element={<InfrastructurePage />} />
             <Route path="/services/:group/:name" element={<ServiceDetail />} />
+            <Route path="/monitoring" element={<MonitoringPage />} />
+            <Route path="/monitoring/incidents" element={<MonitoringPage />} />
+            <Route path="/monitoring/:id" element={<MonitorDetailPage />} />
           </Routes>
         </LayoutProvider>
       </SettingsProvider>
@@ -2131,6 +2273,211 @@ export async function runWebTests(): Promise<WebResult> {
     expect(!qa('input[type=checkbox]').length, 'the operations pane offers a toggle — none of this is configurable');
     expect(/no shell or command execution/i.test(text()), 'the boundaries are not stated in plain words');
     expect(/no Docker API passthrough/i.test(text()), 'the passthrough boundary is not stated');
+  });
+
+  /* ---------------- Phase 10A: monitoring ---------------- */
+
+  await test('monitoring: the page is a list with real counts, and a stale engine says so', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...monitoringRoutes() });
+    await h.mount(<TestApp entry="/monitoring"><MonitoringPage /></TestApp>);
+    await h.waitFor(() => text().includes('Paperless'), 'the monitor list');
+    // counts come from the document, not from counting rows in the browser
+    expect(/Total/.test(text()) && /Paused/.test(text()), 'the counts strip is missing');
+    expect(text().includes('Down') && text().includes('Up'), 'the counts strip lost its words');
+    // a monitor's own words, never a colour alone
+    expect(text().includes('Down'), 'the down monitor is not labelled as down');
+    expect(text().includes('Paused'), 'a paused monitor is not labelled as paused');
+    expect(/never checked|checked /.test(text()), 'no row says when it was last checked');
+    // the group it belongs to comes from the service reference, not from a hardcoded list
+    expect(text().includes('Media') || text().includes('Endpoints'), 'monitors are not grouped');
+    // the scope of what it reaches is stated, not implied: an internal target is labelled as one
+    expect(/internal/.test(text()), 'the address scope is not stated anywhere');
+    // and the page never runs a check by being opened
+    expect(!h.writes('POST', '/api/monitoring/monitors/mon-fixture0001/check').length, 'merely opening the page ran a check');
+  });
+
+  await test('monitoring: a stopped engine marks its data as a recording, not as current', async (h) => {
+    const stopped = {
+      ...monitoringOverview,
+      engine: { ...monitoringOverview.engine, state: 'stopped', reason: 'The engine was stopped.', stale: true },
+    };
+    h.setRoutes({ ...stubRoutes(), ...monitoringRoutes({ '/api/monitoring': stopped }) });
+    await h.mount(<TestApp entry="/monitoring"><MonitoringPage /></TestApp>);
+    await h.waitFor(() => /Monitoring is stopped/i.test(text()), 'the stopped-engine line');
+    expect(/last recorded state|not presented as current|last recorded/i.test(text()), 'a stopped engine did not say its data is a recording');
+  });
+
+  await test('monitoring: adding a monitor sends a name and a service, never a container id or a raw host', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...monitoringRoutes() });
+    await h.mount(<TestApp entry="/monitoring"><MonitoringPage /></TestApp>);
+    await h.waitFor(() => !!qa('button').find((b) => text(b).trim() === 'Add monitor'), 'the Add control');
+    click(qa('button').find((b) => text(b).trim() === 'Add monitor')!);
+    await h.waitFor(() => !!dialog(), 'the add dialog');
+    // choose the discovered service rather than typing a URL — the preferred path
+    const nameInput = qa<HTMLInputElement>('.modal input.input')[0];
+    type(nameInput, 'Jellyfin web');
+    const select = q<HTMLSelectElement>('.modal select.input');
+    expect(!!select, 'there is no way to pick a discovered service');
+    const picked = servicesDoc.services.find((s) => s.url)!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+      setter?.call(select!, `${picked.group}/${picked.name}`);
+      select!.dispatchEvent(new window.Event('change', { bubbles: true }));
+    });
+    await h.flush(10);
+    click(qa('.modal-foot button').find((b) => text(b).trim() === 'Add monitor')!);
+    await h.waitFor(() => !!h.lastCall('POST', '/api/monitoring/monitors'), 'the create request');
+    const sent = h.lastCall('POST', '/api/monitoring/monitors')!.body as { monitor: { name: string; type: string; target: Record<string, unknown> } };
+    expect(sent.monitor.name === 'Jellyfin web', `unexpected name ${sent.monitor.name}`);
+    expect(JSON.stringify(sent.monitor.target).includes('"service"'), 'the target did not carry a service reference');
+    expect(!/container|id"?:"[0-9a-f]{12}/.test(JSON.stringify(sent.monitor.target)), 'the browser sent something that looks like a container id');
+    expect(!/socketPath|docker/i.test(JSON.stringify(sent.monitor)), 'the browser sent a Docker detail');
+  });
+
+  await test('monitoring: a refusal from the server is shown in place, and nothing is retried', async (h) => {
+    h.setRoutes({
+      ...stubRoutes(),
+      ...monitoringRoutes({
+        '/api/monitoring/monitors': (body: unknown) => (body
+          ? { $status: 400, body: { error: 'Endpoint points at link-local space, which monitors never reach.', code: 'blocked_address' } }
+          : monitoringOverview),
+      }),
+    });
+    await h.mount(<TestApp entry="/monitoring"><MonitoringPage /></TestApp>);
+    await h.waitFor(() => !!qa('button').find((b) => text(b).trim() === 'Add monitor'), 'the Add control');
+    click(qa('button').find((b) => text(b).trim() === 'Add monitor')!);
+    await h.waitFor(() => !!dialog(), 'the add dialog');
+    type(qa<HTMLInputElement>('.modal input.input')[0], 'Metadata');
+    click(qa('.modal-foot button').find((b) => text(b).trim() === 'Add monitor')!);
+    await h.waitFor(() => /link-local space/i.test(text()), 'the refusal reason');
+    expect(h.writes('POST', '/api/monitoring/monitors').length === 1, 'the browser retried a refused create');
+    expect(!!dialog(), 'the dialog closed on a refusal, losing the form');
+  });
+
+  await test('monitoring: a filter narrows the list and says so', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...monitoringRoutes() });
+    await h.mount(<TestApp entry="/monitoring"><MonitoringPage /></TestApp>);
+    await h.waitFor(() => text().includes('Paperless'), 'the monitor list');
+    click(qa('.mon-filters button').find((b) => text(b).trim() === 'Down')!);
+    await h.flush(10);
+    expect(text().includes('Paperless'), 'the down monitor vanished when filtering for down');
+    expect(!text().includes('Jellyfin'), 'an up monitor survived a filter for down');
+    expect(/2 of 3|1 of 3/.test(text()), 'the filter does not say how much of the list it is showing');
+  });
+
+  await test('monitoring: incidents are real records with a real duration', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...monitoringRoutes() });
+    await h.mount(<TestApp entry="/monitoring/incidents"><MonitoringPage /></TestApp>);
+    await h.waitFor(() => text().includes('Paperless'), 'the incident list');
+    expect(/open \d|recovered|\d+m \d+s/.test(text()), 'the incident has no duration');
+    expect(text().includes('No connection (refused).'), 'the incident does not carry the reason it was opened');
+    expect(!/100% uptime|all systems/i.test(text()), 'the incidents view invented a reassurance');
+  });
+
+  await test('monitoring: the detail page shows recorded history, and offers no fabricated numbers', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...monitoringRoutes() });
+    await h.mount(<TestApp entry="/monitoring/mon-fixture0002"><MonitorDetailPage /></TestApp>);
+    await h.waitFor(() => text().includes('Paperless'), 'the monitor detail');
+    await h.flush(30);
+    expect(/88\.2%|88\.2/.test(text()), 'the recorded uptime is not shown');
+    expect(/61 \/ 30 \/ 900 ms|—/.test(text()), 'the latency figures are missing');
+    expect(/recorded check/.test(text()), 'the graph does not say how many checks it drew');
+    expect(/open \d/.test(text()), 'the open incident has no duration');
+    // pausing is an action, and it is sent to the monitor's own endpoint
+    click(qa('button').find((b) => text(b).trim() === 'Pause')!);
+    await h.waitFor(() => !!h.lastCall('POST', '/api/monitoring/monitors/mon-fixture0002/pause'), 'the pause request');
+    expect(!h.lastCall('POST', '/api/v1/operations'), 'monitoring reached the operations engine');
+  });
+
+  await test('monitoring: maintenance is explicit, bounded, and ends from the same place', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...monitoringRoutes() });
+    await h.mount(<TestApp entry="/monitoring/mon-fixture0002"><MonitorDetailPage /></TestApp>);
+    await h.waitFor(() => !!qa('button').find((b) => text(b).trim() === 'Start maintenance'), 'the maintenance control');
+    // only the offered durations — there is no free-form "until" and no calendar
+    const options = qa('.mon-maintenance option').map((o) => text(o).trim());
+    expect(options.length >= 3 && options.every((o) => /minute|hour|day/.test(o)), `unexpected maintenance choices: ${options.join(', ')}`);
+    type(qa<HTMLInputElement>('.mon-maintenance input.input')[0], 'disk swap');
+    click(qa('button').find((b) => text(b).trim() === 'Start maintenance')!);
+    await h.waitFor(() => !!h.lastCall('POST', '/api/monitoring/monitors/mon-fixture0002/maintenance'), 'the maintenance request');
+    const sent = h.lastCall('POST', '/api/monitoring/monitors/mon-fixture0002/maintenance')!.body as { until: number; reason: string };
+    expect(sent.until > Date.now(), 'the maintenance window is in the past');
+    expect(sent.until - Date.now() <= 24 * 3600_000 + 5000, 'the browser asked for a window longer than a day');
+    expect(sent.reason === 'disk swap', 'the reason was not sent');
+  });
+
+  await test('monitoring: settings shows the server bounds and offers no way to widen them', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...monitoringRoutes() });
+    await h.mount(<TestApp entry="/settings/monitoring"><Settings /></TestApp>);
+    await h.waitFor(() => text().includes('Concurrent checks'), 'the defaults pane');
+    expect(/server bound 10–86400/.test(text().replace(/,/g, '')), 'the interval bounds are not shown');
+    expect(/server bound 1–8/.test(text()), 'the concurrency bound is not shown');
+    expect(/public endpoints only|internal targets/i.test(text()), 'the internal-target policy is not stated');
+    expect(/no container is started, stopped or restarted|never/i.test(text()), 'the pane does not state what monitoring cannot do');
+    // saving sends the settings object and nothing else
+    click(qa('button').find((b) => text(b).trim() === 'Save defaults')!);
+    await h.waitFor(() => !!h.lastCall('PUT', '/api/monitoring/settings'), 'the settings write');
+    const sent = h.lastCall('PUT', '/api/monitoring/settings')!.body as { settings: Record<string, unknown> };
+    expect(typeof sent.settings.intervalMs === 'number' && typeof sent.settings.allowInternal === 'boolean', 'the settings payload is incomplete');
+    expect(!('bounds' in sent.settings), 'the browser sent the bounds back to the server');
+  });
+
+  await test('monitoring: a service page shows what watches it, and offers to watch it', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...monitoringRoutes() });
+    await h.mount(<TestApp entry="/services/Music/wave"><ServiceDetail /></TestApp>);
+    await h.waitFor(() => text().includes('Monitoring'), 'the monitoring block');
+    await h.flush(40);
+    expect(/Nothing watches|mon-row|monitor/i.test(text()), 'the block says nothing about monitors');
+    const link = qa('a').find((a) => text(a).trim() === 'Configure a monitor');
+    expect(!!link, 'there is no way to configure a monitor from the service page');
+    expect(/\/monitoring\?service=/.test(link!.getAttribute('href') || ''), 'the configure link does not name the service');
+    // and the service page did not become a monitoring engine
+    expect(!h.writes('POST', '/api/monitoring/monitors').length, 'the service page created a monitor on its own');
+  });
+
+  await test('search: monitors and incidents are destinations, not triggers', async (h) => {
+    const search = [
+      { title: 'Paperless monitor', subtitle: 'tcp · down', href: '/monitoring/mon-fixture0002', kind: 'monitor', status: 'down' },
+      { title: 'Paperless incident', subtitle: 'open since 14:02', href: '/monitoring/mon-fixture0002', kind: 'incident', status: 'down' },
+    ];
+    h.setRoutes({ ...stubRoutes(), ...monitoringRoutes(), '/api/search': { query: 'paperless', results: search } });
+    await h.mount(<TestApp><SearchHost /></TestApp>);
+    key(window, '/');
+    await h.flush(40);
+    await type(searchInput()!, 'paperless');
+    await h.waitFor(() => text().includes('Paperless monitor'), 'the monitor result');
+    expect(text().includes('Monitors'), 'monitor results are not grouped under Monitors');
+    expect(text().includes('Incidents'), 'incident results are not grouped under Incidents');
+    key(window, 'Enter');
+    await h.flush(30);
+    expect(!h.writes('POST', '/api/monitoring/monitors').length, 'selecting a monitor result created something');
+    expect(!h.lastCall('POST', '/api/monitoring/monitors/mon-fixture0002/check'), 'selecting a monitor result ran a check');
+  });
+
+  await test('the Hub shows a monitor summary, and keeps working when monitoring is unavailable', async (h) => {
+    const withMonitoring = layoutWith([
+      { id: 'monitoring', type: 'monitoring', zone: 'main', size: 'md', visible: true, config: {} },
+      { id: 'services', type: 'services', zone: 'main', size: 'lg', visible: true, config: {} },
+    ]);
+    h.setRoutes({
+      ...stubRoutes(),
+      ...monitoringRoutes(),
+      '/api/layout': withMonitoring,
+      '/api/widgets': { catalogue: [...catalogue, { type: 'monitoring', category: 'grid', title: 'Monitoring', description: 'What OpusHub watches', zone: 'main', size: 'md', sizes: ['sm', 'md'], config: [] }], widgets: withMonitoring.hub.widgets, spacing: withMonitoring.hub.spacing },
+    });
+    await h.mount(<TestApp><Hub /></TestApp>);
+    await h.waitFor(() => text().includes('Down'), 'the monitoring widget');
+    expect(text().includes('Paused'), 'the widget does not distinguish paused from down');
+    expect(/Total/.test(text()), 'the widget summary has no totals');
+
+    // and the same widget with the engine unavailable: it says so, and the rest of the Hub is intact
+    const broken = await createHarness({ routes: { ...stubRoutes(), ...monitoringRoutes(), '/api/monitoring': () => { throw new Error('offline'); }, '/api/layout': withMonitoring } });
+    try {
+      await broken.mount(<TestApp><Hub /></TestApp>);
+      await broken.waitFor(() => text().includes('Monitoring is unavailable') || /unavailable/i.test(text()), 'the unavailable state');
+      expect(text().includes('Services') || qa('.hub-widget').length > 0, 'one failed widget took the Hub with it');
+    } finally {
+      await broken.unmount();
+    }
   });
 
   for (const r of results) {

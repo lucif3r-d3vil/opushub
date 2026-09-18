@@ -451,6 +451,118 @@ async function main() {
       check('search: subsequence matching still finds distant matches', fuzzy.status === 200);
     }
 
+    // ---- 8c. Phase 10A: monitoring is a real engine, and it is honest ----------
+    {
+      const overview = await get('/api/monitoring');
+      check('monitoring: the engine reports its own state, not a service verdict',
+        overview.status === 200 && ['running', 'idle', 'stopped', 'unavailable'].includes(overview.body?.engine?.state)
+        && typeof overview.body?.counts?.total === 'number',
+        JSON.stringify(overview.body?.engine || {}).slice(0, 120));
+      check('monitoring: the monitor cap and check concurrency are stated as numbers',
+        typeof overview.body?.engine?.concurrency === 'number' && overview.body?.engine?.concurrency <= 8,
+        String(overview.body?.engine?.concurrency));
+
+      // a monitor on a discovered service, preferring the canonical endpoint over a typed URL
+      const dockerLive = (await get('/api/services')).body?.live !== false;
+      let monitorId = null;
+      if (dockerLive) {
+        const services = (await get('/api/services')).body?.services || [];
+        const withUrl = services.find((s) => s.url && !s.hidden);
+        const target = withUrl || services.find((s) => !s.hidden);
+        if (target) {
+          const created = await send('POST', '/api/monitoring/monitors', {
+            monitor: { name: 'verify-monitor', type: withUrl ? 'http' : 'docker', target: { service: { group: target.group, name: target.name } }, intervalMs: 15_000, timeoutMs: 2000 },
+          });
+          monitorId = created.body?.monitor?.id || null;
+          check('monitoring: a monitor is created from a service reference and starts with no verdict',
+            created.status === 201 && created.body?.monitor?.status === 'pending' && created.body.monitor.target.service.name === target.name,
+            `${created.status} ${JSON.stringify(created.body?.monitor || created.body).slice(0, 120)}`);
+          check('monitoring: the created monitor carries provenance and a resolved-at-check-time target',
+            created.body?.monitor?.provenance === 'configured' && created.body.monitor.target.service && 'url' in created.body.monitor.target,
+            JSON.stringify(created.body?.monitor?.provenance));
+          check('monitoring: nothing internal to the engine leaks into the API projection',
+            created.body?.monitor && !('streakStartedAt' in created.body.monitor) && !('rawTarget' in created.body.monitor),
+            Object.keys(created.body?.monitor || {}).join(','));
+
+          const before = await get(`/api/monitoring/monitors/${monitorId}`);
+          check('monitoring: a monitor with no checks reports no data, never 100% uptime',
+            before.status === 200 && before.body?.uptime?.day?.noData === true && before.body.uptime.day.uptimePct === null,
+            JSON.stringify(before.body?.uptime?.day || {}).slice(0, 120));
+
+          const manual = await send('POST', `/api/monitoring/monitors/${monitorId}/check`);
+          check('monitoring: a manual check runs the stored target and records one check with a timestamp',
+            manual.status === 200 && manual.body?.monitor?.lastCheck?.at > 0 && manual.body?.result?.kind,
+            `${manual.status} ${JSON.stringify(manual.body?.result || manual.body || {}).slice(0, 120)}`);
+          const after = await get(`/api/monitoring/monitors/${monitorId}`);
+          check('monitoring: the recorded check appears in history and uptime reflects it',
+            after.body?.uptime?.day?.checks >= 1 && after.body.uptime.day.judged >= 0
+            && (after.body.uptime.day.judged === 0 ? after.body.uptime.day.uptimePct === null : typeof after.body.uptime.day.uptimePct === 'number'),
+            JSON.stringify(after.body?.uptime?.day || {}).slice(0, 140));
+          check('monitoring: one failed check is never enough to call something down',
+            after.body?.monitor?.status !== 'down' || after.body.monitor.consecutiveFailures >= 3,
+            `${after.body?.monitor?.status} after ${after.body?.monitor?.consecutiveFailures} failure(s)`);
+          check('monitoring: a check records the scope of the address it actually reached',
+            ['public', 'internal', 'mixed', null].includes(after.body?.monitor?.target?.scope),
+            String(after.body?.monitor?.target?.scope));
+
+          const paused = await send('POST', `/api/monitoring/monitors/${monitorId}/pause`);
+          const doc = await get('/api/monitoring');
+          check('monitoring: pausing is not down — it is a paused state with no incident',
+            paused.body?.monitor?.status === 'paused' && doc.body?.counts?.paused >= 1
+            && (await get(`/api/monitoring/monitors/${monitorId}`)).body?.incidents?.length === 0,
+            JSON.stringify(paused.body?.monitor || {}).slice(0, 100));
+          await send('POST', `/api/monitoring/monitors/${monitorId}/resume`);
+        }
+      }
+
+      // what the model refuses, whatever the caller sends
+      const refusals = [
+        ['monitoring: a loopback and a link-local endpoint are refused with a reason', { name: 'x', type: 'http', target: { url: 'http://169.254.169.254/latest/meta-data/' } }, /link-local|private|refused/i],
+        ['monitoring: a non-http scheme is refused', { name: 'x', type: 'http', target: { url: 'file:///etc/passwd' } }, /http/i],
+        ['monitoring: a port range is refused — monitoring is not a scanner', { name: 'x', type: 'tcp', target: { host: '10.0.0.9', port: '22-80' } }, /port/i],
+        ['monitoring: a host range is refused too', { name: 'x', type: 'tcp', target: { host: '10.0.0.1-10.0.0.50', port: 22 } }, /host/i],
+        ['monitoring: a container id is not a service reference', { name: 'x', type: 'docker', target: { service: { name: 'abcdef123456' } } }, /container id/i],
+        ['monitoring: an unsupported type is refused', { name: 'x', type: 'icmp', target: { host: '10.0.0.9' } }, /type/i],
+      ];
+      let refusalsHeld = 0;
+      for (const [name, body, pattern] of refusals) {
+        const r = await send('POST', '/api/monitoring/monitors', { monitor: body });
+        const ok = r.status === 400 && pattern.test(String(r.body?.error || '')) && !!r.body?.code;
+        if (ok) refusalsHeld++;
+        else console.error(`   ↳ ${name}: ${r.status} ${String(r.body?.error || '').slice(0, 100)}`);
+      }
+      check('monitoring: every invalid target is refused with a status, a code and a sentence', refusalsHeld === refusals.length, `${refusalsHeld}/${refusals.length}`);
+
+      const settings = await get('/api/monitoring/settings');
+      check('monitoring: the effective settings carry their server-side bounds',
+        settings.status === 200 && settings.body?.bounds?.intervalMs?.min === 10_000 && settings.body?.bounds?.maxConcurrent?.max === 8
+        && typeof settings.body?.settings?.allowInternal === 'boolean',
+        JSON.stringify(settings.body?.bounds || {}).slice(0, 120));
+      const clamped = await send('PUT', '/api/monitoring/settings', { settings: { intervalMs: 1, maxConcurrent: 99, failureThreshold: 42, allowInternal: true } });
+      check('monitoring: a setting outside its bound is clamped on the server, not stored',
+        clamped.body?.settings?.intervalMs === 10_000 && clamped.body.settings.maxConcurrent === 8 && clamped.body.settings.failureThreshold === 10,
+        JSON.stringify(clamped.body?.settings || {}).slice(0, 140));
+      await send('PUT', '/api/monitoring/settings', { settings: { intervalMs: 60_000, maxConcurrent: 3, failureThreshold: 3 } });
+
+      if (monitorId) {
+        const search = await get('/api/search?q=verify-monitor');
+        check('monitoring: a monitor is searchable, as a destination',
+          search.body?.results?.some((r) => r.kind === 'monitor' && r.href === `/monitoring/${monitorId}`),
+          JSON.stringify((search.body?.results || []).slice(0, 3)));
+        const activity = await get('/api/activity?category=monitoring&limit=50');
+        check('monitoring: the activity log carries the monitor through its own category',
+          activity.body?.items?.some((e) => String(e.type).startsWith('monitor.') || String(e.type).startsWith('incident.')),
+          JSON.stringify((activity.body?.items || []).slice(0, 3).map((e) => e.type)));
+        const removed = await send('DELETE', `/api/monitoring/monitors/${monitorId}`);
+        check('monitoring: deleting a monitor removes it and its detail is a 404 afterwards',
+          removed.status === 200 && (await get(`/api/monitoring/monitors/${monitorId}`)).status === 404);
+      }
+
+      // and the surface is behind the same session as everything else
+      const anon = await fetch(`${BASE}/api/monitoring`, { headers: { 'x-forwarded-for': '127.0.0.1' } });
+      check('monitoring: the API is not public', anon.status === 401, `status ${anon.status}`);
+    }
+
     // ---- 8b. Phase 3: read-only service intelligence ----------
     if (engineLive) {
       // service detail carries the runtime facts Docker actually has

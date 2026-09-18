@@ -41,6 +41,9 @@ import { handleOperations } from './operationsApi.js';
 import { describeStorage } from './providers/storage.js';
 // Phase 9 — the OpusGrid infrastructure surface and its health aggregation
 import { handleInfrastructure } from './infrastructureApi.js';
+// Phase 10A — the monitoring surface (monitors, checks, incidents, engine health)
+import { handleMonitoring } from './monitoringApi.js';
+import { alertInputs as monitoringAlertInputs } from './monitoring/engine.js';
 import { describeProviders } from './infrastructure/registry.js';
 import { aggregateHealth } from './infrastructure/health.js';
 import { storageDocument, networkDocument } from './infrastructure/opusgrid.js';
@@ -175,6 +178,20 @@ export async function handleApi(req, res, url) {
       p, method,
       send: (status, obj) => send(res, status, obj),
       query: url.searchParams,
+    });
+    return;
+  }
+
+  // ---------- monitoring (Phase 10A) ----------
+  // Same gate, same rules: the handler owns every /api/monitoring/* route. It answers GETs and a
+  // small, validated set of writes that only ever touch monitor definitions.
+  if (p.startsWith('/api/monitoring')) {
+    await handleMonitoring({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      query: url.searchParams,
+      actor: session?.username ?? null,
     });
     return;
   }
@@ -859,6 +876,10 @@ export async function handleApi(req, res, url) {
       services, stacks, system,
       authFailures: countRecentAuthFailures(),
       storage, network, providers,
+      // Phase 10A: what the monitoring engine *reports* — never what it decides. A monitor that is
+      // paused or inside a maintenance window is not offered here, so this is the whole mechanism
+      // behind "maintenance is quiet".
+      ...monitoringAlertInputs(),
     });
     return send(res, 200, {
       at: new Date().toISOString(), alerts,

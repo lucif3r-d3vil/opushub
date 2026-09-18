@@ -11,6 +11,8 @@ import { BackgroundImage } from './components/BackgroundImage';
 const Hub = lazy(() => import('./pages/Hub'));
 const Services = lazy(() => import('./pages/Services'));
 const ServiceDetail = lazy(() => import('./pages/ServiceDetail'));
+const Monitoring = lazy(() => import('./pages/Monitoring'));
+const MonitorDetail = lazy(() => import('./pages/MonitorDetail'));
 const Stacks = lazy(() => import('./pages/Stacks'));
 const StackDetail = lazy(() => import('./pages/StackDetail'));
 const Infrastructure = lazy(() => import('./pages/Infrastructure'));
@@ -26,6 +28,8 @@ const Login = lazy(() => import('./pages/Login'));
 const NAV = [
   { to: '/', label: 'Hub', icon: 'M4 11.5 12 5l8 6.5V20h-5.5v-4.5h-5V20H4z' },
   { to: '/services', label: 'Services', icon: 'M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z' },
+  // Phase 10A — what OpusHub watches sits between the services it shows and the stacks they form.
+  { to: '/monitoring', label: 'Monitoring', icon: 'M3 12h4l2.5-6 4 12 2.5-6H21' },
   { to: '/stacks', label: 'Stacks', icon: 'm12 3 8.5 4.7L12 12.4 3.5 7.7zM3.5 12.5 12 17.2l8.5-4.7M3.5 17l8.5 4.7L20.5 17' },
   { to: '/system', label: 'System', icon: 'M4 5.5h16v11H4zM8.5 20h7M12 16.5V20' },
   { to: '/activity', label: 'Activity', icon: 'M3 12h4l2.5-6 4 12 2.5-6H21' },
@@ -220,6 +224,9 @@ function ShellWithRoutes() {
             <Route index element={<Hub />} />
             <Route path="services" element={<Services />} />
             <Route path="services/:group/:name" element={<ServiceDetail />} />
+            <Route path="monitoring" element={<Monitoring />} />
+            <Route path="monitoring/incidents" element={<Monitoring />} />
+            <Route path="monitoring/:id" element={<MonitorDetail />} />
             <Route path="stacks" element={<Stacks />} />
             <Route path="stacks/:name" element={<StackDetail />} />
             <Route path="infrastructure" element={<Infrastructure />} />

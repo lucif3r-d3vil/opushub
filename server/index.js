@@ -173,6 +173,22 @@ history.start(async () => {
   }
 }
 
+// Phase 10A — the monitoring engine. It is started here, inside the server's own lifecycle, and it
+// is stopped gracefully on SIGINT/SIGTERM below so an in-flight check is not lost. Nothing about
+// monitoring happens outside this engine: no other module runs checks, schedules them, or holds
+// monitor state.
+{
+  const { start: startMonitoring } = await import('./monitoring/engine.js');
+  try {
+    const health = await startMonitoring();
+    const counts = health.active ? `${health.active} active` : 'no monitors yet';
+    console.log(`│ monitoring : ${health.state} — ${counts}, ${health.concurrency} concurrent checks`);
+  } catch (err) {
+    // Monitoring is a feature, not a dependency: a failure here must not stop OpusHub.
+    console.error(`│ monitoring : failed to start (${err?.message || err})`);
+  }
+}
+
 // Operations that were still running when this process last stopped can never be completed by
 // it, and their Docker call may or may not have reached the engine. Record that honestly once at
 // boot instead of leaving an operation that looks like it is running forever (Phase 8).
@@ -264,8 +280,14 @@ server.listen(PORT, HOST, () => {
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => {
+  process.on(sig, async () => {
     logEvent({ source: 'system', type: 'app.shutdown', subject: 'opushub', message: sig });
+    // Stop monitoring first: the scheduler stops arming work and waits for the running checks, and
+    // the flusher writes what it holds. Bounded — the process still exits within 1.5s.
+    try {
+      const { stop: stopMonitoring } = await import('./monitoring/engine.js');
+      await stopMonitoring();
+    } catch { /* monitoring must never hold up a shutdown */ }
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1500).unref();
   });

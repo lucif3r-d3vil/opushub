@@ -33,7 +33,10 @@ export const SEVERITIES = ['info', 'notice', 'warning', 'critical'];
 // six phases of history under a new heading would be a change nobody asked for. New Phase-9
 // events name their category explicitly instead.
 export const CATEGORIES = ['service', 'stack', 'docker', 'system', 'security', 'config',
-  'storage', 'network', 'power', 'provider'];
+  'storage', 'network', 'power', 'provider',
+  // Phase 10A — monitor state changes and incidents are their own area: they are not service
+  // state (a monitor can be down while the service is fine, and vice versa) and not operations.
+  'monitoring'];
 
 const CATEGORY_BY_TYPE = new Map(Object.entries({
   container: 'docker', provider: 'docker', stack: 'stack', service: 'service', alert: 'system',
@@ -42,6 +45,8 @@ const CATEGORY_BY_TYPE = new Map(Object.entries({
   // Phase 8: an operation is something a person did to a service, so it belongs beside the
   // service it happened to — not buried in "configuration" or lost in "docker".
   operation: 'service',
+  // Phase 10A: monitoring.
+  monitor: 'monitoring', incident: 'monitoring',
   // Phase 9: infrastructure domains.
   zfs: 'storage', storage: 'storage', dataset: 'storage',
   network: 'network',
@@ -68,6 +73,9 @@ export function classifyEvent({ source = null, type = null, meta = null } = {}) 
   // worth recording without alarm. Cancelled is a person changing their mind, not a problem.
   else if (t === 'operation.failed' || t === 'operation.timeout' || t === 'operation.rejected') severity = 'warning';
   else if (t === 'operation.succeeded') severity = 'notice';
+  // Phase 10A: a monitor that has gone down or degraded is worth noticing; a recovery is not.
+  else if (t === 'monitor.down' || t === 'monitor.degraded' || t === 'incident.opened') severity = 'warning';
+  else if (t === 'monitor.recovered' || t === 'monitor.recovering' || t === 'incident.resolved') severity = 'notice';
   return { severity, category };
 }
 

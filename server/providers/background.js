@@ -31,6 +31,7 @@ import dns from 'node:dns/promises';
 import path from 'node:path';
 import { CONFIG_DIR } from '../configStore.js';
 import { TimedCache } from '../lib/cache.js';
+import { remoteFetchBlocked } from '../lib/ipPolicy.js';
 import { fetchJson } from '../lib/net.js';
 
 const PROBE_TIMEOUT_MS = Number(process.env.OPUSHUB_BACKGROUND_PROBE_MS || 9000);
@@ -62,63 +63,15 @@ function meterProbe() {
 }
 
 /**
- * Is this address one the server must not fetch? Loopback, link-local (cloud metadata lives
- * here), private, CGNAT, multicast, documentation, and the IPv6 twins of all of it.
+ * Is this address one the server must not fetch?
+ *
+ * The classification lives in `server/lib/ipPolicy.js` — one implementation of "loopback,
+ * link-local (cloud metadata lives here), private, CGNAT, multicast, documentation, and the IPv6
+ * twins of all of it", shared with the Phase 10A monitoring engine (which needs the same
+ * classification with a different block list, because LAN services are legitimate monitor
+ * targets). `remoteFetchBlocked` is the *shipped* policy of this module, kept verbatim.
  */
-function isBlockedIp(ip) {
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split('.').map(Number);
-    if (a === 0 || a === 10 || a === 127 || a === 169) return true; // 0/8, 10/8, loopback, 169.254/16
-    if (a === 100 && b >= 64 && b <= 127) return true;              // CGNAT 100.64/10
-    if (a === 172 && b >= 16 && b <= 31) return true;               // 172.16/12
-    if (a === 192 && b === 168) return true;                        // 192.168/16
-    if (a === 198 && (b === 18 || b === 19)) return true;           // benchmarking 198.18/15
-    if (a >= 224) return true;                                      // multicast + reserved 224/3
-    return false;
-  }
-  if (!net.isIPv6(ip)) return true; // not a recognized address at all — refuse
-  const groups = v6Groups(ip);
-  if (!groups) return true;
-  const [g0, g1] = groups;
-  if (g0 === 0xff00) return true;                                  // multicast ff00::/8
-  if ((g0 & 0xffc0) === 0xfe80) return true;                       // link-local fe80::/10
-  if ((g0 & 0xfe00) === 0xfc00) return true;                       // unique local fc00::/7
-  if (groups.slice(0, 7).every((g) => g === 0) && groups[7] === 1) return true; // ::1
-  if (groups.every((g) => g === 0)) return true;                   // ::
-  if (g0 === 0x0100) return true;                                  // discard-only 100::/64
-  if (g0 === 0x2001 && g1 === 0x0db8) return true;                 // documentation 2001:db8::/32
-  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) { // v4-mapped ::ffff:a.b.c.d
-    return isBlockedIp(`${groups[6] >> 8}.${groups[6] & 255}.${groups[7] >> 8}.${groups[7] & 255}`);
-  }
-  if (g0 === 0x64 && g1 === 0xff9b && groups[2] === 0 && groups[3] === 0 && groups[4] === 0) { // NAT64
-    return isBlockedIp(`${groups[6] >> 8}.${groups[6] & 255}.${groups[7] >> 8}.${groups[7] & 255}`);
-  }
-  return false;
-}
-
-/** Expand an IPv6 literal to eight 16-bit groups (handles :: and embedded IPv4), else null. */
-function v6Groups(ip) {
-  const addr = String(ip).toLowerCase().split('%')[0];
-  const v4 = addr.lastIndexOf('.');
-  let v4tail = null;
-  if (v4 !== -1) {
-    const parts = addr.slice(v4 + 1).split('.').map(Number);
-    if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return null;
-    v4tail = [(parts[0] << 8) | parts[1], (parts[2] << 8) | parts[3]];
-  }
-  const head = v4 !== -1 ? addr.slice(0, v4 + 1) : addr;
-  const halves = head.split('::');
-  if (halves.length > 2) return null;
-  const left = halves[0] ? halves[0].split(':') : [];
-  const right = halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : [];
-  for (const g of [...left, ...right]) if (g !== '' && !/^[0-9a-f]{1,4}$/.test(g)) return null;
-  if (halves.length > 1 && (left.length > 1 || right.length > 1)) return null;
-  const known = left.length + right.length + (v4tail ? 2 : 0);
-  if (halves.length === 1 && known !== 8) return null;
-  if (halves.length === 2 && known > 7) return null;
-  const groups = [...left.filter(Boolean).map((g) => parseInt(g, 16)), ...new Array(8 - known).fill(0), ...right.filter(Boolean).map((g) => parseInt(g, 16)), ...(v4tail || [])];
-  return groups.length === 8 ? groups : null;
-}
+const isBlockedIp = (ip) => remoteFetchBlocked(ip);
 
 /**
  * Refuse a hostname whose resolution reaches anywhere the server must not fetch.
