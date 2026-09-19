@@ -8,7 +8,6 @@
 // Bounds: MAX_ALERTS active alerts (worst-first), evaluation is pure over its inputs and
 // runs at most once per MIN_INTERVAL_MS no matter how often it is asked.
 import { logEvent, readEvents } from './activity.js';
-import { dispatch } from './notify.js';
 import { THRESHOLDS } from './infrastructure/model.js';
 
 // Phase 10B — event bus publish (lazy)
@@ -299,8 +298,9 @@ function hashInputs({ dockerAvailable, services, stacks, system, authFailures, s
 
 /**
  * Evaluate and reconcile with the active set. Returns the active alerts.
- * Firing alerts are dispatched to notification channels (best-effort) and logged;
- * resolved ones are logged once and forgotten (along with their ack).
+ * Firing alerts are logged and published to the Phase 10B event bus (which feeds the
+ * one notification center and its providers); resolved ones are logged once and
+ * forgotten (along with their ack).
  */
 export function refreshAlerts(inputs = {}) {
   const now = Date.now();
@@ -336,7 +336,8 @@ export function refreshAlerts(inputs = {}) {
         payload: { signature: a.signature, evidence: a.evidence, area: a.area || null },
         correlation: { alertId: a.signature },
       });
-      try { dispatch(a); } catch { /* channels must never break alerting */ }
+      // Delivery is the notification center's job: the alert.created event published above
+      // is the only dispatch path (the Phase 7 channel registry was removed with it).
     }
   }
   for (const [sig, prev] of active) {

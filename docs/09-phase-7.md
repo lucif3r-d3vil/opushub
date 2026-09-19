@@ -83,7 +83,9 @@ The proof is mechanical, not a comment promise — `server/phase7-proof.test.js`
   ack via `POST /api/alerts/ack`.
 - `server/notify.js`: the delivery registry — webhook, email, Telegram, Slack, all
   `coming-later`, with the fan-out and Settings surface ready so a real channel is one
-  `registerChannel()` call.
+  `registerChannel()` call. (Superseded in Phase 10B: the registry was removed outright
+  and delivery lives only in the Phase 10B notification center + provider registry —
+  one canonical notification architecture.)
 - Activity page: active-alert strip with evidence links + ack, Area/Severity filters,
   severity dots. Settings → Notifications names the channels and their status.
 

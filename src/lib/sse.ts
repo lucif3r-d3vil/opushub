@@ -75,10 +75,12 @@ export function useLiveEvents({
     es.onopen = () => {
       setState((s) => ({ ...s, connected: true, connecting: false, error: null, reconnectAttempts: 0 }));
       retryRef.current = RECONNECT_MIN;
+      reportLiveStatus('live', 0);
     };
 
     es.onerror = () => {
       setState((s) => ({ ...s, connected: false, connecting: false, error: 'connection lost', reconnectAttempts: s.reconnectAttempts + 1 }));
+      reportLiveStatus('connecting', 0);
       try { es.close(); } catch {}
       esRef.current = null;
       // exponential backoff with jitter
@@ -148,4 +150,74 @@ export function useLiveEvents({
   }, []);
 
   return { ...state, clear, reconnect: connect };
+}
+
+/* ------------------------------------------------------------------ */
+/* shared live-event broadcast (Phase 10B Notification Center)          */
+/*                                                                     */
+/* The Shell keeps one SSE connection for browser notifications and the */
+/* Activity page keeps its own while open. Instead of the notification */
+/* bell opening a third connection just to learn that something         */
+/* happened, every useLiveEvents instance republishes the deduplicated  */
+/* events it receives here. Consumers (the notification hooks) refresh  */
+/* from the server on each new event id — the server stays the source   */
+/* of truth, so live inserts can neither duplicate nor reset read state.*/
+/* ------------------------------------------------------------------ */
+
+type LiveListener = (e: LiveEvent) => void;
+
+const liveListeners = new Set<LiveListener>();
+const liveSeen = new Set<string>();
+
+function broadcastLiveEvent(e: LiveEvent) {
+  if (!e || !e.id || liveSeen.has(e.id)) return;
+  liveSeen.add(e.id);
+  // bounded: the set only guards the broadcast fan-out, not history
+  if (liveSeen.size > 500) {
+    const arr = [...liveSeen];
+    for (const id of arr.slice(0, arr.length - 500)) liveSeen.delete(id);
+  }
+  for (const fn of liveListeners) {
+    try { fn(e); } catch { /* one bad listener must not break the others */ }
+  }
+}
+
+/** Subscribe to deduplicated live events from every open SSE connection. */
+export function subscribeLiveEvents(fn: LiveListener): () => void {
+  liveListeners.add(fn);
+  return () => { liveListeners.delete(fn); };
+}
+
+/** Test seam: feed one event through the same dedupe + broadcast path. */
+export function __emitLiveEventForTests(e: LiveEvent) {
+  broadcastLiveEvent(e);
+}
+
+/* Aggregate connection status across every open instance, for the panel's
+ * Live/Reconnecting indicator. Instances report; the last report wins, with
+ * "connected" sticky until an instance reports otherwise. */
+
+export type LiveConnection = 'live' | 'connecting' | 'idle';
+
+let liveStatus: LiveConnection = 'idle';
+let liveAttempts = 0;
+const statusListeners = new Set<(s: LiveConnection, attempts: number) => void>();
+
+function reportLiveStatus(s: LiveConnection, attempts: number) {
+  liveStatus = s;
+  liveAttempts = attempts;
+  for (const fn of statusListeners) {
+    try { fn(s, attempts); } catch {}
+  }
+}
+
+export function subscribeLiveStatus(fn: (s: LiveConnection, attempts: number) => void): () => void {
+  statusListeners.add(fn);
+  // the current truth immediately, so a panel opened mid-outage shows it
+  try { fn(liveStatus, liveAttempts); } catch {}
+  return () => { statusListeners.delete(fn); };
+}
+
+export function __setLiveStatusForTests(s: LiveConnection, attempts = 0) {
+  reportLiveStatus(s, attempts);
 }

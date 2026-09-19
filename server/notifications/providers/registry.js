@@ -1,4 +1,5 @@
-// Phase 10B — generic notification provider registry (extensible to Email/Telegram/Discord/Slack)
+// Phase 10B — the one canonical notification provider registry (webhook + Telegram
+// registered; extensible to Email/Discord/Slack without redesign).
 
 const providers = new Map(); // id -> provider instance
 

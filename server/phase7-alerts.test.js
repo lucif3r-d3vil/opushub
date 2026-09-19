@@ -1,4 +1,6 @@
-// Phase 7E — event severity/category, alert evaluation, transitions, notify registry.
+// Phase 7E — event severity/category, alert evaluation, transitions, and the feed into
+// the canonical Phase 10B event bus (the old Phase 7 channel registry is gone — delivery
+// is the notification center's job now).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -14,7 +16,7 @@ process.env.OPUSHUB_DATA_DIR = DATA_DIR;
 
 const { classifyEvent, logEvent, readEvents, _resetActivity } = await import('./activity.js');
 const { evaluateAlerts, refreshAlerts, getActiveAlerts, ackAlert, _resetAlerts, MAX_ALERTS } = await import('./alerts.js');
-const { listChannels, dispatch } = await import('./notify.js');
+const { bus } = await import('./events/bus.js');
 
 let ENGINE = null;
 let handleApi;
@@ -148,25 +150,46 @@ test('refreshAlerts logs fired/resolved exactly once per transition', () => {
   assert.equal(getActiveAlerts()[0].acknowledged, false);
 });
 
-// --- notify registry ------------------------------------------------------------
+// --- canonical feed: alerts publish to the Phase 10B event bus ----------------------
+// There is no alert-channel registry anymore. A firing alert reaches the outside world
+// through exactly one path: alert.created on the bus → notification center → providers.
 
-test('notify lists the four planned channels, all coming-later, and dispatches to none', () => {
-  const channels = listChannels();
-  assert.deepEqual(channels.map((c) => c.id).sort(), ['email', 'slack', 'telegram', 'webhook']);
-  assert.ok(channels.every((c) => c.status === 'coming-later' && c.configured === false));
-  assert.ok(channels.every((c) => c.label && c.blurb));
-  assert.deepEqual(dispatch({ signature: 'x', title: 't' }), [], 'nothing ready, nothing attempted');
+test('a firing alert publishes alert.created to the canonical event bus', async () => {
+  _resetAlerts();
+  _resetActivity();
+  const seen = [];
+  const sub = bus.subscribe(() => true, (evt) => { seen.push(evt); });
+  try {
+    // let any in-flight publish from an earlier test settle, then listen fresh
+    await new Promise((r) => setTimeout(r, 100));
+    seen.length = 0;
+    refreshAlerts({
+      dockerAvailable: true,
+      services: [{ group: 'g', name: 'db', displayName: 'Db', health: 'unhealthy', state: 'running' }],
+      stacks: [], system: null, authFailures: 0,
+    });
+    for (let i = 0; i < 200 && !seen.some((e) => e.type === 'alert.created'); i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const created = seen.find((e) => e.type === 'alert.created');
+    assert.ok(created, 'no alert.created reached the bus');
+    assert.equal(created.correlation?.alertId, 'service.unhealthy:g/db');
+    assert.equal(created.source, 'alert');
+    assert.ok(created.subject?.href, 'the event carries somewhere to look');
+  } finally {
+    sub.unsubscribe();
+  }
 });
 
 // --- endpoint -------------------------------------------------------------------
 
-test('GET /api/alerts returns active alerts, counts and channels', async () => {
+test('GET /api/alerts returns active alerts and counts, and no channel registry', async () => {
   _resetAlerts();
   const { status, json } = await get('/api/alerts');
   assert.equal(status, 200);
   assert.ok(Array.isArray(json.alerts));
   assert.ok(json.counts && typeof json.counts.critical === 'number' && typeof json.counts.warning === 'number');
-  assert.ok(Array.isArray(json.channels) && json.channels.length === 4);
+  assert.equal('channels' in json, false, 'the obsolete channel list is gone from the API');
   assert.ok(json.at);
 });
 

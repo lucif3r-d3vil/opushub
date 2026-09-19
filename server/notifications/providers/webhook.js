@@ -48,7 +48,10 @@ function atomicWrite(obj) {
   ensureDir();
   const tmp = `${FILE}.tmp-${process.pid}-${Date.now()}`;
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf8');
+  // This file can hold a signing secret: restrict it like the Telegram config.
+  try { fs.chmodSync(tmp, 0o600); } catch {}
   fs.renameSync(tmp, FILE);
+  try { fs.chmodSync(FILE, 0o600); } catch {}
 }
 
 let lookupFn = dns.lookup;

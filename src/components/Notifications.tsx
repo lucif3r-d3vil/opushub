@@ -1,10 +1,22 @@
-// Phase 10B — Notification Center UI (bell, list, read/unread)
+// Phase 10B — Notification Center UI (bell, panel, page)
+//
+// The bell lives in the shell (rail on desktop, bottom bar on mobile) so it is present on
+// every page. The panel is portalled to document.body and positioned against the bell with
+// the same measure/flip/clamp discipline as Menu — the first version was absolutely
+// positioned inside the 56px rail item, which pushed it off-viewport to the left.
+//
+// Data: useNotifications() polls quietly AND refreshes on every live SSE event, silently —
+// the server stays the source of truth, so live inserts can neither duplicate a row nor
+// resurrect one already marked read.
 
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { useNotifications, useUnreadCount } from '../lib/notifications';
+import { safeHref, useLiveStatus, useNotifications, useUnreadCount, type Notification } from '../lib/notifications';
 import { relTime } from '../lib/format';
 import { StatusDot } from './ui';
+
+const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 function severityDot(s: string) {
   if (s === 'critical') return 'down';
@@ -16,125 +28,232 @@ function severityDot(s: string) {
 export function NotificationBell() {
   const { unread } = useUnreadCount();
   const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const close = () => {
+    setOpen(false);
+    // focus returns to the trigger, like Menu
+    btnRef.current?.focus();
+  };
+
   return (
-    <div style={{ position: 'relative' }}>
+    <>
       <button
-        className="icon-btn"
-        aria-label={`Notifications${unread ? ` (${unread} unread)` : ''}`}
+        ref={btnRef}
+        className="icon-btn notif-bell"
+        aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         title="Notifications"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (open ? close() : setOpen(true))}
+        onKeyDown={(e) => { if (!open && e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); } }}
         style={{ position: 'relative' }}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" width={20} height={20}>
           <path d="M6 9a6 6 0 0 1 12 0c0 7 6 5 6 10H0s6-3 6-10" strokeLinecap="round" strokeLinejoin="round" />
           <path d="M9 21a3 3 0 0 0 6 0" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
+        {/* live from persisted server state; hidden at 0; tabular numerals + min-width so
+            9→10→99+ never jitters the layout */}
         {unread > 0 && (
-          <span style={{
-            position: 'absolute', top: -2, right: -2,
-            background: 'var(--danger)', color: 'white',
-            borderRadius: '10px', fontSize: '10px', minWidth: '16px', height: '16px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px',
-            fontWeight: 700,
-          }}>
+          <span className="notif-badge" aria-hidden="true">
             {unread > 99 ? '99+' : unread}
           </span>
         )}
       </button>
-      {open && <NotificationPanel onClose={() => setOpen(false)} />}
+      {open && <NotificationPanel anchor={btnRef.current} onClose={close} />}
+    </>
+  );
+}
+
+function LiveChip() {
+  const { status } = useLiveStatus();
+  if (status === 'live') {
+    return <span className="notif-live" data-state="live" title="Live updates connected"><span className="dot" />Live</span>;
+  }
+  if (status === 'connecting') {
+    return <span className="notif-live" data-state="connecting" title="Connection lost — retrying"><span className="dot" />Reconnecting…</span>;
+  }
+  return <span className="notif-live" data-state="polling" title="Polling for updates"><span className="dot" />Polling</span>;
+}
+
+function NotificationRow({ n, busy, onRead, onNavigate }: {
+  n: Notification;
+  busy: boolean;
+  onRead: (id: string) => void;
+  onNavigate: () => void;
+}) {
+  const href = safeHref(n.href);
+  return (
+    <div className="notif-row" data-read={n.read ? 'true' : 'false'} data-severity={n.severity}>
+      <StatusDot state={severityDot(n.severity)} title={n.severity} />
+      <div className="notif-row-body">
+        <div className="notif-row-title">{n.title}</div>
+        {n.message && n.message !== n.title && <div className="notif-row-msg">{n.message}</div>}
+        <div className="notif-row-meta">
+          <span title={new Date(n.t).toLocaleString()}>{relTime(n.t)}</span>
+          <span aria-label={`severity ${n.severity}`}>{n.severity}</span>
+          <span>{n.type}</span>
+          {n.source && <span>{n.source}</span>}
+        </div>
+      </div>
+      <div className="notif-row-actions">
+        {!n.read && (
+          <button className="btn btn-sm" disabled={busy} onClick={() => onRead(n.id)}>
+            {busy ? '…' : 'Read'}
+          </button>
+        )}
+        {href && (
+          <Link to={href} className="btn btn-sm" onClick={onNavigate}>Open</Link>
+        )}
+      </div>
     </div>
   );
 }
 
-export function NotificationPanel({ onClose }: { onClose?: () => void }) {
+export function NotificationPanel({ anchor, onClose }: { anchor?: HTMLElement | null; onClose: () => void }) {
   const { notifications, unread, loading, error, markRead, markAllRead, refresh } = useNotifications(50);
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyAll, setBusyAll] = useState(false);
 
-  return (
+  // placement: below the bell, left-aligned with it (the rail sits at the viewport's left
+  // edge, so end-alignment would clamp over the rail); flips above when there is no room
+  // below (the mobile bar), and clamps into the viewport on every resize/scroll
+  useIsoLayoutEffect(() => {
+    const place = () => {
+      const el = ref.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const gap = 8;
+      const gutter = 8;
+      const a = anchor?.getBoundingClientRect();
+      let left = gutter;
+      let top = gap;
+      if (a && (a.width || a.height)) {
+        left = a.left;
+        top = a.bottom + gap;
+        const height = rect.height || 320;
+        const above = a.top - gap - height;
+        if (top + height > vh - gutter && above > gutter) top = Math.max(gutter, above);
+      }
+      const width = rect.width || Math.min(420, vw - gutter * 2);
+      left = Math.max(gutter, Math.min(left, vw - width - gutter));
+      top = Math.max(gutter, Math.min(top, vh - (rect.height || 320) - gutter));
+      setPos((cur) => (cur && Math.abs(cur.left - left) < 0.5 && Math.abs(cur.top - top) < 0.5 ? cur : { left, top }));
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [anchor]);
+
+  // keyboard: Escape closes (focus was already restored by the bell's close), Tab moves on
+  useEffect(() => {
+    ref.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+      if (e.key === 'Tab') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // click-outside closes; a click on the bell itself is the bell's business (it toggles)
+  useEffect(() => {
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (ref.current?.contains(target)) return;
+      if (anchor && (anchor === target || anchor.contains(target))) return;
+      onClose();
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('touchstart', onDown);
+    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('touchstart', onDown); };
+  }, [onClose, anchor]);
+
+  const doRead = async (id: string) => {
+    if (busyId) return;
+    setBusyId(id);
+    try { await markRead(id); } catch { /* the error banner survives below */ } finally { setBusyId(null); }
+  };
+  const doReadAll = async () => {
+    if (busyAll) return;
+    setBusyAll(true);
+    try { await markAllRead(); } catch {} finally { setBusyAll(false); }
+  };
+
+  const panel = (
     <div
-      className="card"
-      style={{
-        position: 'absolute', right: 0, top: 'calc(100% + 8px)',
-        width: 'min(420px, 90vw)', maxHeight: '70vh', overflow: 'auto',
-        zIndex: 100, boxShadow: 'var(--shadow-lg)',
-      }}
+      ref={ref}
+      className="notif-panel"
+      role="dialog"
+      aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ''}`}
+      tabIndex={-1}
+      style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-        <strong>Notifications {unread > 0 && <span style={{ color: 'var(--danger)' }}>({unread})</span>}</strong>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-sm" onClick={() => { void markAllRead().then(() => refresh()); }}>Mark all read</button>
-          {onClose && <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>}
+      <div className="notif-head">
+        <strong>Notifications {unread > 0 && <span className="notif-unread">({unread})</span>}</strong>
+        <div className="notif-head-actions">
+          <LiveChip />
+          <button className="btn btn-sm" disabled={busyAll || unread === 0} onClick={() => void doReadAll()}>
+            {busyAll ? 'Marking…' : 'Mark all read'}
+          </button>
+          <button className="icon-btn" onClick={onClose} aria-label="Close notifications">✕</button>
         </div>
       </div>
-      {loading && <p className="stale-note" style={{ padding: 16 }}>Loading…</p>}
-      {error && <p className="stale-note" style={{ padding: 16, color: 'var(--warn)' }}>{error}</p>}
-      {!loading && notifications.length === 0 && <p className="stale-note" style={{ padding: 16 }}>No notifications.</p>}
-      <div>
-        {notifications.map((n) => (
-          <div
-            key={n.id}
-            style={{
-              padding: '10px 16px',
-              borderBottom: '1px solid var(--border)',
-              background: n.read ? 'transparent' : 'var(--surface-2)',
-              display: 'flex', gap: 10, alignItems: 'flex-start',
-            }}
-          >
-            <StatusDot state={severityDot(n.severity)} title={n.severity} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: n.read ? 400 : 600, fontSize: '0.92rem', lineHeight: 1.3 }}>{n.title}</div>
-              <div className="stale-note" style={{ marginTop: 2, fontSize: '0.82rem' }}>{n.message}</div>
-              <div className="stale-note" style={{ marginTop: 4, fontSize: '0.75rem' }}>
-                {relTime(n.t)} · {n.type} {n.source && `· ${n.source}`}
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {!n.read && (
-                <button className="btn btn-sm" onClick={() => { void markRead(n.id).then(() => refresh()); }}>Read</button>
-              )}
-              {n.href && (
-                <Link to={n.href} className="btn btn-sm" onClick={() => onClose?.()}>Open</Link>
-              )}
-            </div>
+      <div className="notif-list">
+        {loading && <p className="stale-note notif-state">Loading…</p>}
+        {!loading && error && (
+          <div className="notif-state">
+            <p className="stale-note" style={{ color: 'var(--warn)' }}>{error}</p>
+            <button className="btn btn-sm" onClick={() => refresh()}>Retry</button>
           </div>
+        )}
+        {!loading && !error && notifications.length === 0 && (
+          <p className="stale-note notif-state">You're all caught up — new monitoring, alert, operation and infrastructure events will appear here.</p>
+        )}
+        {notifications.map((n) => (
+          <NotificationRow key={n.id} n={n} busy={busyId === n.id} onRead={(id) => void doRead(id)} onNavigate={onClose} />
         ))}
       </div>
-      <div style={{ padding: 12, textAlign: 'center' }}>
-        <Link to="/activity" className="btn btn-sm" onClick={() => onClose?.()}>View Activity</Link>
-        <Link to="/settings?tab=notifications" className="btn btn-sm" style={{ marginLeft: 8 }} onClick={() => onClose?.()}>Settings</Link>
+      <div className="notif-foot">
+        <Link to="/activity" className="btn btn-sm" onClick={onClose}>View Activity</Link>
+        <Link to="/settings/notifications" className="btn btn-sm" onClick={onClose}>Settings</Link>
       </div>
     </div>
   );
+  return typeof document === 'undefined' ? panel : createPortal(panel, document.body);
 }
 
 export function NotificationCenterPage() {
   const { notifications, unread, loading, error, markRead, markAllRead, refresh } = useNotifications(100);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const doRead = async (id: string) => {
+    if (busyId) return;
+    setBusyId(id);
+    try { await markRead(id); } catch {} finally { setBusyId(null); }
+  };
   return (
     <div>
       <header className="page-hero">
-        <h1 className="page-title">Notifications {unread > 0 && <span style={{ color: 'var(--danger)' }}>({unread} unread)</span>}</h1>
+        <h1 className="page-title">Notifications {unread > 0 && <span style={{ color: 'var(--fail)' }}>({unread} unread)</span>}</h1>
         <p className="page-desc">Live updates from monitoring, alerts, operations, and infrastructure. Mark read to clear the bell.</p>
       </header>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button className="btn" onClick={() => { void markAllRead().then(() => refresh()); }}>Mark all read</button>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+        <button className="btn" disabled={unread === 0} onClick={() => { void markAllRead(); }}>Mark all read</button>
         <button className="btn" onClick={() => refresh()}>Refresh</button>
+        <LiveChip />
       </div>
       {loading && <p>Loading…</p>}
       {error && <p style={{ color: 'var(--warn)' }}>{error}</p>}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {notifications.length === 0 && !loading && <p className="stale-note" style={{ padding: 16 }}>No notifications.</p>}
+        {notifications.length === 0 && !loading && !error && <p className="stale-note" style={{ padding: 16 }}>No notifications.</p>}
         {notifications.map((n) => (
-          <div key={n.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 12, background: n.read ? 'transparent' : 'var(--surface-2)' }}>
-            <StatusDot state={severityDot(n.severity)} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: n.read ? 400 : 600 }}>{n.title}</div>
-              <div className="stale-note">{n.message}</div>
-              <div className="stale-note" style={{ fontSize: '0.8rem', marginTop: 4 }}>{relTime(n.t)} · {n.type}</div>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {!n.read && <button className="btn btn-sm" onClick={() => { void markRead(n.id).then(() => refresh()); }}>Mark read</button>}
-              {n.href && <Link className="btn btn-sm" to={n.href}>Open</Link>}
-            </div>
-          </div>
+          <NotificationRow key={n.id} n={n} busy={busyId === n.id} onRead={(id) => void doRead(id)} onNavigate={() => {}} />
         ))}
       </div>
     </div>

@@ -1,13 +1,15 @@
 # Phase 10B — Live Events & Notifications
 
-> Status: implementation plan (pre-code audit)
+> Status: shipped — Notification Center UI fixed (portalled panel, live badge, SSE refresh) and
+> Telegram added as an outbound-only provider through the shared policy/provider model.
+> The sections below remain the pre-code plan; §7 notes what is still deferred.
 
 ## 1. Audit — existing modules to reuse
 
 | Capability | Location | Reuse |
 | --- | --- | --- |
 | Activity log (JSONL, bounded, dedup, severity/category, grouping, filtering) | `server/activity.js` | Keep as historical log; new Event Bus will feed it for meaningful transitions, but Activity remains authoritative for activity UI. Do NOT replace. |
-| Alerts engine (pure evaluate, active set, firing/resolved transitions, ack, channels registry) | `server/alerts.js` + `server/notify.js` | Alerts remain authoritative; event bus will publish `alert.created` / `alert.resolved` on transitions. Existing `notify.js` registry will be extended to real provider registry (webhook first). |
+| Alerts engine (pure evaluate, active set, firing/resolved transitions, ack, channels registry) | `server/alerts.js` + `server/notify.js` | Alerts remain authoritative; event bus will publish `alert.created` / `alert.resolved` on transitions. Shipped differently from this plan: the `notify.js` registry was removed outright (its dispatch was a proven no-op) and delivery lives only in the Phase 10B notification center + provider registry. |
 | Monitoring engine (CRUD, scheduler, checks, state machine, incidents, history, store) | `server/monitoring/*` + `server/monitoringApi.js` | Monitoring remains sole checker/scheduler/state holder. Phase 10B will add event publishing on meaningful transitions (up→down etc) inside `engine.js` via event bus, without changing check logic. |
 | Infrastructure model/providers/registry/health | `server/infrastructure/*` + `server/infrastructureApi.js` | Health changes already produce activity via `state.js` and `registry.js`. Event bus will publish `infrastructure.health_changed` where provider model supports it. No new provider invented. |
 | Operations engine (request → confirm → execute → verify → audit) | `server/operations/*` | Operations already log activity. Event bus will publish `operation.completed/failed/etc` on terminal states. No Docker mutation added. |
@@ -40,7 +42,7 @@
 | `server/notifications/store.js` | Persistence: `DATA_DIR/notifications/notifications.json` (JSON doc, atomic), bounded (max 1000, keep 800), corruption handling, retention. |
 | `server/notifications/policy.js` | Policy layer: Event → Notification filtering. Simple explicit rules: enabled, minSeverity, allowedTypes, allowedSources, browserEnabled, webhookEnabled. No rule language, no JS eval. Stored in `DATA_DIR/notifications/policy.json` or `config/settings.yaml`? Decision: store in `DATA_DIR/notifications/policy.json` to keep operational data separate, but expose via settings API. |
 | `server/notifications/center.js` | Notification Center logic: create from event (idempotent by eventId), unread count, mark read, mark all read, list with filters, retention. |
-| `server/notifications/providers/registry.js` | Generic provider registry: `NotificationProvider` base, `registerProvider`, `listProviders`, `getProviderStatus`. Extends existing `notify.js` concept but new generic interface. |
+| `server/notifications/providers/registry.js` | Generic provider registry: `NotificationProvider` base, `registerProvider`, `listProviders`, `getProviderStatus`. The one canonical provider registry (`notify.js` was removed, not extended). |
 | `server/notifications/providers/webhook.js` | WebhookProvider: config (url, secret, enabled), validation (HTTPS by default, allow http for explicitly configured internal? Use shared ipPolicy), SSRF protection (reuse `ipPolicy`), redirect validation, timeout (5s), bounded payload (64KB), bounded response (16KB), bounded retries (max 2, exponential), no arbitrary headers, secret redaction, delivery results recorded. | Safe target validation, same security boundary as monitoring. |
 | `server/notificationsApi.js` | `/api/notifications/*` routes: list, unread count, mark read, mark all read, policy get/put, webhook config get/put/test, providers status. Auth gated, CSRF for writes, secrets masked. |
 | `src/lib/sse.ts` | Frontend SSE hook: authenticated EventSource with reconnection, Last-Event-ID handling, connection state, duplicate prevention via event id, fallback to polling. |
@@ -106,7 +108,8 @@ Future providers (Email, Telegram, Discord, Slack) can be added as new `Notifica
 
 ## 7. What is deferred (explicit)
 
-- Email, Telegram, Discord, Slack providers (registry placeholder only)
+- Email, Discord, Slack providers (registry placeholder only). Telegram shipped as outbound-only
+  (`server/notifications/providers/telegram.js`, fixed `api.telegram.org` endpoint, secret-masked config).
 - Autoheal/remediation (no restart, no repair)
 - OpusAI (no LLM)
 - File management, app deployment, reverse-proxy implementation

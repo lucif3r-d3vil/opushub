@@ -21,7 +21,6 @@ import { URL_REASONS } from './urlResolver.js';
 import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons.js';
 import { logEvent, readEvents, firstEventAt } from './activity.js';
 import { ackAlert, countRecentAuthFailures, getActiveAlerts, refreshAlerts } from './alerts.js';
-import { listChannels } from './notify.js';
 import { checkForUpdates, lastUpdateCheck, REPO_URL } from './updateCheck.js';
 import { searchAll } from './search.js';
 import { loadEnv } from './env.js';
@@ -925,7 +924,8 @@ export async function handleApi(req, res, url) {
         critical: alerts.filter((x) => x.severity === 'critical').length,
         warning: alerts.filter((x) => x.severity === 'warning').length,
       },
-      channels: listChannels(),
+      // Delivery status lives with the canonical providers now
+      // (GET /api/notifications/providers) — /api/alerts carries the alerts.
     });
   }
   if (route === 'POST /api/alerts/ack') {
@@ -1736,6 +1736,7 @@ const V1_ROUTES = new Set([
   '/events', '/events/stream', '/events/stats',
   '/notifications', '/notifications/unread-count', '/notifications/stats',
   '/notifications/policy', '/notifications/providers', '/notifications/webhook',
+  '/notifications/telegram',
 ]);
 
 export function rewriteV1(pathname) {

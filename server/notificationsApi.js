@@ -1,13 +1,21 @@
 // Phase 10B — /api/notifications routes
+//
+// All routes sit behind the session + CSRF gate in server/api.js: reads require a session,
+// writes additionally require a same-origin request. Secrets (webhook secret, Telegram bot
+// token) are write-only — GET responses carry masked forms and booleans, never the value.
 
 import { listNotifications, unreadCount, markRead, markAllRead, getNotification, stats as notifStats } from './notifications/store.js';
 import { getPolicy, putPolicy } from './notifications/policy.js';
 import { getWebhookConfig, putWebhookConfig, sendWebhook, validateWebhookUrl, webhookProvider } from './notifications/providers/webhook.js';
+import { getTelegramConfig, putTelegramConfig, sendTestMessage, telegramProvider } from './notifications/providers/telegram.js';
 import { listProviders, registerProvider } from './notifications/providers/registry.js';
 
-// Ensure webhook provider is registered
+// Ensure providers are registered (init.js also registers; registration is idempotent)
 try {
   registerProvider('webhook', webhookProvider);
+} catch {}
+try {
+  registerProvider('telegram', telegramProvider);
 } catch {}
 
 export async function handleNotifications({ p, method, send, jsonBody, query }) {
@@ -121,6 +129,35 @@ export async function handleNotifications({ p, method, send, jsonBody, query }) 
       if (!validation.ok) return send(400, { error: validation.reason, code: 'invalid_url' });
       return send(200, { ok: true, message: 'URL appears valid', url: validation.url });
     }
+  }
+
+  // GET /api/notifications/telegram — config (token masked, never returned)
+  if (p === '/api/notifications/telegram' && method === 'GET') {
+    return send(200, { telegram: getTelegramConfig() });
+  }
+
+  // PUT /api/notifications/telegram — save config; an omitted/empty token preserves the saved secret
+  if (p === '/api/notifications/telegram' && method === 'PUT') {
+    const body = await jsonBody();
+    try {
+      const next = putTelegramConfig({
+        botToken: body?.botToken,
+        chatId: body?.chatId,
+        enabled: body?.enabled,
+      });
+      return send(200, { ok: true, telegram: next });
+    } catch (err) {
+      return send(err.status || 400, { error: err.message, code: err.code || 'invalid_telegram' });
+    }
+  }
+
+  // POST /api/notifications/telegram/test — uses the SAVED config, sends a fixed test
+  // message. Creates no incident and no persistent notification.
+  if (p === '/api/notifications/telegram/test' && method === 'POST') {
+    const result = await sendTestMessage();
+    // The result reason is provider-sanitized (fixed words + codes, never the token,
+    // never Telegram's verbatim description) and safe to return.
+    return send(result.ok ? 200 : 400, { ok: result.ok, result });
   }
 
   // GET /api/notifications/:id
