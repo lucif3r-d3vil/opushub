@@ -36,6 +36,20 @@
 //                      sentence. Credentials, paths and upstream bodies are not fields here.
 import { logEvent } from '../activity.js';
 
+// Phase 10B — event bus publish (lazy)
+let _publishEvent = null;
+async function getPublish() {
+  if (_publishEvent) return _publishEvent;
+  try {
+    const mod = await import('../events/index.js');
+    _publishEvent = mod.publishEvent;
+    return _publishEvent;
+  } catch { return null; }
+}
+function publishEventSafe(desc) {
+  getPublish().then((fn) => { if (fn) try { fn(desc); } catch {} }).catch(() => {});
+}
+
 /** The whole status vocabulary. `not-configured` is a first-class answer, not a failure. */
 export const PROVIDER_STATUS = Object.freeze([
   'connected', 'available', 'degraded', 'unavailable', 'not-configured', 'unknown',
@@ -274,6 +288,17 @@ export function noteProviderStates(providers) {
       category: 'provider',
       signature: `provider.${p.id}:${prev}>${p.status}`,
       dedupeWindowMs: 5 * 60_000,
+    });
+    publishEventSafe({
+      type: 'infrastructure.provider.state_changed',
+      severity: recovered ? 'notice' : 'warning',
+      source: 'infrastructure',
+      subject: { kind: 'provider', id: p.id, label: p.name, href: '/infrastructure' },
+      message: recovered
+        ? `${p.name} is ${p.statusLabel.toLowerCase()} again`
+        : `${p.name} is ${p.statusLabel.toLowerCase()}${p.error?.reason ? ` — ${p.error.reason}` : ''}`,
+      payload: { provider: p.id, from: prev, to: p.status },
+      correlation: { provider: p.id },
     });
   }
 }

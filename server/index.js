@@ -173,6 +173,19 @@ history.start(async () => {
   }
 }
 
+// Phase 10B — live events & notifications (must start before monitoring so it can capture transitions)
+{
+  try {
+    const { initEvents } = await import('./events/index.js');
+    const { initNotifications } = await import('./notifications/init.js');
+    initEvents();
+    initNotifications();
+    console.log('│ events     : bus ready, history loaded, notification center listening');
+  } catch (err) {
+    console.error(`│ events     : failed to start (${err?.message || err})`);
+  }
+}
+
 // Phase 10A — the monitoring engine. It is started here, inside the server's own lifecycle, and it
 // is stopped gracefully on SIGINT/SIGTERM below so an in-flight check is not lost. Nothing about
 // monitoring happens outside this engine: no other module runs checks, schedules them, or holds
@@ -288,6 +301,14 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
       const { stop: stopMonitoring } = await import('./monitoring/engine.js');
       await stopMonitoring();
     } catch { /* monitoring must never hold up a shutdown */ }
+    try {
+      const { closeAllSSE } = await import('./events/sse.js');
+      closeAllSSE();
+    } catch {}
+    try {
+      const { stopNotifications } = await import('./notifications/init.js');
+      stopNotifications();
+    } catch {}
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1500).unref();
   });

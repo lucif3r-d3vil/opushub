@@ -11,6 +11,20 @@ import { logEvent, readEvents } from './activity.js';
 import { dispatch } from './notify.js';
 import { THRESHOLDS } from './infrastructure/model.js';
 
+// Phase 10B — event bus publish (lazy)
+let _publishEvent = null;
+async function getPublish() {
+  if (_publishEvent) return _publishEvent;
+  try {
+    const mod = await import('./events/index.js');
+    _publishEvent = mod.publishEvent;
+    return _publishEvent;
+  } catch { return null; }
+}
+function publishEventSafe(desc) {
+  getPublish().then((fn) => { if (fn) try { fn(desc); } catch {} }).catch(() => {});
+}
+
 export const MAX_ALERTS = 50;
 export const MIN_INTERVAL_MS = 30_000;
 
@@ -313,6 +327,15 @@ export function refreshAlerts(inputs = {}) {
         meta: { signature: a.signature, severity: a.severity, evidence: a.evidence },
         severity: a.severity === 'critical' ? 'critical' : 'warning', category: 'system',
       });
+      publishEventSafe({
+        type: 'alert.created',
+        severity: a.severity === 'critical' ? 'critical' : 'warning',
+        source: 'alert',
+        subject: { kind: 'alert', id: a.signature, label: a.title, href: a.links?.[0]?.href || '/' },
+        message: a.detail,
+        payload: { signature: a.signature, evidence: a.evidence, area: a.area || null },
+        correlation: { alertId: a.signature },
+      });
       try { dispatch(a); } catch { /* channels must never break alerting */ }
     }
   }
@@ -325,6 +348,15 @@ export function refreshAlerts(inputs = {}) {
       meta: { signature: sig, severity: prev.severity },
       severity: 'notice', category: 'system',
     });
+    publishEventSafe({
+      type: 'alert.resolved',
+      severity: 'notice',
+      source: 'alert',
+      subject: { kind: 'alert', id: sig, label: prev.title, href: '/' },
+      message: `${prev.title} — resolved.`,
+      payload: { signature: sig },
+      correlation: { alertId: sig },
+    });
   }
   return [...active.values()];
 }
@@ -336,6 +368,15 @@ export function ackAlert(signature) {
   if (!a) return null;
   a.acknowledged = true;
   a.ackAt = Date.now();
+  publishEventSafe({
+    type: 'alert.acknowledged',
+    severity: 'info',
+    source: 'alert',
+    subject: { kind: 'alert', id: a.signature, label: a.title, href: '/' },
+    message: `${a.title} acknowledged`,
+    payload: { signature: a.signature },
+    correlation: { alertId: a.signature },
+  });
   return a;
 }
 

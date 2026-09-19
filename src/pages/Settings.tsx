@@ -1662,19 +1662,163 @@ function normalizeSymbolInput(raw: string): { symbol: string | null; reason: str
 }
 
 function NotificationsTab() {
-  const { data } = usePolled<AlertsDoc>('/api/alerts', 30_000);
-  const channels = data?.channels || [];
+  const { data: alertsData } = usePolled<AlertsDoc>('/api/alerts', 30_000);
+  const channels = alertsData?.channels || [];
+  const [policy, setPolicy] = useState<any>(null);
+  const [webhook, setWebhook] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<any>(null);
+  const [webhookForm, setWebhookForm] = useState({ url: '', secret: '', enabled: false, allowInternal: false, allowInsecure: false });
+
+  const load = useCallback(async () => {
+    try {
+      const p = await api<{ policy: any }>('/api/notifications/policy');
+      setPolicy(p.policy);
+      const w = await api<{ webhook: any }>('/api/notifications/webhook');
+      setWebhook(w.webhook);
+      setWebhookForm((prev) => ({
+        ...prev,
+        enabled: w.webhook?.enabled || false,
+        allowInternal: w.webhook?.allowInternal || false,
+        allowInsecure: w.webhook?.allowInsecure || false,
+      }));
+    } catch {}
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const savePolicy = async (patch: any) => {
+    setSaving(true); setErr(null); setMsg(null);
+    try {
+      const res = await put<{ policy: any }>('/api/notifications/policy', patch);
+      setPolicy(res.policy);
+      setMsg('Policy saved');
+    } catch (e: any) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const saveWebhook = async () => {
+    setSaving(true); setErr(null); setMsg(null);
+    try {
+      const body: any = {
+        enabled: webhookForm.enabled,
+        allowInternal: webhookForm.allowInternal,
+        allowInsecure: webhookForm.allowInsecure,
+      };
+      if (webhookForm.url.trim()) body.url = webhookForm.url.trim();
+      if (webhookForm.secret.trim()) body.secret = webhookForm.secret.trim();
+      const res = await put<{ webhook: any }>('/api/notifications/webhook', body);
+      setWebhook(res.webhook);
+      setMsg('Webhook saved');
+      setWebhookForm((f) => ({ ...f, url: '', secret: '' }));
+    } catch (e: any) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const testWebhook = async () => {
+    setSaving(true); setErr(null); setTestResult(null);
+    try {
+      const res = await post<any>('/api/notifications/webhook/test', {});
+      setTestResult(res);
+    } catch (e: any) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const requestBrowser = async () => {
+    if (!('Notification' in window)) { setErr('Browser notifications not supported'); return; }
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      await savePolicy({ browser: { enabled: true } });
+      setMsg('Browser notifications enabled');
+    } else {
+      setErr(`Permission ${perm}`);
+    }
+  };
+
   return (
     <>
       <p className="lede">
-        When something needs your attention — an unhealthy service, a degraded stack, a full disk — OpusHub raises an
-        alert on the <Link className="section-link" to="/activity">Activity page</Link>. Delivery channels will forward
-        those alerts elsewhere; the registry below is the plan, and every entry says plainly what exists today.
+        Live events from monitoring, alerts, operations and infrastructure flow through the Event Bus, into the
+        Notification Center, and optionally out via Webhooks or browser notifications. All of it is bounded, sanitized,
+        and authenticated — the browser can never publish arbitrary events.
       </p>
-      <Block title="Channels" aside={data ? <span className="stale-note">{data.alerts.length} active alert{data.alerts.length === 1 ? '' : 's'}</span> : undefined}>
-        {!data && <Loading what="notification channels" />}
+
+      <Block title="Notification Center" aside={<span className="stale-note">{alertsData ? `${alertsData.alerts.length} active alert(s)` : ''}</span>}>
+        {!policy && <Loading what="notification policy" />}
+        {policy && (
+          <>
+            <Row label="Enabled" tight><Switch checked={policy.enabled} onChange={(v) => savePolicy({ enabled: v })} label="Enable notifications" /></Row>
+            <Row label="Minimum severity" desc="Only events at or above this level become notifications.">
+              <Segmented value={policy.minSeverity} onChange={(v) => savePolicy({ minSeverity: v })} ariaLabel="Min severity"
+                options={[{ value: 'info', label: 'Info' }, { value: 'notice', label: 'Notice' }, { value: 'warning', label: 'Warning' }, { value: 'critical', label: 'Critical' }]} />
+            </Row>
+            <Row label="In-app" desc="Bell indicator and notification list." tight>
+              <Switch checked={policy.inApp?.enabled !== false} onChange={(v) => savePolicy({ inApp: { enabled: v } })} label="In-app" />
+            </Row>
+          </>
+        )}
+      </Block>
+
+      <Block title="Browser notifications" aside={<span className="stale-note">{typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'}</span>}>
+        {policy && (
+          <>
+            <Row label="Enabled" desc="Shows a native notification when a matching event arrives via SSE. Permission must be granted and is requested only on your click." tight>
+              <Switch checked={!!policy.browser?.enabled} onChange={(v) => v ? void requestBrowser() : savePolicy({ browser: { enabled: false } })} label="Browser notifications" />
+            </Row>
+            <Row label="Minimum severity for browser">
+              <Segmented value={policy.browser?.minSeverity || 'warning'} onChange={(v) => savePolicy({ browser: { minSeverity: v } })} ariaLabel="Browser min severity"
+                options={[{ value: 'notice', label: 'Notice' }, { value: 'warning', label: 'Warning' }, { value: 'critical', label: 'Critical' }]} />
+            </Row>
+            <Row label="Permission" desc="Browsers only allow permission requests on user interaction.">
+              <button className="btn btn-sm" onClick={() => void requestBrowser()}>Request permission</button>
+              <span className="stale-note" style={{ marginLeft: 8 }}>{typeof window !== 'undefined' && 'Notification' in window ? `current: ${Notification.permission}` : 'not supported'}</span>
+            </Row>
+          </>
+        )}
+      </Block>
+
+      <Block title="Webhook provider" aside={webhook ? <span className="stale-note">{webhook.url ? `configured: ${webhook.url}` : 'not configured'} · {webhook.enabled ? 'enabled' : 'disabled'}</span> : undefined}>
+        <p className="stale-note" style={{ marginBottom: 12 }}>
+          Generic outbound webhook with SSRF protection reusing the shared address policy. HTTPS by default; internal
+          addresses only if explicitly allowed. Payloads are bounded (64KB), timeout 5s, no secrets in logs, HMAC signature
+          via <code>X-OpusHub-Signature</code>. Extensible to future Email/Telegram/Discord/Slack without redesign.
+        </p>
+        {webhook && (
+          <>
+            <Row label="Enabled" tight><Switch checked={!!webhookForm.enabled} onChange={(v) => setWebhookForm((f) => ({ ...f, enabled: v }))} label="Enable webhook" /></Row>
+            <Row label="URL" desc="Only https (or http when internal allowed). No credentials in URL, max 2048 chars.">
+              <input className="input mono-meta" style={{ width: 360 }} placeholder={webhook.url || 'https://example.com/hook'} value={webhookForm.url} onChange={(e) => setWebhookForm((f) => ({ ...f, url: e.target.value }))} />
+            </Row>
+            <Row label="Secret" desc="Optional — used to HMAC sign payloads. Never returned after save (masked).">
+              <input className="input" style={{ width: 260 }} type="password" placeholder={webhook.hasSecret ? '•••••••• (already set)' : 'optional secret'} value={webhookForm.secret} onChange={(e) => setWebhookForm((f) => ({ ...f, secret: e.target.value }))} />
+            </Row>
+            <Row label="Allow internal" desc="Permit private RFC1918/CGNAT/ULA destinations. Default false (public only)." tight>
+              <Switch checked={webhookForm.allowInternal} onChange={(v) => setWebhookForm((f) => ({ ...f, allowInternal: v }))} label="Allow internal" />
+            </Row>
+            <Row label="Allow insecure" desc="Allow http when internal is allowed. Default false." tight>
+              <Switch checked={webhookForm.allowInsecure} onChange={(v) => setWebhookForm((f) => ({ ...f, allowInsecure: v }))} label="Allow http" />
+            </Row>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => void saveWebhook()}>{saving ? 'Saving…' : 'Save webhook'}</button>
+              <button className="btn btn-sm" disabled={saving || !webhook.url} onClick={() => void testWebhook()}>{saving ? 'Testing…' : 'Send test'}</button>
+            </div>
+            {testResult && (
+              <p className="stale-note" style={{ marginTop: 8, color: testResult.ok ? 'var(--ok)' : 'var(--warn)' }}>
+                Test: {testResult.ok ? '✓ delivered' : `✗ ${testResult.result?.reason || 'failed'}`}
+              </p>
+            )}
+          </>
+        )}
+        {msg && <p className="stale-note" style={{ color: 'var(--ok)', marginTop: 8 }}>{msg}</p>}
+        {err && <p className="stale-note" style={{ color: 'var(--fail)', marginTop: 8 }}>{err}</p>}
+      </Block>
+
+      <Block title="Alert channels (legacy)" aside={alertsData ? <span className="stale-note">{alertsData.alerts.length} active</span> : undefined}>
+        {!alertsData && <Loading what="notification channels" />}
         <div className="editor-list">
-          {channels.map((c) => (
+          {channels.map((c: any) => (
             <div className="editor-item" key={c.id}>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <b style={{ fontWeight: 560 }}>{c.label}</b>
@@ -1684,14 +1828,6 @@ function NotificationsTab() {
             </div>
           ))}
         </div>
-      </Block>
-      <Block title="How alerting works">
-        <Row label="Evaluation" desc="Alert conditions run over data OpusHub already holds — no extra polling of your engine, no external calls.">
-          <span className="stale-note">on each Activity visit</span>
-        </Row>
-        <Row label="Record" desc="Every firing and every recovery is written to the activity log, so the history survives restarts.">
-          <Link className="section-link" to="/activity">open the log →</Link>
-        </Row>
       </Block>
     </>
   );
