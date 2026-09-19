@@ -372,6 +372,8 @@ test('no server module outside the Docker client opens a socket to the engine', 
         // here is not an exemption from that proof: it is the acknowledgement that a second
         // client exists at all, so a third one cannot appear unnoticed.
         if (/providers[/\\]dockerOperations\.js$/.test(p)) continue;
+        // Phase 10C: server/updates/recreateAdapter.js is the dedicated adapter for container recreation/updates.
+        if (/updates[/\\]recreateAdapter\.js$/.test(p)) continue;
         // Phase 10A: the monitoring checks open sockets to *monitored endpoints* — that is the
         // feature, not a second Docker client. They are named here rather than pattern-matched, and
         // the exemption is paid for: server/phase10a-proof.test.js proves mechanically that neither

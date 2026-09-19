@@ -69,6 +69,11 @@ function shouldLogToActivity(evt) {
     'service.up',
     'service.unhealthy',
     'service.healthy',
+    'container.update_available',
+    'container.updated',
+    'container.update_failed',
+    'container.autoheal.restarted',
+    'container.autoheal.failed',
   ]);
   return meaningful.has(evt.type);
 }

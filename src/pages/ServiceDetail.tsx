@@ -19,6 +19,8 @@ import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
 import { ServiceActions, RecentOperations } from '../components/ServiceActions';
 import { useOperationsCapabilities } from '../lib/operations';
+import { UpdateItemRow } from '../components/Updates';
+import type { ContainerUpdateRecord } from '../lib/types';
 
 interface InspectedContainer {
   id: string; name: string; image: string | null; imageId?: string | null;
@@ -97,6 +99,10 @@ export default function ServiceDetail() {
   );
   const opsCap = useOperationsCapabilities();
   const opsHistory = ops.data?.operations ?? [];
+  const updateQuery = usePolled<{ update: ContainerUpdateRecord }>(
+    data ? `/api/container-updates/${encodeURIComponent(data.service.name)}` : null, 30_000
+  );
+  const containerUpdate = updateQuery.data?.update;
 
   if (loading && !data) return <div style={{ padding: 'var(--sp-12) 0' }}><Loading what="this service" note="from the engine and the presentation overlay" /></div>;
   if (error && !data) return <ProviderNote status="error" reason={error} fixHref="/services" fixLabel="Back to Services →" />;
@@ -441,7 +447,13 @@ export default function ServiceDetail() {
             ) : (
               <div className="stale-note">Not available — the engine did not report image metadata.</div>
             )}
-            <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>Observation only — OpusHub does not pull, update or recreate images.</p>
+            {containerUpdate && (containerUpdate.status === 'update_available' || containerUpdate.status === 'updating' || containerUpdate.status === 'updated') ? (
+              <div style={{ marginTop: 'var(--sp-4)' }}>
+                <UpdateItemRow record={containerUpdate} onDone={() => updateQuery.refresh()} />
+              </div>
+            ) : (
+              <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>Up to date or no registry update detected by Diun.</p>
+            )}
           </section>
 
           {data.stack && (

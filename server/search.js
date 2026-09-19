@@ -422,6 +422,11 @@ function describeEventType(type) {
     'alert.fired': 'alert fired',
     'alert.resolved': 'alert resolved',
     'update.checked': 'checked for updates',
+    'container.update_available': 'update available',
+    'container.updated': 'updated',
+    'container.update_failed': 'update failed',
+    'container.autoheal.restarted': 'autoheal recovered',
+    'container.autoheal.failed': 'autoheal failed',
   };
   return map[type] || String(type || 'event');
 }

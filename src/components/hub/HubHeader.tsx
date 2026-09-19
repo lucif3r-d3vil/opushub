@@ -6,6 +6,7 @@ import { StatusDot } from '../ui';
 import { Icon } from '../Icon';
 import { plural } from '../../lib/format';
 import { searchShortcutLabel } from '../SearchOverlay';
+import { GlobalUpdateIndicator } from '../Updates';
 
 /**
  * The greeting's whole vocabulary, in one place.
@@ -63,6 +64,7 @@ export function HubHeader({ services, weather, showWeather, onSearch, frozenNow 
           </span>
           <span className="dot-sep">·</span>
           <span>week {isoWeek(now)}</span>
+          <GlobalUpdateIndicator />
         </div>
         <button className="hub-search" onClick={onSearch} aria-label="Search OpusHub">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" strokeLinecap="round" /></svg>

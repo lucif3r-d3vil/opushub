@@ -287,7 +287,7 @@ function findRef(ref) {
  * is to count what the client actually did.
  */
 export function createHandler({ log = null } = {}) {
-  return (req, res) => {
+  return async (req, res) => {
     const url = new URL(req.url, 'http://docker');
     const p = url.pathname.replace(/^\/v1\.\d+/, '');
     if (log) log.push(`${req.method} ${p}`);
@@ -457,6 +457,63 @@ export function createHandler({ log = null } = {}) {
     if (req.method === 'GET' && p === '/system/df') {
       return send(200, { LayersSize: 1, Images: [], Containers: [], Volumes: [] });
     }
+
+    // ---- Phase 10C: Recreate / Update mock routes ----
+    if (req.method === 'POST' && p === '/images/create') {
+      const fromImage = url.searchParams.get('fromImage') || '';
+      if (fromImage.includes('fake-digest') || fromImage.includes('nonexistent') || fromImage.includes('invalid')) {
+        return send(404, { message: `manifest unknown or not found: ${fromImage}` });
+      }
+      return send(200, { status: 'Download complete' });
+    }
+    m = p.match(/^\/containers\/([^/]+)\/rename$/);
+    if (req.method === 'POST' && m) {
+      const fx = findRef(decodeURIComponent(m[1]));
+      if (!fx) return send(404, { message: 'No such container' });
+      const newName = url.searchParams.get('name') || 'renamed';
+      fx.Names = [`/${newName}`];
+      return send(204, '');
+    }
+    if (req.method === 'POST' && p === '/containers/create') {
+      let bodyData = {};
+      try {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        bodyData = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      } catch {}
+      const newName = url.searchParams.get('name') || 'new-container';
+      const id64 = 'e1e2e3e4e5e6'.padEnd(64, '0');
+      const newFx = {
+        Id: id64,
+        Names: [`/${newName}`],
+        Image: bodyData.Image || 'updated:latest',
+        ImageID: `sha256:${'9'.repeat(64)}`,
+        State: 'created',
+        Status: 'Created',
+        Labels: bodyData.Labels || {},
+        Ports: [],
+        Created: Math.floor(Date.now() / 1000),
+        Config: { ...bodyData },
+        HostConfig: bodyData.HostConfig || {},
+        Mounts: (bodyData.HostConfig?.Binds || []).map((b) => {
+          const parts = b.split(':');
+          return { Type: 'bind', Source: parts[0], Destination: parts[1], RW: parts[2] !== 'ro' };
+        }),
+      };
+      FLEET.push(newFx);
+      return send(201, { Id: newFx.Id, Warnings: [] });
+    }
+    m = p.match(/^\/networks\/([^/]+)\/connect$/);
+    if (req.method === 'POST' && m) {
+      return send(200, {});
+    }
+    m = p.match(/^\/containers\/([^/]+)$/);
+    if (req.method === 'DELETE' && m) {
+      const idx = FLEET.findIndex((f) => f.Id.startsWith(m[1]) || f.Names[0] === `/${m[1]}`);
+      if (idx >= 0) FLEET.splice(idx, 1);
+      return send(204, '');
+    }
+
     return send(404, { message: `mock engine: no route ${req.method} ${p}` });
   };
 }

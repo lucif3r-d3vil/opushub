@@ -10,6 +10,7 @@ import { Sortable } from '../components/Sortable';
 import { PageHero } from '../components/ui';
 import { LogsDrawer } from '../lib/dockerStatus';
 import { ServiceActionMenu } from '../components/ServiceActions';
+import { GlobalUpdateIndicator } from '../components/Updates';
 
 const hostOf = (url: string) => url.replace(/^https?:\/\/(?:[^@/]*@)?([^/:]+)/, '$1');
 
@@ -49,6 +50,7 @@ export default function ServicesPage() {
             <span>{total} service{total === 1 ? '' : 's'}</span><span className="sep">·</span>
             <span>{groups.filtered.length} groups</span><span className="sep">·</span>
             <span>{data?.live ? `discovered from Docker${data.stats ? ` · ${data.stats.withUrl} with a web URL` : ''}` : 'docker not connected'}</span><span className="sep">·</span>
+            <GlobalUpdateIndicator /><span className="sep">·</span>
             <span>{error ? 'refresh failed' : `updated ${relTime(fetchedAt || Date.now())}`}</span>
             <button className="btn btn-quiet btn-sm" onClick={refresh}>Refresh</button>
           </>

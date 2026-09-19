@@ -57,6 +57,11 @@ function humanType(type) {
     'service.up': 'Service recovered',
     'service.unhealthy': 'Service unhealthy',
     'service.healthy': 'Service healthy',
+    'container.update_available': 'Update available',
+    'container.updated': 'Update completed',
+    'container.update_failed': 'Update failed',
+    'container.autoheal.restarted': 'Container auto-recovered',
+    'container.autoheal.failed': 'Container auto-recovery failed',
   };
   return map[type] || type.replace(/_/g, ' ').replace(/\./g, ' — ');
 }
@@ -69,7 +74,7 @@ function deriveHref(evt) {
   if (evt.type.startsWith('alert.')) return '/activity';
   if (evt.type.startsWith('operation.')) return '/services';
   if (evt.type.startsWith('infrastructure.')) return '/infrastructure';
-  if (evt.type.startsWith('service.')) return '/services';
+  if (evt.type.startsWith('service.') || evt.type.startsWith('container.')) return '/services';
   return '/activity';
 }
 
