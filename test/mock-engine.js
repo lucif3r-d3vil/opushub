@@ -248,6 +248,10 @@ function inspectCreated(fx) {
       Status: fx.State, Running: running, Paused: fx.State === 'paused', Restarting: false,
       StartedAt: running ? new Date(fx.StartedAtOverride || Date.now()).toISOString() : '0001-01-01T00:00:00Z',
       FinishedAt: '0001-01-01T00:00:00Z', ExitCode: fx.ExitCodeOverride || 0, OOMKilled: false,
+      // a Healthcheck in the create body reports healthy — or unhealthy when the name says so —
+      // so install verification has both paths to exercise
+      ...(running && body.Healthcheck && body.Healthcheck.Test?.[0] !== 'NONE'
+        ? { Health: { Status: /become-unhealthy/.test(fx.Names[0]) ? 'unhealthy' : 'healthy', FailingStreak: 0 } } : {}),
     },
     HostConfig: {
       ...hc,

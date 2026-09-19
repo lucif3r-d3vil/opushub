@@ -53,6 +53,7 @@ export default function ServicesPage() {
             <GlobalUpdateIndicator /><span className="sep">·</span>
             <span>{error ? 'refresh failed' : `updated ${relTime(fetchedAt || Date.now())}`}</span>
             <button className="btn btn-quiet btn-sm" onClick={refresh}>Refresh</button>
+            <Link className="btn btn-sm" to="/catalog">Install from catalog</Link>
           </>
         }
       />

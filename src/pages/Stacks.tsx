@@ -53,6 +53,7 @@ export default function StacksPage() {
             <span>{data?.live ? 'live from Docker' : 'docker not connected'}</span>
             <button className="btn btn-quiet btn-sm" onClick={refresh}>Refresh</button>
             {caps.can('stack.deploy') && <button className="btn btn-primary btn-sm" onClick={() => nav('/stacks/new')}>New stack</button>}
+            <button className="btn btn-sm" onClick={() => nav('/catalog')}>Catalog</button>
           </>
         }
       />

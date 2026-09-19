@@ -123,4 +123,6 @@ export function backoffState(containerId, { at = Date.now() } = {}) {
 
 /** Test helpers. */
 export function _resetLimits() { locks.clear(); windows.clear(); backoff.clear(); }
+/** Test helper: forget the rate window and backoff only — held locks stay held. */
+export function _resetRate() { windows.clear(); backoff.clear(); }
 export const _internals = { LOCK_TTL_MS, WINDOW_MS, MAX_PER_WINDOW, FAIL_BACKOFF_MS, FAIL_THRESHOLD };

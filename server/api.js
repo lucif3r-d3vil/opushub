@@ -57,6 +57,7 @@ import { handleUpdatesRoutes } from './updatesApi.js';
 import { handleContainersRoutes } from './containersApi.js';
 import { handleStacksRoutes } from './stacksApi.js';
 import { handleRegistriesRoutes } from './registriesApi.js';
+import { handleCatalogRoutes } from './catalogApi.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -285,6 +286,19 @@ export async function handleApi(req, res, url) {
   // of registries/client.js against a validated endpoint. Pulls are operations, not routes here.
   if (p.startsWith('/api/registries') || p.startsWith('/api/v1/registries')) {
     const handled = await handleRegistriesRoutes({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      actor: session?.username ?? null,
+      query: url.searchParams,
+    });
+    if (handled) return;
+  }
+
+  // ---------- service catalog (Phase 10D-D) ----------
+  // Reads and plans only. Installing is the `service.install` operation (confirmed, locked, audited).
+  if (p.startsWith('/api/catalog') || p.startsWith('/api/v1/catalog')) {
+    const handled = await handleCatalogRoutes({
       p, method,
       send: (status, obj) => send(res, status, obj),
       jsonBody,
@@ -1819,6 +1833,8 @@ const V1_ROUTES = new Set([
   '/stacks/managed',
   // Phase 10D — registries
   '/registries',
+  // Phase 10D — service catalog
+  '/catalog',
 ]);
 
 export function rewriteV1(pathname) {

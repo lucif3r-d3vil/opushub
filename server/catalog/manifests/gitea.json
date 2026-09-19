@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "gitea",
+  "name": "Gitea",
+  "summary": "Painless self-hosted Git service with a web UI.",
+  "category": "developer",
+  "tags": ["git", "code", "ci"],
+  "icon": "gitea",
+  "homepage": "https://about.gitea.com/",
+  "docs": "https://docs.gitea.com/",
+  "image": {
+    "repository": "gitea/gitea",
+    "versions": [
+      { "tag": "1.22", "label": "1.22", "recommended": true },
+      { "tag": "1.21", "label": "1.21" }
+    ]
+  },
+  "variables": [
+    { "key": "USER_UID", "label": "User UID", "kind": "number", "default": 1000, "min": 0, "max": 65535 },
+    { "key": "USER_GID", "label": "User GID", "kind": "number", "default": 1000, "min": 0, "max": 65535 },
+    { "key": "ROOT_URL", "label": "Root URL", "kind": "string", "description": "e.g. https://git.example.com/", "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]+)?/$", "required": false },
+    { "key": "SSH_PORT", "label": "SSH port (host)", "kind": "port", "default": 2222 }
+  ],
+  "env": { "USER_UID": "${USER_UID}", "USER_GID": "${USER_GID}", "GITEA__server__ROOT_URL": "${ROOT_URL}", "GITEA__server__SSH_PORT": "${SSH_PORT}" },
+  "ports": [
+    { "container": 3000, "host": 3000, "label": "Web UI" },
+    { "container": 22, "host": "${SSH_PORT}", "label": "SSH" }
+  ],
+  "volumes": [{ "target": "/data", "label": "Data", "default": "volume:${name}-data" }],
+  "healthcheck": { "test": ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/healthz"], "intervalMs": 30000, "timeoutMs": 10000, "retries": 3, "startPeriodMs": 60000 },
+  "proxy": { "port": 3000, "default": true },
+  "monitoring": { "type": "http", "path": "/api/healthz" },
+  "autoheal": { "default": true },
+  "updates": { "default": true }
+}

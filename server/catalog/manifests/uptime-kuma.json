@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "id": "uptime-kuma",
+  "name": "Uptime Kuma",
+  "summary": "Self-hosted status and uptime monitoring with a clean dashboard.",
+  "description": "Uptime Kuma watches HTTP, TCP, DNS and Docker targets and notifies you when they go down. This entry runs the official image with a single persistent data volume.",
+  "category": "monitoring",
+  "tags": ["uptime", "status page", "alerts"],
+  "icon": "uptime-kuma",
+  "homepage": "https://uptime.kuma.pet/",
+  "docs": "https://github.com/louislam/uptime-kuma/wiki",
+  "image": {
+    "repository": "louislam/uptime-kuma",
+    "versions": [
+      { "tag": "1", "label": "1.x (stable)", "recommended": true },
+      { "tag": "2", "label": "2.x (beta)" }
+    ],
+    "allowCustomTag": true
+  },
+  "variables": [
+    { "key": "TZ", "label": "Timezone", "kind": "timezone", "default": "UTC" }
+  ],
+  "env": { "TZ": "${TZ}" },
+  "ports": [{ "container": 3001, "host": 3001, "label": "Web UI" }],
+  "volumes": [{ "target": "/app/data", "label": "Data", "default": "volume:${name}-data" }],
+  "healthcheck": { "test": ["CMD", "extra/healthcheck"], "intervalMs": 60000, "timeoutMs": 30000, "retries": 5, "startPeriodMs": 180000 },
+  "proxy": { "port": 3001, "default": false },
+  "monitoring": { "type": "http", "path": "/", "default": true },
+  "autoheal": { "default": true },
+  "updates": { "default": true }
+}

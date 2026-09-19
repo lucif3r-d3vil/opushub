@@ -1183,3 +1183,19 @@
 .mstack-hist-status { font-weight: 600; text-transform: capitalize; }
 .mstack-history li[data-status="failed"] .mstack-hist-status, .mstack-history li[data-status="remove_failed"] .mstack-hist-status { color: var(--fail); }
 .mstack-history li[data-status="succeeded"] .mstack-hist-status { color: var(--ok); }
+
+/* ---- service catalog (Phase 10D-D) ---- */
+.catalog-filters { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; margin-bottom: var(--sp-5); }
+.catalog-filters input[type="search"] { min-width: 240px; flex: 1 1 240px; }
+.catalog-cats { display: flex; flex-wrap: wrap; gap: 6px; }
+.catalog-cats .chip.active { border-color: var(--hair-strong); color: var(--ink); background: var(--surface-2); }
+.catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-4); }
+.catalog-card { border: 1px solid var(--hair); border-radius: var(--radius, 10px); padding: var(--sp-4) var(--sp-5); display: grid; gap: var(--sp-3); cursor: pointer; background: var(--surface); }
+.catalog-card:hover, .catalog-card:focus-visible { border-color: var(--hair-strong); outline: none; }
+.catalog-card-head { display: flex; gap: var(--sp-3); align-items: center; }
+.catalog-card-head h3 { margin: 0; font-size: var(--fs-body); }
+.catalog-card p { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.catalog-card-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.catalog-title { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.catalog-form { display: grid; gap: var(--sp-5); }
+.catalog-form .field:last-child { margin-bottom: 0; }

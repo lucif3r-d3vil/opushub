@@ -25,6 +25,9 @@ import { GREETINGS, greetingFor } from '../../src/components/hub/HubHeader';
 import type { LayoutDoc, Monitor, UptimeWindow, WidgetInstance } from '../../src/lib/types';
 import type { HubData } from '../../src/lib/hubData';
 import App from '../../src/App';
+import CatalogPage from '../../src/pages/Catalog';
+import CatalogInstallPage from '../../src/pages/CatalogInstall';
+import catalogFixture from './fixtures/catalog.json' with { type: 'json' };
 import { GroupNameField } from '../../src/components/GroupNameField';
 import { MenuButton } from '../../src/components/ui';
 import { AreaChart } from '../../src/components/Charts';
@@ -728,6 +731,8 @@ function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: strin
             <Route path="/settings/:tab" element={<Settings />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/icons" element={<IconsPage />} />
+            <Route path="/catalog" element={<CatalogPage />} />
+            <Route path="/catalog/:id" element={<CatalogInstallPage />} />
             <Route path="/activity" element={<div data-test="activity">activity</div>} />
             <Route path="/stacks/:name" element={<StackDetail />} />
             <Route path="/system" element={<SystemPage />} />
@@ -2256,6 +2261,69 @@ export async function runWebTests(): Promise<WebResult> {
   /* ==================================================================
      Phase 8 — the operations flow, as a person meets it
      ================================================================== */
+
+  /* ==================================================================
+     Phase 10D-D — the service catalog is data; installing is one confirmed operation
+     ================================================================== */
+
+  await test('catalog: manifests render as cards, the install page previews the server plan and installs through service.install', async (h) => {
+    const fx = catalogFixture as { list: unknown; detail: unknown; plan: unknown };
+    const dry = opsDryRun('container.restart');
+    dry.dryRun.action = { id: 'service.install', label: 'Install service', risk: 'medium', verb: 'install', timeoutMs: 300_000 };
+    dry.dryRun.target = { ...dry.dryRun.target, label: 'Uptime Kuma → kuma', containerName: 'kuma' };
+    dry.confirmation.mode = 'strong';
+    dry.confirmation.prompt = { ...dry.confirmation.prompt, title: 'Install Uptime Kuma as kuma?', confirmLabel: 'Install', acknowledge: 'I understand this creates and starts a new container.' };
+    const routes = {
+      ...stubRoutes(), ...opsRoutes(undefined, { action: 'service.install', dry }),
+      '/api/v1/catalog': fx.list,
+      '/api/v1/catalog/uptime-kuma': fx.detail,
+      '/api/v1/catalog/uptime-kuma/plan': () => fx.plan,
+    };
+    h.setRoutes(routes);
+    await h.mount(<TestApp entry="/catalog"><div /></TestApp>);
+    await h.waitFor(() => text().includes('Uptime Kuma'), 'the catalog card');
+    expect(text().includes('louislam/uptime-kuma:1'), 'the card does not name the image it would pull');
+    expect(!!qa('.catalog-cats .chip').find((b) => text(b) === 'monitoring'), 'the categories are not offered as filters');
+    // search narrows by manifest data, not by anything hardcoded in the page
+    type(q<HTMLInputElement>('input[type="search"]')!, 'nothing-like-this');
+    await h.waitFor(() => text().includes('Nothing matches'), 'the empty search result');
+
+    await h.unmount();
+    const h2 = await createHarness({ routes });
+    try {
+    await h2.mount(<TestApp entry="/catalog/uptime-kuma"><div /></TestApp>);
+    await h2.waitFor(() => !!q<HTMLInputElement>('#ci-name'), 'the install form');
+    expect(q<HTMLInputElement>('#ci-name')!.value === 'uptime-kuma', 'the name does not default to the manifest id');
+    expect(q<HTMLInputElement>('#ci-port-3001\\/tcp')!.value === '3001', 'the port does not default from the manifest');
+    expect(text().includes('kuma-old'), 'install history is missing');
+    type(q<HTMLInputElement>('#ci-name')!, 'kuma');
+    // preview is a plan request — no operation, no dry-run
+    click(qa('button').find((b) => text(b).trim() === 'Preview plan')!);
+    await h2.waitFor(() => !!h2.lastCall('POST', '/api/v1/catalog/uptime-kuma/plan'), 'the plan request');
+    const asked = h2.lastCall('POST', '/api/v1/catalog/uptime-kuma/plan')!.body as { config: Record<string, unknown> };
+    expect(Object.keys(asked).join(',') === 'config', `the plan request carried more than config: ${Object.keys(asked).join(',')}`);
+    expect(asked.config.name === 'kuma' && asked.config.network === 'bridge' && asked.config.monitoring === true, 'the config does not reflect the form');
+    expect(!('image' in asked.config) && !('privileged' in asked.config) && !('binds' in asked.config), 'the browser sent Docker fields, not catalog config');
+    await h2.waitFor(() => text().includes('create container kuma'), 'the server plan steps');
+    expect(!h2.lastCall('POST', '/api/v1/operations/dry-run') && !h2.lastCall('POST', '/api/v1/operations'), 'previewing touched the operations API');
+    // Install… goes through the one operations flow: dry-run, strong confirmation, execute
+    click(qa('button').find((b) => text(b).trim() === 'Install…')!);
+    await h2.waitFor(() => !!h2.lastCall('POST', '/api/v1/operations/dry-run'), 'the dry-run');
+    const dr = h2.lastCall('POST', '/api/v1/operations/dry-run')!.body as { action: string; target: { type: string; id: string }; params: { config: Record<string, unknown> } };
+    expect(dr.action === 'service.install' && dr.target.type === 'catalog' && dr.target.id === 'uptime-kuma', 'the dry-run names the wrong action or target');
+    expect(dr.params.config.name === 'kuma', 'the dry-run did not carry the same config as the preview');
+    expect(!h2.lastCall('POST', '/api/v1/operations'), 'the install executed before confirmation');
+    await h2.waitFor(() => text().includes('I understand this creates'), 'the strong acknowledgement');
+    const ack = q<HTMLInputElement>('.op-inline input[type="checkbox"]');
+    expect(!!ack, 'no acknowledgement checkbox for a strong confirmation');
+    click(ack!);
+    await h2.flush(20);
+    click(qa('.op-inline button').find((b) => text(b).trim() === 'Install')!);
+    await h2.waitFor(() => !!h2.lastCall('POST', '/api/v1/operations'), 'the execute request');
+    const sent = h2.lastCall('POST', '/api/v1/operations')!.body as Record<string, unknown>;
+    expect(sent.confirmationToken === 'tok-fixture' && sent.action === 'service.install', 'the execution did not spend the issued token for service.install');
+    } finally { await h2.unmount(); }
+  });
 
   await test('operations: the service page asks first, and only a confirmed operation runs', async (h) => {
     h.setRoutes({ ...stubRoutes(), ...opsRoutes() });

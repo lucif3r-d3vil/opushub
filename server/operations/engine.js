@@ -749,8 +749,12 @@ function errorStatus(error) {
     case 'unknown_action':
     case 'bad_target': return 400;
     case 'unknown_target':
+    case 'not_found':
     case 'ambiguous_target': return 404;
-    case 'stale_target': return 409;
+    case 'stale_target':
+    case 'name_taken':
+    case 'port_in_use':
+    case 'network_taken': return 409;
     case 'not_permitted': return 403;
     case 'docker_unavailable': return 503;
     case 'bad_params':
@@ -760,6 +764,7 @@ function errorStatus(error) {
     case 'policy_blocked':
     case 'ineligible':
     case 'not_reproducible':
+    case 'network_missing':
     case 'container_running': return 422;
     case 'not_available': return 501;
     case 'already_running':
