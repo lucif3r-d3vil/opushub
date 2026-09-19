@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "vaultwarden",
+  "name": "Vaultwarden",
+  "summary": "Lightweight Bitwarden-compatible password server.",
+  "description": "Vaultwarden implements the Bitwarden client API in Rust. Put it behind HTTPS (the reverse proxy option here) before using it from any client — the apps refuse plain HTTP except on localhost.",
+  "category": "security",
+  "tags": ["passwords", "bitwarden", "vault"],
+  "icon": "vaultwarden",
+  "homepage": "https://github.com/dani-garcia/vaultwarden",
+  "docs": "https://github.com/dani-garcia/vaultwarden/wiki",
+  "image": {
+    "repository": "vaultwarden/server",
+    "versions": [
+      { "tag": "latest", "label": "latest", "recommended": true },
+      { "tag": "1.32.0", "label": "1.32.0" }
+    ],
+    "allowCustomTag": true
+  },
+  "variables": [
+    { "key": "DOMAIN", "label": "Public URL", "kind": "string", "description": "The https URL clients will use, e.g. https://vault.example.com", "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$", "required": false },
+    { "key": "SIGNUPS_ALLOWED", "label": "Allow sign-ups", "kind": "boolean", "default": false },
+    { "key": "ADMIN_TOKEN", "label": "Admin token", "kind": "secret", "description": "Enables the /admin page. Leave empty to keep it disabled.", "generate": "hex", "advanced": true },
+    { "key": "TZ", "label": "Timezone", "kind": "timezone", "default": "UTC" }
+  ],
+  "env": { "DOMAIN": "${DOMAIN}", "SIGNUPS_ALLOWED": "${SIGNUPS_ALLOWED}", "ADMIN_TOKEN": "${ADMIN_TOKEN}", "TZ": "${TZ}" },
+  "ports": [{ "container": 80, "host": null, "label": "Web / API" }],
+  "volumes": [{ "target": "/data", "label": "Data", "default": "volume:${name}-data" }],
+  "healthcheck": { "test": ["CMD", "/healthcheck.sh"], "intervalMs": 60000, "timeoutMs": 10000, "retries": 3, "startPeriodMs": 30000 },
+  "proxy": { "port": 80, "default": true },
+  "monitoring": { "type": "http", "path": "/alive", "default": true },
+  "autoheal": { "default": true },
+  "updates": { "default": true },
+  "notes": ["Vaultwarden clients require HTTPS. Expose it through the reverse proxy or terminate TLS in front of it."]
+}

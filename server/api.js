@@ -54,6 +54,10 @@ import { initEvents } from './events/index.js';
 // Phase 10C — container recovery (Autoheal) & updates (Diun)
 import { handleAutohealRoutes } from './autohealApi.js';
 import { handleUpdatesRoutes } from './updatesApi.js';
+import { handleContainersRoutes } from './containersApi.js';
+import { handleStacksRoutes } from './stacksApi.js';
+import { handleRegistriesRoutes } from './registriesApi.js';
+import { handleCatalogRoutes } from './catalogApi.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -246,6 +250,60 @@ export async function handleApi(req, res, url) {
       send: (status, obj) => send(res, status, obj),
       jsonBody,
       clientIp: req.socket?.remoteAddress || '127.0.0.1',
+    });
+    if (handled) return;
+  }
+
+  // ---------- containers (Phase 10D-A) ----------
+  // The read surface behind the Edit Container UI: inspect, canonical spec, processes, volumes,
+  // and a side-effect-free diff preview. Every write is an operation (POST /api/v1/operations).
+  if (p.startsWith('/api/containers') || p.startsWith('/api/v1/containers')) {
+    const handled = await handleContainersRoutes({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+    });
+    if (handled) return;
+  }
+
+  // ---------- managed stacks (Phase 10D-B) ----------
+  // Compose documents as data: stored, validated, planned; deployed only through the operations
+  // engine. Sits before the unversioned /api/stacks discovery routes so `/api/stacks/managed` and
+  // the `/api/stacks/:id/<verb>` wrappers never fall through to the projection routes.
+  if (p.startsWith('/api/stacks/') || p.startsWith('/api/v1/stacks/')) {
+    const handled = await handleStacksRoutes({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      actor: session?.username ?? null,
+      sessionId: activeToken ? auth.sessionHandle(activeToken) : null,
+    });
+    if (handled) return;
+  }
+
+  // ---------- registries (Phase 10D-C) ----------
+  // Credentials are stored encrypted and never returned; remote calls are the five fixed shapes
+  // of registries/client.js against a validated endpoint. Pulls are operations, not routes here.
+  if (p.startsWith('/api/registries') || p.startsWith('/api/v1/registries')) {
+    const handled = await handleRegistriesRoutes({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      actor: session?.username ?? null,
+      query: url.searchParams,
+    });
+    if (handled) return;
+  }
+
+  // ---------- service catalog (Phase 10D-D) ----------
+  // Reads and plans only. Installing is the `service.install` operation (confirmed, locked, audited).
+  if (p.startsWith('/api/catalog') || p.startsWith('/api/v1/catalog')) {
+    const handled = await handleCatalogRoutes({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      actor: session?.username ?? null,
+      query: url.searchParams,
     });
     if (handled) return;
   }
@@ -1769,6 +1827,14 @@ const V1_ROUTES = new Set([
   '/notifications', '/notifications/unread-count', '/notifications/stats',
   '/notifications/policy', '/notifications/providers', '/notifications/webhook',
   '/notifications/telegram',
+  // Phase 10D — containers (the /:ref forms are patterns, matched by the handler itself)
+  '/containers/spec-fields',
+  // Phase 10D — managed stacks (the /:id forms are patterns, matched by the handler itself)
+  '/stacks/managed',
+  // Phase 10D — registries
+  '/registries',
+  // Phase 10D — service catalog
+  '/catalog',
 ]);
 
 export function rewriteV1(pathname) {

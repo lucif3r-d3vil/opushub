@@ -38,7 +38,10 @@ function readOperationBody(body) {
   if (Object.keys(body).length > MAX_BODY_FIELDS) {
     return { ok: false, error: operationError('bad_request', 'The operation request has too many fields.') };
   }
-  return { ok: true, action, targetRef: parsed.ref, operationId: typeof body.operationId === 'string' ? body.operationId.trim().slice(0, 64) : null, confirmationToken: typeof body.confirmationToken === 'string' ? body.confirmationToken.trim().slice(0, 256) : null };
+  // Phase 10D — `params`: an object the engine validates against the action's declared schema
+  // (operations/params.js). It is passed through opaque here; nothing in this layer reads it.
+  const params = body.params === undefined ? undefined : body.params;
+  return { ok: true, action, targetRef: parsed.ref, params, operationId: typeof body.operationId === 'string' ? body.operationId.trim().slice(0, 64) : null, confirmationToken: typeof body.confirmationToken === 'string' ? body.confirmationToken.trim().slice(0, 256) : null };
 }
 
 /**
@@ -93,7 +96,7 @@ export async function handleOperations({ p, method, send, jsonBody, actor, sessi
     const body = await readBody(jsonBody);
     if (!body.ok) { send(400, { error: body.error.reason, code: body.error.code }); return true; }
     const r = await engine.requestOperation({
-      actionId: body.action, targetRef: body.targetRef, actor, sessionId,
+      actionId: body.action, targetRef: body.targetRef, params: body.params, actor, sessionId,
     });
     if (r.status !== 200) {
       send(r.status, { operation: r.operation, evaluation: r.evaluation, error: r.operation?.error?.reason || null, code: r.operation?.error?.code || null });
@@ -123,6 +126,7 @@ export async function handleOperations({ p, method, send, jsonBody, actor, sessi
       operationId: body.operationId,
       actionId: body.action,
       targetRef: body.targetRef,
+      params: body.params,
       confirmationToken: body.confirmationToken,
       actor,
       sessionId,

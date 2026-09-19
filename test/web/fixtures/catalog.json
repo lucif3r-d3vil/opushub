@@ -1,0 +1,569 @@
+{
+ "detail": {
+  "entry": {
+   "id": "uptime-kuma",
+   "name": "Uptime Kuma",
+   "summary": "Self-hosted status and uptime monitoring with a clean dashboard.",
+   "category": "monitoring",
+   "tags": [
+    "uptime",
+    "status page",
+    "alerts"
+   ],
+   "icon": "uptime-kuma",
+   "homepage": "https://uptime.kuma.pet/",
+   "image": {
+    "repository": "louislam/uptime-kuma",
+    "recommended": "1",
+    "versions": [
+     {
+      "tag": "1",
+      "label": "1.x (stable)",
+      "recommended": true,
+      "notes": null
+     },
+     {
+      "tag": "2",
+      "label": "2.x (beta)",
+      "recommended": false,
+      "notes": null
+     }
+    ],
+    "allowCustomTag": true,
+    "allowDigest": false
+   },
+   "proxy": {
+    "port": 3001,
+    "scheme": "http",
+    "default": false
+   },
+   "healthcheck": {
+    "intervalMs": 60000,
+    "timeoutMs": 30000,
+    "retries": 5
+   },
+   "description": "Uptime Kuma watches HTTP, TCP, DNS and Docker targets and notifies you when they go down. This entry runs the official image with a single persistent data volume.",
+   "docs": "https://github.com/louislam/uptime-kuma/wiki",
+   "notes": [],
+   "variables": [
+    {
+     "key": "TZ",
+     "label": "Timezone",
+     "description": "",
+     "kind": "timezone",
+     "required": false,
+     "default": "UTC",
+     "options": null,
+     "min": null,
+     "max": null,
+     "pattern": null,
+     "generate": null,
+     "advanced": false
+    }
+   ],
+   "ports": [
+    {
+     "container": 3001,
+     "protocol": "tcp",
+     "host": 3001,
+     "label": "Web UI",
+     "required": false
+    }
+   ],
+   "volumes": [
+    {
+     "target": "/app/data",
+     "label": "Data",
+     "description": "",
+     "default": "volume:${name}-data",
+     "readOnly": false,
+     "allowBind": true
+    }
+   ],
+   "network": {
+    "default": "bridge",
+    "aliases": []
+   },
+   "restartPolicy": "unless-stopped",
+   "monitoring": {
+    "type": "http",
+    "path": "/",
+    "expectStatus": null,
+    "default": true
+   },
+   "autoheal": {
+    "default": true
+   },
+   "updates": {
+    "default": true
+   }
+  },
+  "instances": [],
+  "networks": [
+   "opustream_default",
+   "photos_default",
+   "cloud_default",
+   "secure_default",
+   "home_default",
+   "observability_default",
+   "update_default",
+   "proxy",
+   "bridge"
+  ],
+  "registries": [],
+  "proxy": {
+   "provider": "traefik",
+   "label": "Traefik",
+   "available": true,
+   "network": "proxy"
+  },
+  "permissions": {
+   "install": true
+  },
+  "history": [
+   {
+    "id": "h1",
+    "at": 1758000000000,
+    "name": "kuma-old",
+    "status": "succeeded",
+    "error": null,
+    "actor": "nora",
+    "version": "1"
+   }
+  ]
+ },
+ "plan": {
+  "ok": true,
+  "problems": [],
+  "plan": {
+   "kind": "install",
+   "summary": [
+    "install Uptime Kuma as kuma",
+    "image louislam/uptime-kuma:1"
+   ],
+   "steps": [
+    "image louislam/uptime-kuma:1 is present",
+    "create volume kuma-data if missing",
+    "create container kuma",
+    "start",
+    "verify running and healthy",
+    "register monitor",
+    "refresh inventory"
+   ],
+   "diff": {
+    "changed": [
+     "image",
+     "name",
+     "env",
+     "labels",
+     "ports",
+     "volumes",
+     "networks",
+     "networkMode",
+     "restartPolicy",
+     "healthcheck",
+     "resources",
+     "capabilities",
+     "securityOpt",
+     "privileged",
+     "readOnlyRootfs",
+     "dns",
+     "dnsSearch",
+     "extraHosts",
+     "tty",
+     "stdinOpen",
+     "init",
+     "devices"
+    ],
+    "unchanged": [
+     "command",
+     "entrypoint",
+     "user",
+     "workingDir",
+     "hostname",
+     "logging",
+     "stopSignal",
+     "stopTimeout"
+    ],
+    "entries": [
+     {
+      "field": "image",
+      "label": "image",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "louislam/uptime-kuma:1",
+      "inPlace": false
+     },
+     {
+      "field": "name",
+      "label": "name",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "kuma",
+      "inPlace": false
+     },
+     {
+      "field": "env",
+      "label": "environment",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "TZ=UTC",
+      "inPlace": false,
+      "keys": {
+       "added": [
+        "TZ"
+       ],
+       "removed": [],
+       "changed": []
+      }
+     },
+     {
+      "field": "labels",
+      "label": "labels",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "io.opushub.catalog=uptime-kuma\nio.opushub.catalog.version=1\nopushub.name=Uptime Kuma\nopushub.update=true\ndiun.enable=true\nautoheal=true",
+      "inPlace": false,
+      "keys": {
+       "added": [
+        "io.opushub.catalog",
+        "io.opushub.catalog.version",
+        "opushub.name",
+        "opushub.update",
+        "diun.enable",
+        "autoheal"
+       ],
+       "removed": [],
+       "changed": []
+      }
+     },
+     {
+      "field": "ports",
+      "label": "ports",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "13001:3001/tcp",
+      "inPlace": false
+     },
+     {
+      "field": "volumes",
+      "label": "volumes",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "kuma-data \u2192 /app/data",
+      "inPlace": false
+     },
+     {
+      "field": "networks",
+      "label": "networks",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "\u2014",
+      "inPlace": false
+     },
+     {
+      "field": "networkMode",
+      "label": "network mode",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "bridge",
+      "inPlace": false
+     },
+     {
+      "field": "restartPolicy",
+      "label": "restart policy",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "unless-stopped",
+      "inPlace": true
+     },
+     {
+      "field": "healthcheck",
+      "label": "healthcheck",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "extra/healthcheck every 60s \u00d7 5",
+      "inPlace": false
+     },
+     {
+      "field": "resources",
+      "label": "resource limits",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "unlimited",
+      "inPlace": true
+     },
+     {
+      "field": "capabilities",
+      "label": "capabilities",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "\u2014",
+      "inPlace": false
+     },
+     {
+      "field": "securityOpt",
+      "label": "security options",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "\u2014",
+      "inPlace": false
+     },
+     {
+      "field": "privileged",
+      "label": "privileged",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "no",
+      "inPlace": false
+     },
+     {
+      "field": "readOnlyRootfs",
+      "label": "read-only root filesystem",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "no",
+      "inPlace": false
+     },
+     {
+      "field": "dns",
+      "label": "DNS",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "\u2014",
+      "inPlace": false
+     },
+     {
+      "field": "dnsSearch",
+      "label": "DNS search",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "\u2014",
+      "inPlace": false
+     },
+     {
+      "field": "extraHosts",
+      "label": "extra hosts",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "\u2014",
+      "inPlace": false
+     },
+     {
+      "field": "tty",
+      "label": "TTY",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "no",
+      "inPlace": false
+     },
+     {
+      "field": "stdinOpen",
+      "label": "stdin",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "no",
+      "inPlace": false
+     },
+     {
+      "field": "init",
+      "label": "init",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "no",
+      "inPlace": false
+     },
+     {
+      "field": "devices",
+      "label": "devices",
+      "kind": "added",
+      "current": "\u2014",
+      "next": "\u2014",
+      "inPlace": false
+     }
+    ],
+    "inPlace": false,
+    "recreate": true,
+    "summary": [
+     "+ image added",
+     "+ name added",
+     "+ environment added",
+     "+ labels added",
+     "+ ports added",
+     "+ volumes added",
+     "+ networks added",
+     "+ network mode added",
+     "+ restart policy added",
+     "+ healthcheck added",
+     "+ resource limits added",
+     "+ capabilities added",
+     "+ security options added",
+     "+ privileged added",
+     "+ read-only root filesystem added",
+     "+ DNS added",
+     "+ DNS search added",
+     "+ extra hosts added",
+     "+ TTY added",
+     "+ stdin added",
+     "+ init added",
+     "+ devices added",
+     "unchanged: command, entrypoint, user, working directory, hostname, logging, stop signal, stop timeout"
+    ]
+   },
+   "current": null,
+   "next": {
+    "image": "louislam/uptime-kuma:1",
+    "name": "kuma",
+    "command": null,
+    "entrypoint": null,
+    "env": {
+     "TZ": "UTC"
+    },
+    "labels": {
+     "io.opushub.catalog": "uptime-kuma",
+     "io.opushub.catalog.version": "1",
+     "opushub.name": "Uptime Kuma",
+     "opushub.update": "true",
+     "diun.enable": "true",
+     "autoheal": "true"
+    },
+    "ports": [
+     {
+      "container": 3001,
+      "host": 13001,
+      "protocol": "tcp",
+      "hostIp": null
+     }
+    ],
+    "volumes": [
+     {
+      "type": "volume",
+      "source": "kuma-data",
+      "target": "/app/data",
+      "readOnly": false
+     }
+    ],
+    "networks": [],
+    "networkMode": "bridge",
+    "restartPolicy": {
+     "name": "unless-stopped",
+     "maxRetries": 0
+    },
+    "healthcheck": {
+     "test": [
+      "CMD",
+      "extra/healthcheck"
+     ],
+     "intervalMs": 60000,
+     "timeoutMs": 30000,
+     "retries": 5,
+     "startPeriodMs": 180000
+    },
+    "resources": {
+     "memory": 0,
+     "memorySwap": 0,
+     "nanoCpus": 0,
+     "cpuShares": 0,
+     "pidsLimit": 0
+    },
+    "capabilities": {
+     "add": [],
+     "drop": []
+    },
+    "securityOpt": [],
+    "privileged": false,
+    "readOnlyRootfs": false,
+    "user": null,
+    "workingDir": null,
+    "hostname": null,
+    "dns": [],
+    "dnsSearch": [],
+    "extraHosts": [],
+    "logging": null,
+    "tty": false,
+    "stdinOpen": false,
+    "init": false,
+    "stopSignal": null,
+    "stopTimeout": null,
+    "devices": []
+   },
+   "policy": {
+    "level": "SAFE",
+    "findings": []
+   },
+   "services": null,
+   "resources": {
+    "networks": [],
+    "volumes": [
+     {
+      "name": "kuma-data",
+      "action": "ensure"
+     }
+    ],
+    "image": {
+     "ref": "louislam/uptime-kuma:1",
+     "present": true,
+     "registry": null
+    }
+   },
+   "integrations": {
+    "monitoring": {
+     "type": "http",
+     "path": "/",
+     "expectStatus": null
+    },
+    "autoheal": true,
+    "updates": true,
+    "proxy": null
+   },
+   "notes": [
+    "Autoheal opt-in label set (autoheal=true); it acts only when Docker reports unhealthy"
+   ]
+  },
+  "variables": {
+   "TZ": "UTC"
+  },
+  "policy": {
+   "level": "SAFE",
+   "findings": []
+  }
+ },
+ "list": {
+  "entries": [
+   {
+    "id": "uptime-kuma",
+    "name": "Uptime Kuma",
+    "summary": "Self-hosted status and uptime monitoring with a clean dashboard.",
+    "category": "monitoring",
+    "tags": [
+     "uptime",
+     "status page",
+     "alerts"
+    ],
+    "icon": "uptime-kuma",
+    "homepage": "https://uptime.kuma.pet/",
+    "image": {
+     "repository": "louislam/uptime-kuma",
+     "recommended": "1"
+    },
+    "proxy": true,
+    "healthcheck": true
+   }
+  ],
+  "categories": [
+   "monitoring",
+   "database"
+  ],
+  "installed": [],
+  "proxy": {
+   "provider": "traefik",
+   "label": "Traefik",
+   "available": true,
+   "network": "proxy"
+  },
+  "permissions": {
+   "install": true
+  },
+  "invalidManifests": 0
+ }
+}

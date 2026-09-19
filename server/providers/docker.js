@@ -306,6 +306,31 @@ export async function imageInfo(ref) {
   }
 }
 
+/**
+ * Phase 10D — the processes inside a container (`GET /containers/<id>/top`). Read-only; the
+ * command column is redacted with the same rule as the container command (people put tokens in
+ * argv). Best-effort: null when the container is not running or the engine refuses.
+ */
+export async function containerTop(ref) {
+  try {
+    const j = await requestJson(`/containers/${encodeURIComponent(ref)}/top?ps_args=-eo%20pid,ppid,user,%25cpu,%25mem,etime,comm,args`, { timeoutMs: 5000 });
+    const titles = (Array.isArray(j.Titles) ? j.Titles : []).map((t) => String(t).toLowerCase());
+    const idx = (name) => titles.indexOf(name);
+    const rows = (Array.isArray(j.Processes) ? j.Processes : []).slice(0, 200).map((r) => {
+      const pick = (name) => (idx(name) >= 0 ? String(r[idx(name)] ?? '') : null);
+      return {
+        pid: pick('pid'), ppid: pick('ppid'), user: pick('user') || pick('uid'),
+        cpu: pick('%cpu'), mem: pick('%mem'), elapsed: pick('etime') || pick('time'),
+        command: pick('comm') || null,
+        args: redactCommand(pick('args') || pick('cmd') || pick('command') || ''),
+      };
+    });
+    return { titles, processes: rows };
+  } catch {
+    return null;
+  }
+}
+
 export async function containerStats(ref) {
   const s = await requestJson(`/containers/${encodeURIComponent(ref)}/stats?stream=false`, { timeoutMs: 8000 });
   if (!s || s.error || !s.cpu_stats) throw new Error(s?.message || 'stats unavailable');
@@ -499,6 +524,20 @@ export async function listNetworks() {
       containers: attached.slice(0, 100).map((c) => ({ name: c.Name ?? null })).filter((c) => c.name),
     };
   });
+}
+
+/**
+ * Networks with their labels — for ownership decisions server-side (which networks a stack
+ * created, so only those may be removed). Not a browser projection: labels are not served.
+ */
+export async function listNetworksRaw() {
+  const list = await requestJson('/networks');
+  return (Array.isArray(list) ? list : []).slice(0, 500).map((n) => ({
+    id: typeof n.Id === 'string' ? n.Id.slice(0, 12) : null,
+    name: n.Name ?? null,
+    driver: n.Driver ?? null,
+    labels: n.Labels && typeof n.Labels === 'object' ? { ...n.Labels } : {},
+  }));
 }
 
 /**

@@ -17,7 +17,7 @@ import {
   cancelOperation, dryRun, execute, followOperation, healthWord, isTerminal, stateWord, wordsFor,
   onOperationRequest,
   type ConfirmationDoc, type DryRunResponse, type OperationAction, type OperationDoc,
-  type OperationTargetRef,
+  type OperationParams, type OperationTargetRef, type PlanDoc,
 } from '../lib/operations';
 import { Modal } from './ui';
 
@@ -26,6 +26,7 @@ type Phase = 'evaluating' | 'ready' | 'refused' | 'executing' | 'done';
 interface Request {
   action: OperationAction;
   target: OperationTargetRef;
+  params?: OperationParams;
   /** distinguishes two requests for the same action+target so the dialog resets */
   key: number;
 }
@@ -43,6 +44,7 @@ export function OperationsHost() {
       key={req.key}
       action={req.action}
       target={req.target}
+      params={req.params}
       onClose={() => setReq(null)}
     />
   );
@@ -53,15 +55,18 @@ export function OperationsHost() {
 /* ------------------------------------------------------------------ */
 
 export function OperationDialog({
-  action, target, onClose, inline = false,
+  action, target, params, onClose, inline = false,
 }: {
   action: OperationAction;
   target: OperationTargetRef;
+  /** the action's parameters — evaluated by the dry-run and bound into the confirmation token */
+  params?: OperationParams;
   onClose: () => void;
   /** rendered inside a page (hides the backdrop) — same flow, same server checks */
   inline?: boolean;
 }) {
   const words = wordsFor(action);
+  const paramsKey = useMemo(() => JSON.stringify(params ?? null), [params]);
   const [phase, setPhase] = useState<Phase>('evaluating');
   const [dry, setDry] = useState<DryRunResponse | null>(null);
   const [op, setOp] = useState<OperationDoc | null>(null);
@@ -75,7 +80,7 @@ export function OperationDialog({
     let alive = true;
     (async () => {
       try {
-        const r = await dryRun(action, target);
+        const r = await dryRun(action, target, params);
         if (!alive) return;
         setDry(r);
         setPhase('ready');
@@ -92,7 +97,8 @@ export function OperationDialog({
       }
     })();
     return () => { alive = false; };
-  }, [action, target.id, target.group, target.name, target.type]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [action, target.id, target.group, target.name, target.type, paramsKey]);
 
   const dismiss = useCallback(() => {
     // leaving a confirmation on the table retires it, so an abandoned dialog cannot be spent later
@@ -106,7 +112,7 @@ export function OperationDialog({
     cancelled.current = false;
     setPhase('executing');
     try {
-      const r = await execute(action, target, dry.confirmation.token, dry.operation.id);
+      const r = await execute(action, target, dry.confirmation.token, dry.operation.id, params);
       setOp(r.operation);
       const final = await followOperation(r.operation.id, setOp);
       setOp(final);
@@ -116,6 +122,7 @@ export function OperationDialog({
       invalidateShared('/api/stacks');
       invalidateShared('/api/activity');
       invalidateShared('/api/v1/operations');
+      invalidateShared('/api/v1/stacks');
     } catch (err) {
       const body = err instanceof ApiError ? (err.body as { operation?: OperationDoc; error?: string; code?: string } | null) : null;
       setError({
@@ -128,7 +135,7 @@ export function OperationDialog({
     } finally {
       setBusy(false);
     }
-  }, [action, target, dry]);
+  }, [action, target, dry, params]);
 
   const prompt = dry?.confirmation?.prompt;
   const strong = dry?.confirmation?.mode === 'strong';
@@ -171,6 +178,7 @@ export function OperationDialog({
             <p className="op-warn" role="alert">{prompt.selfNote}</p>
           )}
           <DryRunPanel doc={dry.dryRun} />
+          {dry.dryRun.plan && <PlanPanel plan={dry.dryRun.plan} />}
           {strong && prompt?.acknowledge && (
             <label className="op-ack">
               <input
@@ -228,7 +236,8 @@ export function OperationDialog({
       </div>
     );
   }
-  return <Modal title={title} onClose={phase === 'executing' ? () => undefined : dismiss} footer={footer}>{body}</Modal>;
+  const wide = !!dry?.dryRun?.plan?.diff?.entries?.length;
+  return <Modal title={title} onClose={phase === 'executing' ? () => undefined : dismiss} footer={footer} wide={wide}>{body}</Modal>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -259,9 +268,66 @@ function DryRunPanel({ doc }: { doc: DryRunResponse['dryRun'] }) {
         ))}
       </ul>
       {doc.ready
-        ? <p className="op-note op-note--ok">Ready to execute — {doc.engineAction}, then OpusHub checks the container again.</p>
+        ? <p className="op-note op-note--ok">Ready to execute — {doc.engineAction}, then OpusHub checks the {doc.target?.type === 'stack' ? 'stack' : 'container'} again.</p>
         : <p className="op-note op-note--bad">Not ready: {doc.error?.reason}</p>}
     </>
+  );
+}
+
+/**
+ * The plan: what will change (CURRENT → NEW, field by field), what the configuration policy
+ * found, and the steps the transaction will take. Rendered from the server's own plan — the
+ * same object the confirmation token is bound to — never from anything the page computed.
+ */
+export function PlanPanel({ plan, compact = false }: { plan: PlanDoc; compact?: boolean }) {
+  const diff = plan.diff;
+  const findings = plan.policy?.findings || [];
+  const level = plan.policy?.level || 'SAFE';
+  return (
+    <div className="op-plan">
+      {diff && diff.entries.length > 0 && (
+        <>
+          <div className="op-plan-head">
+            <span className="micro-label">Changes</span>
+            <span className={`op-plan-mode ${diff.recreate ? 'op-plan-mode--recreate' : ''}`}>
+              {diff.recreate ? 'requires recreate' : diff.inPlace ? 'applied in place' : 'no change'}
+            </span>
+          </div>
+          <table className="op-diff">
+            <thead><tr><th>Field</th><th>Current</th><th>New</th></tr></thead>
+            <tbody>
+              {diff.entries.map((e) => (
+                <tr key={e.field} data-kind={e.kind}>
+                  <td className="op-diff-field">{e.label}{e.inPlace ? '' : <span className="op-quiet" title="changing this recreates the container"> ↻</span>}</td>
+                  <td className="op-diff-val"><pre>{e.current ?? '—'}</pre></td>
+                  <td className="op-diff-val"><pre>{e.next ?? '—'}</pre></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!compact && diff.unchanged.length > 0 && (
+            <p className="op-quiet">Unchanged: {diff.unchanged.length} field{diff.unchanged.length === 1 ? '' : 's'}.</p>
+          )}
+        </>
+      )}
+      {findings.length > 0 && (
+        <ul className={`op-findings op-findings--${level.toLowerCase()}`} aria-label="Configuration policy">
+          {findings.map((f, i) => (
+            <li key={`${f.code}-${i}`} data-level={f.level}>
+              <span className="op-finding-level">{f.level}</span>
+              <span>{f.message}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!compact && plan.steps?.length > 0 && (
+        <details className="op-steps">
+          <summary>{plan.steps.length} step{plan.steps.length === 1 ? '' : 's'}</summary>
+          <ol>{plan.steps.map((st, i) => <li key={i}>{st}</li>)}</ol>
+        </details>
+      )}
+      {plan.notes?.length > 0 && plan.notes.map((n, i) => <p key={i} className="op-note">{n}</p>)}
+    </div>
   );
 }
 

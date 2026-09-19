@@ -6,6 +6,7 @@ import type { StandaloneContainer, Stack, StacksDoc } from '../lib/types';
 import { Icon } from '../components/Icon';
 import { LastKnownNote, OpenLink, PageHero, ProviderNote, StatusDot, StatusLine } from '../components/ui';
 import { LogsDrawer } from '../lib/dockerStatus';
+import { useOperationsCapabilities } from '../lib/operations';
 
 // The deterministic model from server/discovery.js, in user-facing words
 const STATUS_HINT: Record<string, string> = {
@@ -26,6 +27,8 @@ const briefState = (c: { state: string; health: string | null }): string =>
 export default function StacksPage() {
   const nav = useNavigate();
   const { data, error, fetchedAt, refresh } = usePolled<StacksDoc>('/api/stacks', 30_000);
+  const caps = useOperationsCapabilities();
+  const managed = usePolled<{ stacks: { id: string; revision: number; lastDeploy: { at: number; status: string } | null }[] }>(caps.overview ? '/api/v1/stacks/managed' : null, 30_000);
   const [logsFor, setLogsFor] = useState<string | null>(null);
   const stacks = data?.stacks ?? [];
   const configured = stacks.filter((s) => s.source !== 'discovered');
@@ -49,9 +52,38 @@ export default function StacksPage() {
             <span className="sep">·</span>
             <span>{data?.live ? 'live from Docker' : 'docker not connected'}</span>
             <button className="btn btn-quiet btn-sm" onClick={refresh}>Refresh</button>
+            {caps.can('stack.deploy') && <button className="btn btn-primary btn-sm" onClick={() => nav('/stacks/new')}>New stack</button>}
+            <button className="btn btn-sm" onClick={() => nav('/catalog')}>Catalog</button>
           </>
         }
       />
+      {managed.data && managed.data.stacks.length > 0 && (
+        <>
+          <div className="section-head">
+            <h2 className="section-title">Managed by OpusHub</h2>
+            <span className="section-aside stale-note">Compose documents OpusHub deploys — the live containers, if any, are listed with the other stacks below</span>
+          </div>
+          <ul className="stack-list managed-list" style={{ listStyle: 'none', marginBottom: 'var(--section-gap)' }}>
+            {managed.data.stacks.map((m) => {
+              const live = stacks.find((s) => s.id === m.id);
+              return (
+                <li key={m.id}>
+                  <div className="stack-row" role="link" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => nav(`/stacks/${encodeURIComponent(m.id)}/edit`)} onKeyDown={(e) => { if (e.key === 'Enter') nav(`/stacks/${encodeURIComponent(m.id)}/edit`); }}>
+                    <span className="status-dot-wrap"><StatusDot state={live ? (live.status === 'operational' ? 'up' : live.status === 'stopped' ? 'down' : 'degraded') : 'unknown'} /></span>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="standalone-name">{m.id}</div>
+                      <div className="stale-note standalone-sub">
+                        revision {m.revision}{m.lastDeploy ? ` · last deploy ${m.lastDeploy.status} ${relTime(m.lastDeploy.at)}` : ' · never deployed'}{live ? ` · ${live.runningCount}/${live.containerCount} running` : ' · nothing on the engine'}
+                      </div>
+                    </div>
+                    <span className="mono-meta">edit →</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
       {error && !data && <ProviderNote status="error" reason={error} />}
       {!data?.live && !error && (
         <ProviderNote

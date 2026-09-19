@@ -334,13 +334,17 @@ test('the infrastructure sweep never writes to the engine', async () => {
 /* 5. Phase 8's boundaries are unchanged                                 */
 /* ==================================================================== */
 
-test('the Docker operation allow-list is still exactly three actions', async () => {
+test('the Docker operation allow-list is exactly the frozen set proved in phase8-proof', async () => {
+  // Phase 10D grew the set (documented and frozen in server/phase8-proof.test.js); Phase 9 added
+  // nothing to it. This test asserts the registry and the lifecycle adapter match that ONE list.
+  const { APPROVED_ACTIONS, APPROVED_LIFECYCLE_ENDPOINTS } = await import('../test/approved-operations.js');
   const registry = await import('./operations/registry.js');
-  assert.deepEqual(Object.keys(registry.ACTIONS), ['container.start', 'container.restart', 'container.stop']);
+  assert.deepEqual(Object.keys(registry.ACTIONS), [...APPROVED_ACTIONS]);
+  assert.ok(!APPROVED_ACTIONS.some((id) => /^(zfs|storage|network|infrastructure|opnsense|power)\./.test(id)), 'Phase 9 infrastructure added no operation');
   const adapter = code('server/providers/dockerOperations.js');
   const table = adapter.match(/const OP_PATHS = Object\.freeze\(\{([\s\S]*?)\}\);/);
   const declared = [...table[1].matchAll(/(\w+)\s*:\s*'([^']+)'/g)].map((m) => [m[1], m[2]]);
-  assert.deepEqual(declared.sort(), [['restart', '/restart'], ['start', '/start'], ['stop', '/stop']].sort());
+  assert.deepEqual(declared.sort(), [...APPROVED_LIFECYCLE_ENDPOINTS].sort());
 });
 
 test('the Docker read provider is still GET-only', () => {

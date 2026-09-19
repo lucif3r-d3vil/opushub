@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "nginx",
+  "name": "nginx",
+  "summary": "Static web server — serves a host directory or a volume.",
+  "category": "networking",
+  "tags": ["web server", "static", "http"],
+  "icon": "nginx",
+  "homepage": "https://nginx.org/",
+  "image": {
+    "repository": "nginx",
+    "versions": [
+      { "tag": "1.27-alpine", "label": "1.27 (alpine)", "recommended": true },
+      { "tag": "stable-alpine", "label": "stable (alpine)" }
+    ],
+    "allowCustomTag": true,
+    "allowDigest": true
+  },
+  "variables": [],
+  "env": {},
+  "ports": [{ "container": 80, "host": 8080, "label": "HTTP" }],
+  "volumes": [{ "target": "/usr/share/nginx/html", "label": "Site content", "description": "A host directory with your site, or a named volume.", "default": "volume:${name}-html", "readOnly": true }],
+  "healthcheck": { "test": ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"], "intervalMs": 30000, "timeoutMs": 5000, "retries": 3, "startPeriodMs": 5000 },
+  "proxy": { "port": 80 },
+  "monitoring": { "type": "http", "path": "/" },
+  "updates": { "default": true }
+}

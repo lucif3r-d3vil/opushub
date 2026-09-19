@@ -24,6 +24,20 @@ const MIN_ID_PREFIX = 6;   // shorter than this and a container id prefix is not
 export const TARGET_TYPES = Object.freeze(['service', 'container']);
 
 /**
+ * Phase 10D — the non-container target kinds. Each resolves in its own module and produces a
+ * target record whose `type` says which kind it is; the engine dispatches on the action, never on
+ * the reference, so a `stack` reference cannot reach a container action or vice versa.
+ *
+ *   stack     { type: 'stack', id: '<project or managed id>' }        → stacks/targets.js
+ *   image     { type: 'image', id: '<image reference>' }              → engine (validated ref)
+ *   new       { type: 'new' }                                         → a container that does not exist yet
+ *   catalog   { type: 'catalog', id: '<manifest id>' }                → catalog/schema.js
+ */
+export const EXTENDED_TARGET_TYPES = Object.freeze(['stack', 'image', 'new', 'catalog']);
+const STACK_ID_RE = /^[a-z0-9][a-z0-9_.-]{0,63}$/i;
+const CATALOG_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
  * Normalize and validate the client's target reference *before* it is compared with anything.
  * Returns `{ ok, ref, error }`.
  */
@@ -32,10 +46,18 @@ export function parseTargetRef(input) {
     return { ok: false, error: operationError('bad_target', 'The operation target is missing or malformed.') };
   }
   const type = typeof input.type === 'string' ? input.type.trim().toLowerCase() : 'service';
-  if (!TARGET_TYPES.includes(type)) {
+  if (!TARGET_TYPES.includes(type) && !EXTENDED_TARGET_TYPES.includes(type)) {
     return { ok: false, error: operationError('bad_target', `Unknown target type: ${String(input.type).slice(0, 40)}.`) };
   }
   const read = (v) => (typeof v === 'string' ? v.trim().slice(0, MAX_REF) : null);
+  if (EXTENDED_TARGET_TYPES.includes(type)) {
+    const id = read(input.id);
+    if (type === 'new') return { ok: true, ref: { type, id: null, name: null, group: null } };
+    if (type === 'stack' && !(id && STACK_ID_RE.test(id))) return { ok: false, error: operationError('bad_target', 'The stack reference is missing or malformed.') };
+    if (type === 'catalog' && !(id && CATALOG_ID_RE.test(id))) return { ok: false, error: operationError('bad_target', 'The catalog reference is missing or malformed.') };
+    if (type === 'image' && !(id && id.length <= 300 && !/[\s\x00-\x1f\x7f]/.test(id))) return { ok: false, error: operationError('bad_target', 'The image reference is missing or malformed.') };
+    return { ok: true, ref: { type, id: type === 'stack' ? id.toLowerCase() : id, name: null, group: null } };
+  }
   const id = read(input.id);
   const name = read(input.name);
   const group = read(input.group);

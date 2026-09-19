@@ -4,6 +4,7 @@ import { LayoutProvider, SettingsProvider, useSettings } from './lib/theme';
 import { AuthProvider, useAuth } from './lib/auth';
 import { SearchOverlay, useGlobalSearchHotkey } from './components/SearchOverlay';
 import { OperationsHost } from './components/Operations';
+import { ContainerEditorHost } from './components/ContainerEditor';
 import { Freshness } from './components/ui';
 import { LogoMark } from './components/Logo';
 import { BackgroundImage } from './components/BackgroundImage';
@@ -17,7 +18,10 @@ const ServiceDetail = lazy(() => import('./pages/ServiceDetail'));
 const Monitoring = lazy(() => import('./pages/Monitoring'));
 const MonitorDetail = lazy(() => import('./pages/MonitorDetail'));
 const Stacks = lazy(() => import('./pages/Stacks'));
+const Catalog = lazy(() => import('./pages/Catalog'));
+const CatalogInstall = lazy(() => import('./pages/CatalogInstall'));
 const StackDetail = lazy(() => import('./pages/StackDetail'));
+const ManagedStack = lazy(() => import('./pages/ManagedStack'));
 const Infrastructure = lazy(() => import('./pages/Infrastructure'));
 const Host = lazy(() => import('./pages/Host'));
 const SystemPage = lazy(() => import('./pages/System'));
@@ -183,6 +187,7 @@ function Shell() {
       <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
       {/* operations: one confirmation flow, mounted once, opened from anywhere */}
       <OperationsHost />
+      <ContainerEditorHost />
       <SaveIndicator />
       <CustomAssets />
     </>
@@ -280,7 +285,11 @@ function ShellWithRoutes() {
             <Route path="monitoring/incidents" element={<Monitoring />} />
             <Route path="monitoring/:id" element={<MonitorDetail />} />
             <Route path="stacks" element={<Stacks />} />
+            <Route path="stacks/new" element={<ManagedStack />} />
+            <Route path="stacks/:id/edit" element={<ManagedStack />} />
             <Route path="stacks/:name" element={<StackDetail />} />
+            <Route path="catalog" element={<Catalog />} />
+            <Route path="catalog/:id" element={<CatalogInstall />} />
             {/* System is the parent for the machine: live vitals, the host itself, and the
                 infrastructure views (engine, storage/ZFS, network, power, topology). */}
             <Route path="system" element={<SystemPage />} />

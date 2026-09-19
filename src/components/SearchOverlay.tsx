@@ -83,6 +83,7 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     { title: 'Open Incidents', subtitle: 'Outages that were recorded', kind: 'action', href: '/monitoring/incidents', keywords: ['incident', 'outage', 'downtime', 'failure'] },
     { title: 'Configure monitoring defaults', subtitle: 'Interval, thresholds, retention, bounds', kind: 'action', href: '/settings/monitoring', keywords: ['monitor', 'interval', 'threshold', 'retention', 'settings'] },
     { title: 'Go Stacks', subtitle: 'Compose projects', kind: 'action', href: '/stacks', keywords: ['projects'] },
+    { title: 'Go Catalog', subtitle: 'Install a service', kind: 'action', href: '/catalog', keywords: ['install', 'apps', 'store'] },
     { title: 'Go System', subtitle: 'Host vitals', kind: 'action', href: '/system', keywords: ['cpu', 'memory', 'host'] },
     { title: 'Go Activity', subtitle: 'What happened, when', kind: 'action', href: '/activity', keywords: ['events', 'timeline', 'history', 'log'] },
     { title: 'Go Settings', subtitle: 'Everything you can change', kind: 'action', href: '/settings', keywords: ['preferences', 'config'] },

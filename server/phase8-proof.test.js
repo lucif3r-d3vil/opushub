@@ -2,9 +2,14 @@
 //
 // Phase 7 proved the read client is GET-only. Phase 8 adds the first write path, so the proof has
 // to grow: it is no longer enough to show that Docker *reads* are constrained, it has to show
-// that Docker *writes* are exactly three endpoints, reachable only through named actions, only
-// after authorization, only with a server-bound confirmation, and never with anything the browser
-// chose.
+// that Docker *writes* are exactly an enumerated set of endpoints, reachable only through named
+// actions, only after authorization, only with a server-bound confirmation, and never with
+// anything the browser chose.
+//
+// Phase 10D (the Docker control plane) grew the frozen sets — from three lifecycle actions to the
+// controlled container lifecycle, stacks and catalog installs — and every set below was updated
+// in the same review. The proof is still the same shape: the sets are spelled out here, in full,
+// and anything not spelled out is refused.
 //
 // Everything here is either a static scan of the source or a request against the mock engine.
 // There are no assertions about intent — only about code and bytes on the wire.
@@ -111,13 +116,24 @@ test.after(async () => {
 /* 1. only approved action ids exist                                     */
 /* ==================================================================== */
 
-test('the action registry is exactly three actions and nothing else', async () => {
+// The frozen sets live in test/approved-operations.js so that every proof (Phase 8, 9, 10D)
+// asserts against ONE list. Changing that file is the reviewed act of adding a capability.
+import { APPROVED_ACTIONS, APPROVED_PERMISSIONS, APPROVED_LIFECYCLE_ENDPOINTS, APPROVED_CONTROL_ENDPOINTS } from '../test/approved-operations.js';
+
+test('the action registry is exactly the approved actions and nothing else', async () => {
   const registry = await import('./operations/registry.js');
-  assert.deepEqual(Object.keys(registry.ACTIONS), ['container.start', 'container.restart', 'container.stop']);
-  assert.deepEqual([...registry.ACTION_IDS], ['container.start', 'container.restart', 'container.stop']);
-  assert.deepEqual([...registry.OPERATION_PERMISSIONS], [
-    'operations.container.start', 'operations.container.restart', 'operations.container.stop',
-  ]);
+  assert.deepEqual(Object.keys(registry.ACTIONS), [...APPROVED_ACTIONS]);
+  assert.deepEqual([...registry.ACTION_IDS], [...APPROVED_ACTIONS]);
+  assert.deepEqual([...registry.OPERATION_PERMISSIONS], [...APPROVED_PERMISSIONS]);
+  const params = await import('./operations/params.js');
+  for (const id of APPROVED_ACTIONS) {
+    const a = registry.ACTIONS[id];
+    assert.ok(params.PARAM_KINDS.includes(a.params), `${id} declares a parameter schema`);
+    assert.ok(['lifecycle', 'control', 'transaction'].includes(a.executor), `${id} declares an executor`);
+    assert.ok(['container', 'stack', 'image', 'new', 'catalog'].includes(a.targetType), `${id} declares a target type`);
+  }
+  // still no exec, attach, prune, commit, copy or arbitrary compose command
+  for (const id of APPROVED_ACTIONS) assert.ok(!['exec', 'attach', 'prune', 'commit', 'copy', 'shell', 'run', 'up', 'down'].includes(id.split('.')[1]), id);
 });
 
 test('no other server file declares an operation action', () => {
@@ -132,6 +148,10 @@ test('no other server file declares an operation action', () => {
   const offenders = [];
   for (const rel of serverFiles()) {
     if (rel.endsWith('operations/registry.js') || rel.endsWith('operations/engine.js')) continue;
+    // Phase 10D: thin route wrappers (stack/catalog action POSTs) name the registry action they
+    // forward to the engine; they are allowed to *name* it, and checked separately for not
+    // executing anything themselves (see 'the operations API is inert').
+    if (rel.endsWith('stacksApi.js') || rel.endsWith('catalogApi.js') || rel.endsWith('containersApi.js')) continue;
     const src = code(rel);
     for (const m of src.matchAll(new RegExp(`["'\`]${DOMAINS}\\.([a-z][a-z_-]{1,20})["'\`]`, 'g'))) {
       if (VERBS.has(m[1])) offenders.push(`${rel}: ${m[0]}`);
@@ -144,28 +164,47 @@ test('no other server file declares an operation action', () => {
 /* 2. only approved Docker lifecycle endpoints exist                     */
 /* ==================================================================== */
 
-test('the operations adapter reaches exactly three endpoints', () => {
+test('the lifecycle adapter reaches exactly the approved lifecycle endpoints', () => {
   const src = code('server/providers/dockerOperations.js');
   const table = src.match(/const OP_PATHS = Object\.freeze\(\{([\s\S]*?)\}\);/);
   assert.ok(table, 'the adapter declares an endpoint table');
   const declared = [...table[1].matchAll(/(\w+)\s*:\s*'([^']+)'/g)].map((m) => [m[1], m[2]]);
-  assert.deepEqual(declared.sort(), [['restart', '/restart'], ['start', '/start'], ['stop', '/stop']].sort());
+  assert.deepEqual(declared.sort(), [...APPROVED_LIFECYCLE_ENDPOINTS].sort());
   // the table is the only place a mutation endpoint is spelled
-  for (const op of ['/kill', '/remove', '/prune', '/exec', '/commit', '/rename', '/update', '/pause', '/unpause', '/attach', '/resize', '/copy', '/archive', '/create']) {
+  for (const op of ['/remove', '/prune', '/exec', '/commit', '/rename', '/update', '/attach', '/resize', '/copy', '/archive', '/create']) {
     assert.ok(!src.includes(`'${op}`) && !src.includes(`"${op}`) && !src.includes('`' + op), `the adapter mentions ${op}`);
   }
   assert.ok(!/\/(images|volumes|networks|build|containers\/create)/.test(src), 'the adapter reaches beyond container lifecycle');
+});
+
+test('the control adapter reaches exactly the approved control endpoints, through one frozen table', async () => {
+  const adapter = await import('./updates/recreateAdapter.js');
+  const table = adapter._internals.ENDPOINTS;
+  assert.ok(Object.isFrozen(table), 'the endpoint table is frozen');
+  assert.deepEqual(Object.keys(table).sort(), [...APPROVED_CONTROL_ENDPOINTS].sort());
+  for (const [name, ep] of Object.entries(table)) {
+    assert.ok(['POST', 'GET', 'DELETE'].includes(ep.method), `${name} uses an approved method`);
+    assert.equal(typeof ep.path, 'function', `${name} builds its path from a validated id, never from a string`);
+  }
+  const src = code('server/updates/recreateAdapter.js');
+  assert.ok(!/export (?:async )?function (request|requestEngine|call|dockerCall|execute|mutate|raw)\b/.test(src), 'no generic request helper is exported');
+  for (const op of ['/exec', '/attach', '/prune', '/commit', '/archive', '/resize', '/copy', '/build', '/commit']) {
+    assert.ok(!src.includes(`'${op}`) && !src.includes(`"${op}`) && !src.includes('`' + op), `the control adapter mentions ${op}`);
+  }
+  // removing a container never removes its volumes
+  assert.ok(/v:\s*'0'/.test(src) && !/v:\s*'1'/.test(src), 'container removal never sends v=1');
 });
 
 test('the operations adapter exposes no generic request helper', () => {
   const src = code('server/providers/dockerOperations.js');
   const exported = [...src.matchAll(/export (?:async )?function (\w+)/g)].map((m) => m[1]).sort();
   const alsoExported = [...src.matchAll(/export const (\w+)/g)].map((m) => m[1]);
-  // the complete public surface of the write path: three lifecycle calls, three availability
+  // the complete public surface of the write path: six lifecycle calls, three availability
   // helpers, and a test-only view of the endpoint table
   assert.deepEqual(exported, [
     'operationsAvailability', 'probeOperations', 'publicOperationsStatus', 'restartContainer',
     'resolveOperationsEndpoint', 'startContainer', 'stopContainer',
+    'pauseContainer', 'unpauseContainer', 'killContainer',
   ].sort());
   assert.deepEqual(alsoExported, ['_internals']);
   // the module-private transport is not reachable from outside
@@ -182,12 +221,28 @@ test('the engine dispatches through a static switch, never through input', () =>
   const sw = src.match(/function dispatch\(action, containerId\) \{([\s\S]*?)\n\}/);
   assert.ok(sw, 'the engine has one dispatch function');
   const cases = [...sw[1].matchAll(/case '(\w+)': return dockerOps\.(\w+)\(/g)].map((m) => [m[1], m[2]]);
-  assert.deepEqual(cases.sort(), [['restart', 'restartContainer'], ['start', 'startContainer'], ['stop', 'stopContainer']].sort());
+  assert.deepEqual(cases.sort(), [['restart', 'restartContainer'], ['start', 'startContainer'], ['stop', 'stopContainer'], ['pause', 'pauseContainer'], ['unpause', 'unpauseContainer'], ['kill', 'killContainer']].sort());
   assert.ok(/default: return Promise\.resolve\(\{ ok: false, code: 'unknown_action'/.test(sw[1]), 'an unlisted adapter value is refused');
+  // Phase 10D — the controlled dispatch is a second static switch with the same discipline
+  const sw2 = src.match(/function dispatchControlled\(action, ctx\) \{([\s\S]*?)\n\}/);
+  assert.ok(sw2, 'the engine has one controlled dispatch function');
+  const cases2 = [...sw2[1].matchAll(/case '(\w+)': return (\w+)\.(\w+)\(/g)].map((m) => m[1]);
+  assert.deepEqual(cases2.sort(), ['rename', 'remove', 'pull', 'network_attach', 'network_detach', 'update', 'recreate', 'edit', 'change_image', 'duplicate', 'create', 'image_pull', 'stack_deploy', 'stack_start', 'stack_stop', 'stack_remove', 'install'].sort());
+  assert.ok(/default: return Promise\.resolve\(\{ ok: false, code: 'unknown_action'/.test(sw2[1]), 'an unlisted adapter value is refused');
+  // every registry adapter value is handled by exactly one of the two switches
+  import('./operations/registry.js').then((registry) => {
+    for (const a of Object.values(registry.ACTIONS)) {
+      const inLifecycle = cases.some(([k]) => k === a.adapter);
+      const inControlled = cases2.includes(a.adapter);
+      assert.ok(inLifecycle !== inControlled, `${a.id} → ${a.adapter} is dispatched by exactly one switch`);
+      assert.equal(inLifecycle, a.executor === 'lifecycle', `${a.id} executor matches its switch`);
+    }
+  });
   // no dynamic dispatch anywhere in the operations path
-  for (const rel of serverFiles().filter((f) => f.includes('operations'))) {
+  for (const rel of serverFiles().filter((f) => f.includes('operations') || f.includes('containers/') || f.includes('stacks/') || f.includes('catalog/'))) {
     const s = code(rel);
     assert.ok(!/dockerOps\[/.test(s), `${rel} indexes the adapter dynamically`);
+    assert.ok(!/adapter\[/.test(s), `${rel} indexes the control adapter dynamically`);
     assert.ok(!/\[action(\.adapter|\.id)?\]/.test(s), `${rel} looks a method up by action`);
   }
 });
