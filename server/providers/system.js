@@ -2,6 +2,7 @@
 // fabrication: anything not exposed by the kernel is reported as null and the UI says "Unavailable".
 import fs from 'node:fs';
 import os from 'node:os';
+import { writeFileAtomic } from '../lib/atomicFile.js';
 
 const num = (s) => (s == null || s === '' ? null : Number(s));
 
@@ -259,8 +260,7 @@ export class History {
         if (this.file) {
           this.fileTick = (this.fileTick || 0) + 1;
           if (this.fileTick % 12 === 0) {
-            fs.writeFileSync(this.file + '.tmp', JSON.stringify(this.points.slice(-2880)));
-            fs.renameSync(this.file + '.tmp', this.file);
+            writeFileAtomic(this.file, JSON.stringify(this.points.slice(-2880)));
           }
         }
       } catch { /* next tick */ }

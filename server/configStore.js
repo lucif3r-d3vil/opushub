@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { resolveConfigDir, resolveDataDir, APP_ROOT } from './env.js';
+import { writeFileAtomic } from './lib/atomicFile.js';
 
 const { dir: CONFIG_DIR, created } = resolveConfigDir();
 const DATA_DIR = resolveDataDir();
@@ -76,9 +77,7 @@ function backup(file, name) {
 
 function atomicWrite(file, text, name) {
   if (name) backup(file, name);
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, text, 'utf8');
-  fs.renameSync(tmp, file);
+  writeFileAtomic(file, text);
 }
 
 // Homepage-style files carry a leading explanatory comment block. A fresh Document loses it, so

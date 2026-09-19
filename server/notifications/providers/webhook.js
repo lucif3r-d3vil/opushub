@@ -9,6 +9,7 @@ import https from 'node:https';
 import crypto from 'node:crypto';
 import { DATA_DIR } from '../../configStore.js';
 import { classifyIp, BLOCKED_FOR_MONITOR, INTERNAL_CLASSES, describeClass } from '../../lib/ipPolicy.js';
+import { writeJsonAtomic } from '../../lib/atomicFile.js';
 
 const DIR = path.join(DATA_DIR, 'notifications');
 const FILE = path.join(DIR, 'webhook.json');
@@ -46,12 +47,8 @@ function readRaw() {
 
 function atomicWrite(obj) {
   ensureDir();
-  const tmp = `${FILE}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf8');
-  // This file can hold a signing secret: restrict it like the Telegram config.
-  try { fs.chmodSync(tmp, 0o600); } catch {}
-  fs.renameSync(tmp, FILE);
-  try { fs.chmodSync(FILE, 0o600); } catch {}
+  // This file can hold a signing secret: restrict it exactly like the Telegram config.
+  writeJsonAtomic(FILE, obj, { mode: 0o600 });
 }
 
 let lookupFn = dns.lookup;

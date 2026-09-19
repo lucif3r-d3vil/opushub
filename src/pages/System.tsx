@@ -7,6 +7,7 @@ import { AreaChart, MeterBar } from '../components/Charts';
 import { Freshness, PageHero, ProviderNote } from '../components/ui';
 import { StatusLine } from '../components/ui';
 import { AutohealStatusArea } from '../components/AutohealStatus';
+import { SystemNav } from '../components/SystemNav';
 
 const WINDOWS = [
   { label: '15m', ms: 15 * 60_000 },
@@ -59,6 +60,8 @@ export default function SystemPage() {
           </div>
         }
       />
+
+      <SystemNav />
 
       {providers.data && (
         <section className="sys-band sys-band--providers" aria-label="Provider health">

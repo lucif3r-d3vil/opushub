@@ -19,6 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from '../configStore.js';
+import { writeFileAtomic } from '../lib/atomicFile.js';
 
 export const MONITORING_DIR = path.join(DATA_DIR, 'monitoring');
 
@@ -66,9 +67,7 @@ export function writeDoc(name, value) {
     throw Object.assign(new Error(`monitoring document ${name} exceeds ${Math.round(MAX_DOC_BYTES / 1024 / 1024)} MB`), { status: 500, code: 'store_too_large' });
   }
   ensureDir();
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, text, 'utf8');
-  fs.renameSync(tmp, file); // atomic on every platform OpusHub runs on
+  writeFileAtomic(file, text); // atomic on every platform OpusHub runs on
   return { file, bytes };
 }
 

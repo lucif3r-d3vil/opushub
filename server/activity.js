@@ -15,6 +15,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './configStore.js';
+import { writeFileAtomic } from './lib/atomicFile.js';
+import { SEVERITIES as EVENT_SEVERITIES } from './events/model.js';
 
 const FILE = path.join(DATA_DIR, 'activity.jsonl');
 const MAX_LINES = 5000;
@@ -27,7 +29,7 @@ const listeners = new Set();
 /** signature → last accepted timestamp (bounded below) */
 const recentSignatures = new Map();
 
-export const SEVERITIES = ['info', 'notice', 'warning', 'critical'];
+export const SEVERITIES = EVENT_SEVERITIES; // one severity vocabulary, owned by the event model
 // Phase 9 adds the infrastructure areas. `provider` stays mapped to `docker` in the derived table
 // below: `provider.unavailable` has always meant "the Docker provider went away", and re-filing
 // six phases of history under a new heading would be a change nobody asked for. New Phase-9
@@ -99,8 +101,7 @@ export function logEvent({ source, type, subject = null, message = null, meta = 
     const size = fs.statSync(FILE).size;
     if (size > 2 * 1024 * 1024) {
       const lines = fs.readFileSync(FILE, 'utf8').trim().split('\n').slice(-KEEP);
-      fs.writeFileSync(FILE + '.tmp', lines.join('\n') + '\n');
-      fs.renameSync(FILE + '.tmp', FILE);
+      writeFileAtomic(FILE, lines.join('\n') + '\n');
     }
   } catch { /* activity log must never break a request */ }
   for (const l of listeners) { try { l(ev); } catch { /* */ } }

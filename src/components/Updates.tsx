@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { api, usePolled } from '../lib/api';
 import type { ContainerUpdateRecord, ContainerUpdatesDoc } from '../lib/types';
-import { Loading } from './ui';
+import { Loading, Modal } from './ui';
 
 export function GlobalUpdateIndicator() {
   const { data } = usePolled<ContainerUpdatesDoc>('/api/container-updates', 30_000);
@@ -24,26 +24,18 @@ export function GlobalUpdateIndicator() {
       </button>
 
       {open && (
-        <div className="modal-backdrop" onClick={() => setOpen(false)}>
-          <div className="modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <h2>Container Image Updates</h2>
-              <button className="icon-btn" onClick={() => setOpen(false)} aria-label="Close">✕</button>
-            </div>
-            <div className="modal-body">
-              <p className="stale-note" style={{ marginBottom: 'var(--sp-4)' }}>
-                Image updates detected by Diun. All updates require explicit confirmation.
-              </p>
-              <div className="update-list" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-                {(data?.updates || [])
-                  .filter((u) => u.status === 'update_available' || u.status === 'updating')
-                  .map((u) => (
-                    <UpdateItemRow key={u.containerId} record={u} onDone={() => setOpen(false)} />
-                  ))}
-              </div>
-            </div>
+        <Modal title="Container Image Updates" onClose={() => setOpen(false)}>
+          <p className="stale-note" style={{ marginBottom: 'var(--sp-4)' }}>
+            Image updates detected by Diun. All updates require explicit confirmation.
+          </p>
+          <div className="update-list" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+            {(data?.updates || [])
+              .filter((u) => u.status === 'update_available' || u.status === 'updating')
+              .map((u) => (
+                <UpdateItemRow key={u.containerId} record={u} onDone={() => setOpen(false)} />
+              ))}
           </div>
-        </div>
+        </Modal>
       )}
     </>
   );

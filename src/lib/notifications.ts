@@ -39,6 +39,13 @@ export const NOTIFIABLE_TYPES = new Set([
   'service.up',
   'service.unhealthy',
   'service.healthy',
+  // Phase 10C — container image updates observed by Diun, applied updates, and autoheal
+  // recoveries are notifications too (this list had drifted five types behind the server).
+  'container.update_available',
+  'container.updated',
+  'container.update_failed',
+  'container.autoheal.restarted',
+  'container.autoheal.failed',
 ]);
 
 /** Defense in depth: the server already sanitizes hrefs, the client never trusts one blindly. */
@@ -141,6 +148,8 @@ export function useNotificationPolicy() {
   const q = useSharedQuery<{ policy: any }>('/api/notifications/policy', 30000);
   const save = useCallback(async (policy: any) => {
     const res = await put<{ policy: any }>('/api/notifications/policy', policy);
+    // A save settles the document on screen immediately — not at the next poll tick.
+    invalidateShared('/api/notifications/policy');
     return res.policy;
   }, []);
   return { policy: q.data?.policy || null, loading: q.loading, error: q.error, refresh: q.refresh, save };
@@ -150,6 +159,7 @@ export function useWebhookConfig() {
   const q = useSharedQuery<{ webhook: any }>('/api/notifications/webhook', 30000);
   const save = useCallback(async (cfg: any) => {
     const res = await put<{ webhook: any }>('/api/notifications/webhook', cfg);
+    invalidateShared('/api/notifications/webhook');
     return res.webhook;
   }, []);
   const test = useCallback(async (url?: string) => {

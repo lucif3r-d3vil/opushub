@@ -17,6 +17,7 @@ import { InfraStatusStrip } from '../components/InfraStatusStrip';
 import { StoragePanel } from '../components/infrastructure/StoragePanel';
 import { NetworkPanel } from '../components/infrastructure/NetworkPanel';
 import { PowerPanel } from '../components/infrastructure/PowerPanel';
+import { SystemNav } from '../components/SystemNav';
 
 type Tab = 'docker' | 'storage' | 'network' | 'power' | 'networks' | 'volumes' | 'images' | 'topology';
 const TABS: { id: Tab; label: string }[] = [
@@ -113,11 +114,13 @@ export default function InfrastructurePage() {
             <span>{counts?.volumes ?? '—'} volumes</span><span className="sep">·</span>
             <span>{counts?.images ?? '—'} images</span><span className="sep">·</span>
             <span>{eng.error ? 'refresh failed' : `updated ${relTime(eng.fetchedAt || Date.now())}`}</span>
-            <Link className="btn btn-quiet btn-sm" to="/host">Host →</Link>
+            <Link className="btn btn-quiet btn-sm" to="/system/host">Host →</Link>
             <button className="btn btn-quiet btn-sm" onClick={retry}>Retry</button>
           </>
         }
       />
+
+      <SystemNav />
 
       <InfraStatusStrip health={grid.data?.health} providers={grid.data?.providers} />
 

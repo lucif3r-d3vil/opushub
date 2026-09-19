@@ -11,19 +11,9 @@
 import { logEvent } from '../activity.js';
 import { THRESHOLDS } from './model.js';
 
-// Phase 10B — event bus publish (lazy)
-let _publishEvent = null;
-async function getPublish() {
-  if (_publishEvent) return _publishEvent;
-  try {
-    const mod = await import('../events/index.js');
-    _publishEvent = mod.publishEvent;
-    return _publishEvent;
-  } catch { return null; }
-}
-function publishEventSafe(desc) {
-  getPublish().then((fn) => { if (fn) try { fn(desc); } catch {} }).catch(() => {});
-}
+// Phase 10B — best-effort publish onto the canonical event bus (the failure-isolated
+// wrapper lives with the bus; every producer used to carry an identical local copy).
+import { publishEventSafe } from '../events/index.js';
 
 const lastPoolHealth = new Map();   // pool name → health word
 const lastIfaceState = new Map();   // interface name → operstate

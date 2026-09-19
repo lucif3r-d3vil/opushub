@@ -4,7 +4,6 @@
 import { bus, publishEvent as busPublish } from './bus.js';
 import * as store from './store.js';
 import { toPublicEvent } from './model.js';
-import { logEvent as activityLog } from '../activity.js';
 
 let initialized = false;
 
@@ -22,7 +21,16 @@ export function initEvents() {
   return { bus, store };
 }
 
-// Canonical publish: creates event via bus (which validates), writes to store, logs to activity if meaningful
+// Canonical publish: creates event via bus (which validates) and writes to the store.
+//
+// There is deliberately NO bridge into the activity log here. Every producer records its own
+// timeline rows directly at the moment of the transition (alerts log alert.fired/resolved,
+// the monitoring engine logs monitor.down/recovered/…, operations log their outcomes, updates
+// and autoheal log theirs) with human vocabulary, stable subjects and dedupe signatures.
+// A second copy written by the bus — different type names, different signatures — is how the
+// same fact used to land in the Activity page twice. The bus carries canonical events to SSE
+// and the notification center; the activity log carries the user-facing timeline. Two pipes,
+// two vocabularies, each written once, by the module that owns the transition.
 export function publishEvent(descriptor) {
   initEvents();
   const evt = busPublish(descriptor);
@@ -30,66 +38,24 @@ export function publishEvent(descriptor) {
   try {
     store.writeEvent(evt);
   } catch {}
-  // Bridge to activity for meaningful types: only those that are user-visible timeline entries
-  try {
-    if (shouldLogToActivity(evt)) {
-      activityLog({
-        source: evt.source,
-        type: evt.type,
-        subject: evt.subject?.label || evt.subject?.id || 'system',
-        message: evt.message,
-        meta: {
-          eventId: evt.id,
-          severity: evt.severity,
-          ...(evt.correlation || {}),
-          ...(evt.payload || {}),
-        },
-        severity: evt.severity,
-        category: categoryForType(evt.type),
-        signature: `event:${evt.type}:${evt.correlation?.monitorId || evt.correlation?.incidentId || evt.id}`,
-      });
-    }
-  } catch {}
   return evt;
-}
-
-function shouldLogToActivity(evt) {
-  // Only log meaningful transitions, not every check
-  const meaningful = new Set([
-    'monitor.state_changed',
-    'monitor.incident.opened',
-    'monitor.incident.recovered',
-    'alert.created',
-    'alert.resolved',
-    'operation.completed',
-    'operation.failed',
-    'operation.timed_out',
-    'infrastructure.health_changed',
-    'service.down',
-    'service.up',
-    'service.unhealthy',
-    'service.healthy',
-    'container.update_available',
-    'container.updated',
-    'container.update_failed',
-    'container.autoheal.restarted',
-    'container.autoheal.failed',
-  ]);
-  return meaningful.has(evt.type);
-}
-
-function categoryForType(type) {
-  if (type.startsWith('monitor.') || type.startsWith('incident')) return 'monitor';
-  if (type.startsWith('alert.')) return 'alert';
-  if (type.startsWith('operation.')) return 'operation';
-  if (type.startsWith('infrastructure.')) return 'infrastructure';
-  if (type.startsWith('service.')) return 'service';
-  return 'system';
 }
 
 export function subscribeEvents(filter, handler) {
   initEvents();
   return bus.subscribe(filter, handler);
+}
+
+/**
+ * Best-effort publish for producers that must never be broken by the event pipeline:
+ * the event is published (and stored, and bridged to the activity log) when everything
+ * works, and silently dropped when it does not. Six producers used to carry their own
+ * lazy-import copy of this wrapper; the canonical one lives here next to publishEvent.
+ */
+export function publishEventSafe(descriptor) {
+  try {
+    publishEvent(descriptor);
+  } catch { /* event publication never breaks its producer */ }
 }
 
 export function getRecentEvents(opts) {

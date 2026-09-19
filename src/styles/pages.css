@@ -1021,7 +1021,7 @@
 .mon-count.mon-bad .mon-count-value { color: var(--fail); }
 .mon-count-extra { align-self: center; }
 
-.mon-views { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-6); }
+.mon-views, .page-views { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-6); flex-wrap: wrap; }
 .mon-filters { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-4); }
 
 .mon-group { margin-bottom: var(--sp-8); }

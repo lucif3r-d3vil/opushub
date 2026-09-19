@@ -3,7 +3,7 @@
 
 import { bus } from './bus.js';
 import { readEvents } from './store.js';
-import { toPublicEvent } from './model.js';
+import { SEVERITY_ORDER, toPublicEvent } from './model.js';
 
 const MAX_GLOBAL_CONNECTIONS = 50;
 const MAX_PER_SESSION = 10;
@@ -88,7 +88,7 @@ export function handleSSE(req, res, { sessionHandle, query } = {}) {
       if (types && types.length && !types.includes(evt.type)) return false;
       if (source && evt.source !== source) return false;
       if (severity) {
-        const order = { info: 0, notice: 1, warning: 2, critical: 3 };
+        const order = SEVERITY_ORDER;
         if ((order[evt.severity] ?? 0) < (order[severity] ?? 0)) return false;
       }
       return true;
@@ -174,7 +174,7 @@ export function handleSSE(req, res, { sessionHandle, query } = {}) {
     if (types && types.length && !types.includes(evt.type)) return false;
     if (source && evt.source !== source) return false;
     if (severity) {
-      const order = { info: 0, notice: 1, warning: 2, critical: 3 };
+      const order = SEVERITY_ORDER;
       if ((order[evt.severity] ?? 0) < (order[severity] ?? 0)) return false;
     }
     return true;

@@ -1,7 +1,7 @@
 // Phase 10B — internal EventBus (canonical, trusted producers only)
 // Guarantees: bounded subscribers, bounded memory, failure isolation, loop protection, ordered delivery.
 
-import { makeEvent, toPublicEvent } from './model.js';
+import { SEVERITY_ORDER, makeEvent, toPublicEvent } from './model.js';
 
 const MAX_SUBSCRIBERS = 100;
 const RING_SIZE = 200;
@@ -30,7 +30,7 @@ class EventBus {
       items = items.filter((e) => set.has(e.type));
     }
     if (severity) {
-      const order = { info: 0, notice: 1, warning: 2, critical: 3 };
+      const order = SEVERITY_ORDER;
       const min = order[severity] ?? 0;
       items = items.filter((e) => (order[e.severity] ?? 0) >= min);
     }
@@ -103,7 +103,7 @@ class EventBus {
         if (f.types && Array.isArray(f.types) && f.types.length && !f.types.includes(evt.type)) return false;
         if (f.source && evt.source !== f.source) return false;
         if (f.severity) {
-          const order = { info: 0, notice: 1, warning: 2, critical: 3 };
+          const order = SEVERITY_ORDER;
           if ((order[evt.severity] ?? 0) < (order[f.severity] ?? 0)) return false;
         }
         return true;

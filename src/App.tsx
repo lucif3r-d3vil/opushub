@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Link, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { LayoutProvider, SettingsProvider, useSettings } from './lib/theme';
 import { AuthProvider, useAuth } from './lib/auth';
 import { SearchOverlay, useGlobalSearchHotkey } from './components/SearchOverlay';
@@ -28,15 +28,25 @@ const NotFound = lazy(() => import('./pages/NotFound'));
 const Setup = lazy(() => import('./pages/Setup'));
 const Login = lazy(() => import('./pages/Login'));
 
+/**
+ * The primary navigation — one entry per major concept, and nothing else:
+ *
+ *   Hub · Services / Containers · Stacks · Monitoring · System · Activity · Settings
+ *
+ * Everything else lives *inside* one of those parents: the Docker engine, storage, networking,
+ * power and the host itself are views of System; updates, Autoheal and lifecycle actions are
+ * part of Services; imports, connections, backgrounds and custom code are Settings. Icons come
+ * from one stroke family, and every glyph is unique (Monitoring keeps the pulse; Activity is a
+ * history clock — they briefly shared an icon, which made the rail lie).
+ */
 const NAV = [
   { to: '/', label: 'Hub', icon: 'M4 11.5 12 5l8 6.5V20h-5.5v-4.5h-5V20H4z' },
-  { to: '/services', label: 'Services', icon: 'M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z' },
-  // Phase 10A — what OpusHub watches sits between the services it shows and the stacks they form.
-  { to: '/monitoring', label: 'Monitoring', icon: 'M3 12h4l2.5-6 4 12 2.5-6H21' },
+  { to: '/services', label: 'Services / Containers', icon: 'M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z' },
   { to: '/stacks', label: 'Stacks', icon: 'm12 3 8.5 4.7L12 12.4 3.5 7.7zM3.5 12.5 12 17.2l8.5-4.7M3.5 17l8.5 4.7L20.5 17' },
+  { to: '/monitoring', label: 'Monitoring', icon: 'M3 12h4l2.5-6 4 12 2.5-6H21' },
   { to: '/system', label: 'System', icon: 'M4 5.5h16v11H4zM8.5 20h7M12 16.5V20' },
-  { to: '/activity', label: 'Activity', icon: 'M3 12h4l2.5-6 4 12 2.5-6H21' },
-  { to: '/settings/appearance', label: 'Settings', icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7.4 7.4 0 0 0-.1-1.2l2-1.55-2-3.46-2.35.95a7.5 7.5 0 0 0-2.05-1.2L14.5 3h-5l-.4 2.54a7.5 7.5 0 0 0-2.05 1.2L4.7 5.79l-2 3.46 2 1.55a7.6 7.6 0 0 0 0 2.4l-2 1.55 2 3.46 2.35-.95a7.5 7.5 0 0 0 2.05 1.2L9.5 21h5l.4-2.54a7.5 7.5 0 0 0 2.05-1.2l2.35.95 2-3.46-2-1.55c.07-.4.1-.8.1-1.2Z' },
+  { to: '/activity', label: 'Activity', icon: 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5M12 7v5l4 2' },
+  { to: '/settings', label: 'Settings', icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7.4 7.4 0 0 0-.1-1.2l2-1.55-2-3.46-2.35.95a7.5 7.5 0 0 0-2.05-1.2L14.5 3h-5l-.4 2.54a7.5 7.5 0 0 0-2.05 1.2L4.7 5.79l-2 3.46 2 1.55a7.6 7.6 0 0 0 0 2.4l-2 1.55 2 3.46 2.35-.95a7.5 7.5 0 0 0 2.05 1.2L9.5 21h5l.4-2.54a7.5 7.5 0 0 0 2.05-1.2l2.35.95 2-3.46-2-1.55c.07-.4.1-.8.1-1.2Z' },
 ];
 
 function Background() {
@@ -125,18 +135,19 @@ function Shell() {
               </NavLink>
             ))}
           </div>
+          {/* Global actions — one of each, visually separated from the primary nav above. */}
           <div className="rail-foot">
             <button
               className="rail-item"
               aria-label="Open search"
               onClick={() => setSearchOpen(true)}
-              style={{ height: 40 }}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" strokeLinecap="round" /></svg>
               <span className="tip">Search · /</span>
             </button>
-            <div className="rail-item" style={{ height: 40, position: 'relative' }}>
+            <div className="rail-item rail-notifications">
               <NotificationBell />
+              <span className="tip">Notifications</span>
             </div>
             <ThemeToggle />
             <SignOutButton />
@@ -184,7 +195,7 @@ function ThemeToggle() {
   const next = theme === 'system' ? 'dark' : theme === 'dark' ? 'light' : 'system';
   const label = next === 'system' ? 'Theme: auto' : next === 'dark' ? 'Theme: dark' : 'Theme: light';
   return (
-    <button className="rail-item" aria-label={label} title={label} onClick={() => update({ appearance: { theme: next } })} style={{ height: 40 }}>
+    <button className="rail-item" aria-label={label} title={label} onClick={() => update({ appearance: { theme: next } })}>
       {theme === 'light'
         ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5 5l1.6 1.6M17.4 17.4 19 19M19 5l-1.6 1.6M6.6 17.4 5 19" /></svg>
         : theme === 'dark'
@@ -243,13 +254,19 @@ function SignOutButton() {
   const { user, logout } = useAuth();
   if (!user) return null;
   return (
-    <button className="rail-item" aria-label={`Sign out ${user.username}`} title={`Signed in as ${user.username} — click to sign out`} onClick={() => void logout()} style={{ height: 40 }}>
+    <button className="rail-item" aria-label={`Sign out ${user.username}`} title={`Signed in as ${user.username} — click to sign out`} onClick={() => void logout()}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
         <path d="M15 4h3.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H15M10 8l-4 4 4 4M6 12h9" />
       </svg>
       <span className="tip">Sign out · {user.username}</span>
     </button>
   );
+}
+
+/** Old address → its canonical home, keeping the query string (tabs, pool/dataset picks, service deep links). */
+function LegacyRedirect({ to }: { to: string }) {
+  const location = useLocation();
+  return <Navigate to={{ pathname: to, search: location.search, hash: location.hash }} replace />;
 }
 
 function ShellWithRoutes() {
@@ -264,9 +281,15 @@ function ShellWithRoutes() {
             <Route path="monitoring/:id" element={<MonitorDetail />} />
             <Route path="stacks" element={<Stacks />} />
             <Route path="stacks/:name" element={<StackDetail />} />
-            <Route path="infrastructure" element={<Infrastructure />} />
-            <Route path="host" element={<Host />} />
+            {/* System is the parent for the machine: live vitals, the host itself, and the
+                infrastructure views (engine, storage/ZFS, network, power, topology). */}
             <Route path="system" element={<SystemPage />} />
+            <Route path="system/host" element={<Host />} />
+            <Route path="system/infrastructure" element={<Infrastructure />} />
+            {/* Legacy mounts redirect, never 404: stored notifications, alert links and
+                bookmarks still carry these paths, and they keep arriving where they meant to. */}
+            <Route path="host" element={<LegacyRedirect to="/system/host" />} />
+            <Route path="infrastructure" element={<LegacyRedirect to="/system/infrastructure" />} />
             <Route path="activity" element={<Activity />} />
             <Route path="settings" element={<Settings />} />
             <Route path="settings/:tab" element={<Settings />} />

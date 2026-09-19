@@ -21,19 +21,9 @@ import { logEvent } from '../activity.js';
 import { evaluateServiceHealth } from '../healthModel.js';
 import * as model from '../model.js';
 
-// Phase 10B — event bus publish (lazy)
-let _publishEvent = null;
-async function getPublish() {
-  if (_publishEvent) return _publishEvent;
-  try {
-    const mod = await import('../events/index.js');
-    _publishEvent = mod.publishEvent;
-    return _publishEvent;
-  } catch { return null; }
-}
-function publishEventSafe(desc) {
-  getPublish().then((fn) => { if (fn) try { fn(desc); } catch {} }).catch(() => {});
-}
+// Phase 10B — best-effort publish onto the canonical event bus (the failure-isolated
+// wrapper lives with the bus; every producer used to carry an identical local copy).
+import { publishEventSafe } from '../events/index.js';
 import { getAction, isKnownAction, registrySummary } from './registry.js';
 import { describeActor, can } from './permissions.js';
 import { parseTargetRef, revalidateTarget } from './targets.js';

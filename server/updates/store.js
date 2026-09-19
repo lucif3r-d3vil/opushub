@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from '../configStore.js';
 import { makeUpdateRecord } from './model.js';
+import { writeJsonAtomic } from '../lib/atomicFile.js';
 
 const DIR = path.join(DATA_DIR, 'updates');
 const FILE = path.join(DIR, 'state.json');
@@ -31,9 +32,7 @@ function readRaw() {
 
 function atomicWrite(obj) {
   ensureDir();
-  const tmp = `${FILE}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, FILE);
+  writeJsonAtomic(FILE, obj);
 }
 
 export function listUpdates({ status = null, serviceId = null } = {}) {

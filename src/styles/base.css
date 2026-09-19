@@ -117,10 +117,12 @@ html[data-bg='photo'] body { background: transparent; }
   opacity: 0; pointer-events: none; transition: opacity var(--t-fast) var(--ease);
   box-shadow: var(--shadow-1); z-index: 5;
 }
-.rail-item:hover .tip, .rail-item:focus-visible .tip { opacity: 1; }
+.rail-item:hover .tip, .rail-item:focus-visible .tip, .rail-item:focus-within .tip { opacity: 1; }
 .rail-foot { display: flex; flex-direction: column; gap: var(--sp-2); align-items: center; }
-.rail-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
-.rail-dot.off { background: var(--ink-3); box-shadow: none; }
+/* Global actions sit slightly tighter than primary nav — same rail, one rhythm, lower tier. */
+.rail-foot .rail-item { height: 40px; }
+/* The bell carries its own button; the wrapper is the rail cell and the tooltip anchor. */
+.rail-notifications { position: relative; }
 
 .main-wrap { flex: 1; min-width: 0; padding-left: var(--rail-w); display: flex; flex-direction: column; }
 .page {
@@ -191,7 +193,10 @@ html[data-transparency='off'] .glass { backdrop-filter: none; -webkit-backdrop-f
     overflow-x: auto; scrollbar-width: none;
   }
   html[data-transparency='off'] .mobile-bar { background: var(--bg); backdrop-filter: none; }
-  .mobile-bar .rail-item { width: 58px; }
+  /* Seven destinations plus Search and the bell share the bar: on wide phones they sit at a
+     comfortable 58px, on a narrow (≈360px) phone they contract evenly instead of one item
+     clipping mid-icon off the edge. */
+  .mobile-bar .rail-item { flex: 1 1 0; width: auto; min-width: 36px; max-width: 58px; }
   .mobile-bar .rail-item.active::before { left: 50%; top: -7px; translate: -50% 0; width: 18px; height: 3px; }
   .mobile-bar .rail-item .tip { display: none; }
 }

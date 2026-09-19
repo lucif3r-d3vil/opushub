@@ -1,6 +1,7 @@
 // Server-side cache with a disk snapshot so provider data survives restarts.
 import fs from 'node:fs';
 import path from 'node:path';
+import { writeFileAtomic } from './atomicFile.js';
 
 export class TimedCache {
   constructor({ max = 128 } = {}) {
@@ -23,7 +24,7 @@ export class TimedCache {
 }
 
 export function persistSnapshot(file, obj) {
-  try { fs.writeFileSync(file + '.tmp', JSON.stringify(obj)); fs.renameSync(file + '.tmp', file); } catch { /* best-effort */ }
+  try { writeFileAtomic(file, JSON.stringify(obj)); } catch { /* best-effort */ }
 }
 
 export function readSnapshot(dir, name) {

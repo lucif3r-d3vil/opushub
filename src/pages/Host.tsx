@@ -14,6 +14,7 @@ import { useSettings } from '../lib/theme';
 import type { HostDoc, OpusGridDoc } from '../lib/types';
 import { Loading, PageHero, ProviderNote } from '../components/ui';
 import { InfraStatusStrip, ProviderRow } from '../components/InfraStatusStrip';
+import { SystemNav } from '../components/SystemNav';
 
 const NA = <span className="stale-note">Not available</span>;
 const v = (x: unknown) => (x == null || x === '' ? NA : String(x));
@@ -58,6 +59,8 @@ export default function HostPage() {
         }
       />
 
+      <SystemNav />
+
       <InfraStatusStrip health={grid.data?.health} providers={grid.data?.providers} />
 
       {loading && <Loading what="the host" note="Reading identity, resources and providers." />}
@@ -91,7 +94,7 @@ export default function HostPage() {
             </dl>
           </Band>
 
-          <Band title="Storage" hint={<Link className="act" to="/infrastructure?tab=storage">Storage →</Link>}>
+          <Band title="Storage" hint={<Link className="act" to="/system/infrastructure?tab=storage">Storage →</Link>}>
             {storage?.filesystems.totals ? (
               <dl className="kv">
                 <KV k="Filesystems">{storage.filesystems.mountCount} mounts</KV>
@@ -109,7 +112,7 @@ export default function HostPage() {
             )}
           </Band>
 
-          <Band title="Network" hint={<Link className="act" to="/infrastructure?tab=network">Network →</Link>}>
+          <Band title="Network" hint={<Link className="act" to="/system/infrastructure?tab=network">Network →</Link>}>
             {network ? (
               <dl className="kv">
                 <KV k="Interfaces">{network.interfaceCount ?? NA}{network.counts ? <span className="stale-note"> · {network.counts.up} up</span> : null}</KV>
