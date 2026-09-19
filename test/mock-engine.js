@@ -584,6 +584,7 @@ export function createHandler({ log = null } = {}) {
       let bodyData = {};
       try { const chunks = []; for await (const c of req) chunks.push(c); bodyData = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
       if (!bodyData.Name) return send(400, { message: 'name required' });
+      if (/fail-net/.test(bodyData.Name)) return send(500, { message: 'mock fault: network driver failed' }); // Phase 10D rollback matrix
       if (CREATED_NETWORKS.has(bodyData.Name)) return send(409, { message: 'network already exists' });
       CREATED_NETWORKS.set(bodyData.Name, { ...bodyData, Id: netId(bodyData.Name) });
       return send(201, { Id: netId(bodyData.Name), Warning: '' });
@@ -599,6 +600,7 @@ export function createHandler({ log = null } = {}) {
       let bodyData = {};
       try { const chunks = []; for await (const c of req) chunks.push(c); bodyData = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
       if (!bodyData.Name) return send(400, { message: 'name required' });
+      if (/fail-vol/.test(bodyData.Name)) return send(500, { message: 'mock fault: volume driver failed' }); // Phase 10D rollback matrix
       CREATED_VOLUMES.set(bodyData.Name, { ...bodyData });
       return send(201, { Name: bodyData.Name, Driver: 'local', Mountpoint: `/var/lib/docker-mock/volumes/${bodyData.Name}/_data` });
     }
@@ -619,6 +621,7 @@ export function createHandler({ log = null } = {}) {
         bodyData = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       } catch {}
       const newName = url.searchParams.get('name') || 'new-container';
+      if (/fail-create/.test(newName)) return send(500, { message: 'mock fault: create failed' }); // Phase 10D rollback matrix
       if (FLEET.some((f) => f.Names[0] === `/${newName}`)) return send(409, { message: `Conflict. The container name "/${newName}" is already in use` });
       if (/missing|nonexistent|not-present/.test(bodyData.Image || '') && !PULLED.has(bodyData.Image)) return send(404, { message: 'No such image' });
       const id64 = `e1e2e3${(++CREATED_SEQ).toString(16).padStart(6, '0')}`.padEnd(64, '0');
