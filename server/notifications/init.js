@@ -4,6 +4,7 @@ import { bus } from '../events/bus.js';
 import { createFromEvent } from './center.js';
 import { registerProvider } from './providers/registry.js';
 import { webhookProvider } from './providers/webhook.js';
+import { telegramProvider } from './providers/telegram.js';
 
 let initialized = false;
 let sub = null;
@@ -14,6 +15,7 @@ export function initNotifications() {
 
   // Register built-in providers
   try { registerProvider('webhook', webhookProvider); } catch {}
+  try { registerProvider('telegram', telegramProvider); } catch {}
 
   // Subscribe to all public events that should become notifications
   // We use a filter that only passes meaningful notification types

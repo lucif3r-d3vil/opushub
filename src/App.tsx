@@ -163,6 +163,10 @@ function Shell() {
         <button className="rail-item mobile-cta" aria-label="Search" onClick={() => setSearchOpen(true)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" strokeLinecap="round" /></svg>
         </button>
+        {/* Phase 10B — the rail (and its bell) hides on mobile, so the bell rides the bottom bar */}
+        <div className="rail-item mobile-cta" style={{ position: 'relative' }}>
+          <NotificationBell />
+        </div>
       </nav>
 
       <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />

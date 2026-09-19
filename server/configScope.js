@@ -38,7 +38,7 @@ export const PROTECTED_STATE = [
   { path: 'data/activity.jsonl', kind: 'activity', why: 'the event log — it records what happened and is not a setting' },
   { path: 'data/metrics.json', kind: 'metrics', why: 'host metric history — it is a measurement, not a preference' },
   { path: 'data/events/', kind: 'events', why: 'live event history — it is a measurement, not a preference' },
-  { path: 'data/notifications/', kind: 'notifications', why: 'notification history and webhook secrets — not presentation' },
+  { path: 'data/notifications/', kind: 'notifications', why: 'notification history, policy and provider secrets (webhook secret, Telegram bot token) — not presentation' },
   { path: 'data/monitoring/', kind: 'monitoring', why: 'monitoring state, history and incidents — not presentation' },
   { path: 'data/operations/', kind: 'operations', why: 'operation records and audit trails — not presentation' },
   { path: 'config/.env', kind: 'secrets', why: 'environment secrets — values never leave the server' },

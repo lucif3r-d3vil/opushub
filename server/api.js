@@ -1736,6 +1736,7 @@ const V1_ROUTES = new Set([
   '/events', '/events/stream', '/events/stats',
   '/notifications', '/notifications/unread-count', '/notifications/stats',
   '/notifications/policy', '/notifications/providers', '/notifications/webhook',
+  '/notifications/telegram',
 ]);
 
 export function rewriteV1(pathname) {

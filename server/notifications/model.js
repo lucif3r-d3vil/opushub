@@ -63,12 +63,45 @@ function humanType(type) {
 
 function deriveHref(evt) {
   if (evt.subject?.href) return evt.subject.href;
+  // Fallbacks must name routes that exist in the SPA. There is no /operations page —
+  // operation outcomes are reviewed in the service list and the activity timeline.
   if (evt.type.startsWith('monitor.')) return '/monitoring';
-  if (evt.type.startsWith('alert.')) return '/';
-  if (evt.type.startsWith('operation.')) return '/operations';
+  if (evt.type.startsWith('alert.')) return '/activity';
+  if (evt.type.startsWith('operation.')) return '/services';
   if (evt.type.startsWith('infrastructure.')) return '/infrastructure';
-  if (evt.type.startsWith('service.')) return '/';
+  if (evt.type.startsWith('service.')) return '/services';
   return '/activity';
+}
+
+function sanitizeHref(href) {
+  // Internal paths only: a leading // is a protocol-relative URL to another host, not a
+  // route in this app. (The client re-checks with safeHref; this is the server's gate.)
+  if (typeof href !== 'string' || !href) return null;
+  if (!href.startsWith('/') || href.startsWith('//')) return null;
+  return href.slice(0, 500);
+}
+
+function sanitizeSubject(subject) {
+  if (!subject || typeof subject !== 'object') return null;
+  return {
+    kind: sanitizeString(subject.kind, 40) || null,
+    id: sanitizeString(subject.id, 120) || null,
+    label: sanitizeString(subject.label, 200) || null,
+    href: sanitizeHref(subject.href),
+  };
+}
+
+function sanitizeCorrelation(correlation) {
+  if (!correlation || typeof correlation !== 'object') return null;
+  const out = {};
+  let kept = 0;
+  for (const [k, v] of Object.entries(correlation)) {
+    if (kept >= 20) break;
+    if (typeof k !== 'string' || typeof v !== 'string') continue;
+    out[sanitizeString(k, 60)] = sanitizeString(v, 200);
+    kept++;
+  }
+  return out;
 }
 
 export function sanitizeNotification(n) {
@@ -82,9 +115,9 @@ export function sanitizeNotification(n) {
     source: n.source,
     title: sanitizeString(n.title, 200),
     message: sanitizeString(n.message, 500),
-    href: n.href && typeof n.href === 'string' && n.href.startsWith('/') ? n.href : null,
-    subject: n.subject,
-    correlation: n.correlation,
+    href: sanitizeHref(n.href),
+    subject: sanitizeSubject(n.subject),
+    correlation: sanitizeCorrelation(n.correlation),
     read: !!n.read,
     readAt: n.readAt || null,
     createdAt: n.createdAt || n.t,

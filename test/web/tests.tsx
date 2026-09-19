@@ -30,6 +30,9 @@ import { MenuButton } from '../../src/components/ui';
 import { AreaChart } from '../../src/components/Charts';
 import { createHarness, click, key, q, qa, text, type, type Harness } from './harness';
 import { OperationsHost } from '../../src/components/Operations';
+import { NotificationBell } from '../../src/components/Notifications';
+import { safeHref } from '../../src/lib/notifications';
+import { __emitLiveEventForTests, __setLiveStatusForTests } from '../../src/lib/sse';
 import {
   activityDoc, bookmarksDoc, catalogue, layoutWith, marketDoc, newsDoc, servicesDoc, stacksDoc,
   systemSnapshot, weatherDoc,
@@ -2478,6 +2481,267 @@ export async function runWebTests(): Promise<WebResult> {
     } finally {
       await broken.unmount();
     }
+  });
+
+  /* ==================================================================
+     Phase 10B — the notification center, as a person meets it
+     ================================================================== */
+
+  const notif = (over: Record<string, unknown> = {}) => ({
+    id: 'n1', eventId: 'evt-1', t: Date.now() - 60_000, type: 'monitor.state_changed',
+    severity: 'warning', source: 'monitoring', title: 'Monitor status changed: Jellyfin',
+    message: 'Jellyfin is down', href: '/monitoring/m1', read: false, readAt: null, ...over,
+  });
+
+  /** A notification backend that behaves like the real one: reads reflect writes. */
+  function notificationRoutes(items: ReturnType<typeof notif>[]) {
+    const state = { items };
+    const doc = () => ({
+      notifications: state.items, count: state.items.length,
+      unread: state.items.filter((n) => !n.read).length, total: state.items.length,
+    });
+    const routes: Record<string, unknown | ((body: unknown, path: string) => unknown)> = {
+      '/api/notifications': () => doc(),
+      '/api/notifications/unread-count': () => ({ unread: state.items.filter((n) => !n.read).length, total: state.items.length }),
+      '/api/notifications/read-all': () => {
+        for (const n of state.items) { n.read = true; n.readAt = Date.now(); }
+        return { ok: true, changed: state.items.length, total: state.items.length };
+      },
+    };
+    for (const n of state.items) {
+      routes[`/api/notifications/${n.id}/read`] = () => {
+        n.read = true; n.readAt = Date.now();
+        return { ok: true, notification: n };
+      };
+    }
+    return routes;
+  }
+
+  const bellButton = () => q<HTMLButtonElement>('button[aria-label^="Notifications"]');
+
+  /* 10B-1 — the bell toggles the panel; Escape and outside-click close it; focus returns */
+  await test('notifications: the bell toggles a portalled panel, Escape and outside-click close it', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...notificationRoutes([notif()]) });
+    await h.mount(<MemoryRouter><NotificationBell /></MemoryRouter>);
+    await h.waitFor(() => !!bellButton(), 'the bell');
+    const bell = bellButton()!;
+    expect(!q('.notif-panel'), 'the panel renders before it is opened');
+    click(bell);
+    await h.waitFor(() => !!q('.notif-panel'), 'the panel to open');
+    expect(q('.notif-panel')!.parentElement === document.body, 'the panel is not portalled to the document body');
+    expect(bell.getAttribute('aria-expanded') === 'true', 'aria-expanded did not follow the panel');
+    expect(bell.getAttribute('aria-haspopup') === 'dialog', 'the bell does not announce its dialog');
+    expect(q('.notif-panel')!.getAttribute('role') === 'dialog', 'the panel is not a dialog');
+    click(bell);
+    await h.flush(30);
+    expect(!q('.notif-panel'), 'clicking the bell again did not close the panel');
+    click(bell);
+    await h.waitFor(() => !!q('.notif-panel'), 'the panel to reopen');
+    key(window, 'Escape');
+    await h.flush(30);
+    expect(!q('.notif-panel'), 'Escape did not close the panel');
+    expect(document.activeElement === bell, 'focus did not return to the bell');
+    click(bell);
+    await h.waitFor(() => !!q('.notif-panel'), 'the panel to reopen a second time');
+    await act(async () => { document.body.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true })); });
+    await h.flush(30);
+    expect(!q('.notif-panel'), 'a click outside did not close the panel');
+  });
+
+  /* 10B-2 — the badge is live, honest, and hidden at zero */
+  await test('notifications: the badge shows the unread count and hides at zero', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...notificationRoutes([notif(), notif({ id: 'n2', eventId: 'evt-2' }), notif({ id: 'n3', eventId: 'evt-3', read: true })]) });
+    await h.mount(<MemoryRouter><NotificationBell /></MemoryRouter>);
+    await h.waitFor(() => !!q('.notif-badge'), 'the badge');
+    expect(text(q('.notif-badge')!).trim() === '2', `the badge should read 2, got “${text(q('.notif-badge')!)}”`);
+    expect(bellButton()!.getAttribute('aria-label') === 'Notifications, 2 unread', 'the accessible label does not carry the count');
+  });
+
+  await test('notifications: no badge at zero unread', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...notificationRoutes([notif({ read: true })]) });
+    await h.mount(<MemoryRouter><NotificationBell /></MemoryRouter>);
+    await h.waitFor(() => !!bellButton(), 'the bell');
+    await h.flush(50);
+    expect(!q('.notif-badge'), 'a badge renders with nothing unread');
+    expect(bellButton()!.getAttribute('aria-label') === 'Notifications', 'the zero-state label is wrong');
+  });
+
+  /* 10B-3 — rows carry severity/source/type/time; mark-read commits and refreshes the badge */
+  await test('notifications: rows show their provenance and marking read clears them', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...notificationRoutes([notif(), notif({ id: 'n2', eventId: 'evt-2', severity: 'critical', type: 'alert.created', source: 'alerts', title: 'Alert: disk full', href: null })]) });
+    await h.mount(<MemoryRouter><NotificationBell /></MemoryRouter>);
+    await h.waitFor(() => !!bellButton(), 'the bell');
+    click(bellButton()!);
+    await h.waitFor(() => qa('.notif-row').length === 2, 'both rows');
+    expect(text().includes('Monitor status changed: Jellyfin'), 'the first title is missing');
+    expect(text().includes('Alert: disk full'), 'the second title is missing');
+    expect(text().includes('monitor.state_changed') && text().includes('alert.created'), 'event types are not shown');
+    expect(text().includes('monitoring') && text().includes('alerts'), 'sources are not shown');
+    expect(text().includes('warning') && text().includes('critical'), 'severities are not shown');
+    expect(!!q('.notif-row [title]'), 'no timestamp carries the absolute time');
+    // mark the first row read: the write is committed, the row goes quiet, the badge drops
+    const reads = qa('.notif-row').map((row) => q('button', row)).filter(Boolean) as HTMLElement[];
+    expect(reads.length === 2, 'each unread row should offer “Read”');
+    click(reads[0]);
+    await h.waitFor(() => (h.lastCall('POST', '/api/notifications/n1/read') ? true : false), 'the mark-read write');
+    await h.waitFor(() => !q('.notif-badge') || text(q('.notif-badge')!).trim() === '1', 'the badge to drop to 1');
+    const remaining = qa('.notif-row').map((row) => q('button', row)).filter(Boolean);
+    expect(remaining.length === 1, 'the read row still offers “Read”');
+  });
+
+  /* 10B-4 — mark-all-read commits once and clears the badge */
+  await test('notifications: mark-all-read commits once and clears the badge', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...notificationRoutes([notif(), notif({ id: 'n2', eventId: 'evt-2' })]) });
+    await h.mount(<MemoryRouter><NotificationBell /></MemoryRouter>);
+    await h.waitFor(() => !!q('.notif-badge'), 'the badge');
+    click(bellButton()!);
+    await h.waitFor(() => qa('.notif-row').length === 2, 'both rows (the action enables once loaded)');
+    const all = qa('.notif-panel button').find((b) => text(b).includes('Mark all read'))!;
+    expect((all as HTMLButtonElement).disabled === false, 'mark-all-read stays disabled with unread rows');
+    click(all);
+    await h.waitFor(() => h.writes('POST', '/api/notifications/read-all').length === 1, 'the single read-all write');
+    await h.waitFor(() => !q('.notif-badge'), 'the badge to clear');
+  });
+
+  /* 10B-5 — only safe internal hrefs become links */
+  await test('notifications: external hrefs never become links', async (h) => {
+    h.setRoutes({
+      ...stubRoutes(),
+      ...notificationRoutes([
+        notif({ href: '/monitoring/m1' }),
+        notif({ id: 'n2', eventId: 'evt-2', href: 'https://evil.example/steal' }),
+        notif({ id: 'n3', eventId: 'evt-3', href: '//evil.example/protocol-relative' }),
+      ]),
+    });
+    await h.mount(<MemoryRouter><NotificationBell /></MemoryRouter>);
+    await h.waitFor(() => !!bellButton(), 'the bell');
+    click(bellButton()!);
+    await h.waitFor(() => qa('.notif-row').length === 3, 'all three rows');
+    const links = qa('.notif-row a');
+    expect(links.length === 1, `${links.length} links rendered, expected exactly the internal one`);
+    expect(links[0].getAttribute('href') === '/monitoring/m1', 'the surviving link is not the internal one');
+    expect(!text().includes('evil.example'), 'an external URL leaked into the panel');
+  });
+
+  /* 10B-6 — live events refresh silently: no duplicates, no read reset, no stray refreshes */
+  await test('notifications: a live event refreshes the list without duplicating or resurrecting', async (h) => {
+    const items = [notif(), notif({ id: 'n2', eventId: 'evt-2', read: true })];
+    h.setRoutes({ ...stubRoutes(), ...notificationRoutes(items) });
+    await h.mount(<MemoryRouter><NotificationBell /></MemoryRouter>);
+    await h.waitFor(() => !!bellButton(), 'the bell');
+    click(bellButton()!);
+    await h.waitFor(() => qa('.notif-row').length === 2, 'both rows');
+    const gets = () => h.calls.filter((c) => c.method === 'GET' && c.path.startsWith('/api/notifications?')).length;
+    const before = gets();
+    await act(async () => {
+      __emitLiveEventForTests({ id: 'evt-live-10b-6', t: Date.now(), type: 'alert.created', severity: 'critical', source: 'alerts', message: 'something happened' });
+    });
+    await h.waitFor(() => gets() > before, 'the silent refresh after the live event');
+    await h.flush(30);
+    expect(qa('.notif-row').length === 2, 'the refresh duplicated rows');
+    expect(qa('.notif-row').filter((row) => !q('button', row)).length === 1, 'the refresh resurrected a read row');
+    // an event type the server never turns into a notification causes no refresh at all
+    const steady = gets();
+    await act(async () => {
+      __emitLiveEventForTests({ id: 'evt-live-10b-6b', t: Date.now(), type: 'system.boot', severity: 'info', source: 'system', message: 'booted' });
+    });
+    await h.flush(60);
+    expect(gets() === steady, 'a non-notifiable event triggered a refresh');
+    // a duplicate delivery of the same event id is swallowed, not re-fetched
+    await act(async () => {
+      __emitLiveEventForTests({ id: 'evt-live-10b-6', t: Date.now(), type: 'alert.created', severity: 'critical', source: 'alerts', message: 'something happened' });
+    });
+    await h.flush(60);
+    expect(gets() === steady, 'a duplicate event id triggered a second refresh');
+  });
+
+  /* 10B-7 — the panel says whether it is live, reconnecting, or polling */
+  await test('notifications: the panel shows live, reconnecting, and polling states', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...notificationRoutes([notif()]) });
+    await h.mount(<MemoryRouter><NotificationBell /></MemoryRouter>);
+    await h.waitFor(() => !!bellButton(), 'the bell');
+    click(bellButton()!);
+    await h.waitFor(() => !!q('.notif-panel'), 'the panel');
+    await act(async () => { __setLiveStatusForTests('live'); });
+    await h.flush(20);
+    expect(text(q('.notif-live')!).includes('Live'), 'the live state is not shown');
+    await act(async () => { __setLiveStatusForTests('connecting', 3); });
+    await h.flush(20);
+    expect(text(q('.notif-live')!).includes('Reconnecting'), 'the reconnecting state is not shown');
+    await act(async () => { __setLiveStatusForTests('idle'); });
+    await h.flush(20);
+    expect(text(q('.notif-live')!).includes('Polling'), 'the polling fallback is not shown');
+  });
+
+  /* 10B-8 — safeHref is a pure gate: internal paths pass, everything else is null */
+  await test('notifications: safeHref admits only internal paths', async () => {
+    expect(safeHref('/monitoring/m1') === '/monitoring/m1', 'an internal path was refused');
+    expect(safeHref('/') === '/', 'the root was refused');
+    for (const bad of ['https://evil.example/', '//evil.example/x', 'javascript:alert(1)', 'data:text/html,x', '', null, undefined, 42]) {
+      expect(safeHref(bad as never) === null, `${JSON.stringify(bad)} was admitted`);
+    }
+  });
+
+  /* 10B-9 — the Telegram pane: masked token, preserve-on-blank, fixed test message */
+  await test('settings: telegram config is masked, blank preserves, test uses the saved config', async (h) => {
+    let saved = { enabled: false, chatId: '123456789', configured: true, hasToken: true, tokenMasked: '••••••••Dsaw' };
+    const policyDoc = {
+      enabled: true, minSeverity: 'info', allowedTypes: [], allowedSources: [],
+      browser: { enabled: false, minSeverity: 'warning', allowedTypes: [], allowedSources: [] },
+      webhook: { enabled: false, minSeverity: 'warning', allowedTypes: [], allowedSources: [] },
+      telegram: { enabled: false, minSeverity: 'warning', allowedTypes: [], allowedSources: [] },
+      inApp: { enabled: true, minSeverity: 'info', allowedTypes: [], allowedSources: [] },
+    };
+    h.setRoutes({
+      ...stubRoutes(),
+      '/api/notifications/policy': (body: unknown) => {
+        if (body && typeof body === 'object') Object.assign(policyDoc.telegram, (body as { telegram?: object }).telegram || {});
+        return { policy: policyDoc };
+      },
+      '/api/notifications/webhook': { webhook: { url: null, hasSecret: false, enabled: false, allowInternal: false, allowInsecure: false } },
+      '/api/notifications/telegram': (body: unknown) => {
+        if (body && typeof body === 'object') {
+          const b = body as { botToken?: string | null; chatId?: string | null; enabled?: boolean };
+          if (b.botToken) saved = { ...saved, hasToken: true, tokenMasked: '••••••••NEW!' };
+          if (b.chatId !== undefined) saved = { ...saved, chatId: b.chatId };
+          if (b.enabled !== undefined) saved = { ...saved, enabled: b.enabled };
+        }
+        return { telegram: saved };
+      },
+      '/api/notifications/telegram/test': { ok: true, result: { ok: true, code: 'sent', reason: 'Test message delivered.' } },
+    });
+    await h.mount(<TestApp entry="/settings/notifications"><Hub /></TestApp>);
+    await h.waitFor(() => text().includes('Telegram provider'), 'the telegram block');
+    const section = qa('section').find((s) => q('h2', s)?.textContent === 'Telegram provider')!;
+    expect(!!section, 'the telegram section is missing');
+    const tokenInput = q<HTMLInputElement>('input[aria-label="Telegram bot token"]', section)!;
+    expect(tokenInput.getAttribute('type') === 'password', 'the token field is not a password input');
+    expect((tokenInput.getAttribute('placeholder') || '').includes('••••••••Dsaw'), 'the masked token is not shown as the placeholder');
+    expect(tokenInput.value === '', 'the token field is pre-filled (the secret must never come back down)');
+    expect(text(section).includes('api.telegram.org'), 'the fixed endpoint is not disclosed');
+    // saving with a blank token preserves the secret — the write carries no botToken
+    const saveBtn = qa('button', section).find((b) => text(b) === 'Save Telegram')!;
+    click(saveBtn);
+    await h.waitFor(() => h.writes('PUT', '/api/notifications/telegram').length === 1, 'the telegram save');
+    expect(!('botToken' in (h.lastCall('PUT', '/api/notifications/telegram')!.body as object)), 'a blank token field overwrote the saved secret');
+    // the write is recorded when it is sent — wait for the round-trip before the next save
+    await h.waitFor(() => text(section).includes('Telegram saved'), 'the first save to settle');
+    // typing a token sends it exactly once, then the field clears
+    type(tokenInput, '999888:AAH-new-token-value-here-abcdefgh');
+    click(saveBtn);
+    await h.waitFor(() => h.writes('PUT', '/api/notifications/telegram').length === 2, 'the token save');
+    expect((h.lastCall('PUT', '/api/notifications/telegram')!.body as { botToken: string }).botToken === '999888:AAH-new-token-value-here-abcdefgh', 'the typed token was not sent');
+    await h.waitFor(() => q<HTMLInputElement>('input[aria-label="Telegram bot token"]', section)!.value === '', 'the token field to clear after save');
+    // the test button POSTs with no steerable body and reports the outcome
+    const testBtn = qa('button', section).find((b) => text(b) === 'Send test')!;
+    click(testBtn);
+    await h.waitFor(() => h.writes('POST', '/api/notifications/telegram/test').length === 1, 'the telegram test');
+    await h.waitFor(() => text(section).includes('delivered'), 'the test outcome');
+    // the channel severity commits through the shared policy
+    const seg = q('[aria-label="Telegram min severity"]', section)!;
+    click(qa('button', seg).find((b) => text(b) === 'Critical')!);
+    await h.waitFor(() => h.writes('PUT', '/api/notifications/policy').length >= 1, 'the policy write');
+    expect((h.lastCall('PUT', '/api/notifications/policy')!.body as { telegram: { minSeverity: string } }).telegram.minSeverity === 'critical', 'the telegram floor did not commit');
   });
 
   for (const r of results) {

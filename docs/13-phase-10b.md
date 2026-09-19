@@ -1,6 +1,8 @@
 # Phase 10B — Live Events & Notifications
 
-> Status: implementation plan (pre-code audit)
+> Status: shipped — Notification Center UI fixed (portalled panel, live badge, SSE refresh) and
+> Telegram added as an outbound-only provider through the shared policy/provider model.
+> The sections below remain the pre-code plan; §7 notes what is still deferred.
 
 ## 1. Audit — existing modules to reuse
 
@@ -106,7 +108,8 @@ Future providers (Email, Telegram, Discord, Slack) can be added as new `Notifica
 
 ## 7. What is deferred (explicit)
 
-- Email, Telegram, Discord, Slack providers (registry placeholder only)
+- Email, Discord, Slack providers (registry placeholder only). Telegram shipped as outbound-only
+  (`server/notifications/providers/telegram.js`, fixed `api.telegram.org` endpoint, secret-masked config).
 - Autoheal/remediation (no restart, no repair)
 - OpusAI (no LLM)
 - File management, app deployment, reverse-proxy implementation

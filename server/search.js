@@ -44,7 +44,7 @@ const SETTINGS = [
   { title: 'Groups', href: '/settings/groups', hint: 'Create, rename, reorder and hide groups', keywords: ['grouping', 'categories', 'folders'] },
   { title: 'Bookmarks', href: '/settings/bookmarks', hint: 'Flat links, no status', keywords: ['links', 'shortcuts'] },
   { title: 'Integrations', href: '/settings/integrations', hint: 'News feeds, weather location, watchlist', keywords: ['rss', 'feed', 'weather', 'stocks', 'markets', 'symbols'] },
-  { title: 'Notifications', href: '/settings/notifications', hint: 'Alert channels: webhook, email, Telegram, Slack', keywords: ['alerts', 'notify', 'webhook', 'email', 'telegram', 'slack', 'channels'] },
+  { title: 'Notifications', href: '/settings/notifications', hint: 'Providers: webhook, Telegram · browser notifications', keywords: ['alerts', 'notify', 'webhook', 'email', 'telegram', 'slack', 'channels'] },
   { title: 'General', href: '/settings/general', hint: 'Name, greeting, this install', keywords: ['identity', 'title', 'name', 'greeting', 'app', 'about'] },
   { title: 'Environment', href: '/settings/environment', hint: 'Engine status, URL sources, Homepage-compatible files', keywords: ['docker', 'engine', 'socket', 'discovery', 'unmatched', 'env', 'paths', 'homepage', 'overlay'] },
   // Phase 9 — provider connections: status and capabilities, never credentials.

@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from '../configStore.js';
+import { sanitizeNotification } from './model.js';
 
 const DIR = path.join(DATA_DIR, 'notifications');
 const FILE = path.join(DIR, 'notifications.json');
@@ -46,13 +47,17 @@ export function listNotifications({ limit = 100, unreadOnly = false, severity = 
   if (source) items = items.filter((n) => n.source === source);
   if (before != null) items = items.filter((n) => (n.t || 0) < before);
   if (limit != null) items = items.slice(0, limit);
-  return items;
+  // The API contract is the sanitized projection: bounded strings and internal-only hrefs,
+  // enforced on read so nothing persisted (including older records) can smuggle an
+  // external URL or an oversized body to the browser.
+  return items.map(sanitizeNotification).filter(Boolean);
 }
 
 export function getNotification(id) {
   if (!id) return null;
   const all = readRaw().notifications;
-  return all.find((n) => n.id === id) || null;
+  const found = all.find((n) => n.id === id) || null;
+  return found ? sanitizeNotification(found) : null;
 }
 
 export function addNotification(notif) {
@@ -84,7 +89,7 @@ export function markRead(id) {
   raw.notifications[idx].read = true;
   raw.notifications[idx].readAt = Date.now();
   atomicWrite(raw);
-  return raw.notifications[idx];
+  return sanitizeNotification(raw.notifications[idx]);
 }
 
 export function markAllRead() {

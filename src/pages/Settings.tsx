@@ -1671,6 +1671,9 @@ function NotificationsTab() {
   const [err, setErr] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<any>(null);
   const [webhookForm, setWebhookForm] = useState({ url: '', secret: '', enabled: false, allowInternal: false, allowInsecure: false });
+  const [telegram, setTelegram] = useState<any>(null);
+  const [telegramForm, setTelegramForm] = useState({ token: '', chatId: '', enabled: false });
+  const [telegramTest, setTelegramTest] = useState<any>(null);
 
   const load = useCallback(async () => {
     try {
@@ -1683,6 +1686,13 @@ function NotificationsTab() {
         enabled: w.webhook?.enabled || false,
         allowInternal: w.webhook?.allowInternal || false,
         allowInsecure: w.webhook?.allowInsecure || false,
+      }));
+      const t = await api<{ telegram: any }>('/api/notifications/telegram');
+      setTelegram(t.telegram);
+      setTelegramForm((prev) => ({
+        ...prev,
+        enabled: t.telegram?.enabled || false,
+        chatId: t.telegram?.chatId || '',
       }));
     } catch {}
   }, []);
@@ -1737,6 +1747,43 @@ function NotificationsTab() {
     }
   };
 
+  const saveTelegram = async () => {
+    setSaving(true); setErr(null); setMsg(null); setTelegramTest(null);
+    try {
+      // The token field submits only when the operator typed a new one — an empty field
+      // preserves the saved secret server-side (only an explicit removal clears it).
+      const body: any = { enabled: telegramForm.enabled, chatId: telegramForm.chatId.trim() || null };
+      if (telegramForm.token.trim()) body.botToken = telegramForm.token.trim();
+      const res = await put<{ telegram: any }>('/api/notifications/telegram', body);
+      setTelegram(res.telegram);
+      setTelegramForm((f) => ({ ...f, token: '', enabled: res.telegram?.enabled || false, chatId: res.telegram?.chatId || '' }));
+      setMsg(res.telegram?.configured ? 'Telegram saved' : 'Telegram saved — token and chat ID are both required to send');
+    } catch (e: any) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const clearTelegramToken = async () => {
+    setSaving(true); setErr(null); setMsg(null); setTelegramTest(null);
+    try {
+      const res = await put<{ telegram: any }>('/api/notifications/telegram', { botToken: null });
+      setTelegram(res.telegram);
+      setTelegramForm((f) => ({ ...f, token: '' }));
+      setMsg('Saved Telegram token removed');
+    } catch (e: any) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const testTelegram = async () => {
+    // The test always uses the SAVED config and sends a fixed message — save first.
+    setSaving(true); setErr(null); setTelegramTest(null);
+    try {
+      const res = await post<any>('/api/notifications/telegram/test', {});
+      setTelegramTest(res);
+      if (res?.ok) setMsg('Telegram test delivered — check the chat');
+    } catch (e: any) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
   return (
     <>
       <p className="lede">
@@ -1783,7 +1830,7 @@ function NotificationsTab() {
         <p className="stale-note" style={{ marginBottom: 12 }}>
           Generic outbound webhook with SSRF protection reusing the shared address policy. HTTPS by default; internal
           addresses only if explicitly allowed. Payloads are bounded (64KB), timeout 5s, no secrets in logs, HMAC signature
-          via <code>X-OpusHub-Signature</code>. Extensible to future Email/Telegram/Discord/Slack without redesign.
+          via <code>X-OpusHub-Signature</code>. The provider registry extends to future Email/Discord/Slack without redesign.
         </p>
         {webhook && (
           <>
@@ -1807,6 +1854,61 @@ function NotificationsTab() {
             {testResult && (
               <p className="stale-note" style={{ marginTop: 8, color: testResult.ok ? 'var(--ok)' : 'var(--warn)' }}>
                 Test: {testResult.ok ? '✓ delivered' : `✗ ${testResult.result?.reason || 'failed'}`}
+              </p>
+            )}
+          </>
+        )}
+        {msg && <p className="stale-note" style={{ color: 'var(--ok)', marginTop: 8 }}>{msg}</p>}
+        {err && <p className="stale-note" style={{ color: 'var(--fail)', marginTop: 8 }}>{err}</p>}
+      </Block>
+
+      <Block
+        title="Telegram provider"
+        aside={telegram ? <span className="stale-note">{telegram.configured ? (telegram.enabled ? 'configured · enabled' : 'configured · disabled') : 'not configured'}</span> : undefined}
+      >
+        <p className="stale-note" style={{ marginBottom: 12 }}>
+          Outbound only — OpusHub sends plain-text notifications to one chat via the official Telegram Bot API
+          (<code>api.telegram.org</code>, fixed endpoint, HTTPS, 8s timeout, 20 sends/min). There is no control bot and
+          no receiver: nobody can message OpusHub back. The token is stored server-side with restricted permissions and
+          is never returned after save. Create a bot with <code>@BotFather</code>, message it once from the target
+          chat, then paste the token and the chat's numeric ID below.
+        </p>
+        {!telegram && <Loading what="telegram config" />}
+        {telegram && (
+          <>
+            <Row label="Enabled" desc="Master switch for Telegram sends. The test button below works while disabled, so you can verify before enabling." tight>
+              <Switch checked={!!telegramForm.enabled} onChange={(v) => setTelegramForm((f) => ({ ...f, enabled: v }))} label="Enable Telegram" />
+            </Row>
+            <Row label="Bot token" desc={telegram.hasToken ? `Saved as ${telegram.tokenMasked} — leave blank to keep it, or remove it below.` : 'From @BotFather: digits, a colon, then the secret part.'}>
+              <input
+                className="input mono-meta" style={{ width: 340 }} type="password" autoComplete="off" spellCheck={false}
+                placeholder={telegram.hasToken ? `${telegram.tokenMasked} (saved — blank keeps it)` : '123456:AAH…'}
+                value={telegramForm.token} onChange={(e) => setTelegramForm((f) => ({ ...f, token: e.target.value }))} aria-label="Telegram bot token"
+              />
+            </Row>
+            <Row label="Chat ID" desc="Numeric chat ID (groups are negative), or an @username. The bot must be a member of the chat.">
+              <input
+                className="input mono-meta" style={{ width: 220 }} inputMode="numeric" autoComplete="off" spellCheck={false}
+                placeholder="e.g. 123456789" value={telegramForm.chatId}
+                onChange={(e) => setTelegramForm((f) => ({ ...f, chatId: e.target.value }))} aria-label="Telegram chat ID"
+              />
+            </Row>
+            {policy && (
+              <Row label="Minimum severity" desc="Only notifications at or above this level go to Telegram (and never below the global floor above).">
+                <Segmented value={policy.telegram?.minSeverity || 'warning'} onChange={(v) => savePolicy({ telegram: { minSeverity: v } })} ariaLabel="Telegram min severity"
+                  options={[{ value: 'info', label: 'Info' }, { value: 'notice', label: 'Notice' }, { value: 'warning', label: 'Warning' }, { value: 'critical', label: 'Critical' }]} />
+              </Row>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => void saveTelegram()}>{saving ? 'Saving…' : 'Save Telegram'}</button>
+              <button className="btn btn-sm" disabled={saving || !telegram.configured} onClick={() => void testTelegram()} title={telegram.configured ? 'Send a fixed test message using the saved config' : 'Save a token and chat ID first'}>{saving ? 'Testing…' : 'Send test'}</button>
+              {telegram.hasToken && (
+                <button className="btn btn-sm" disabled={saving} onClick={() => void clearTelegramToken()}>Remove saved token</button>
+              )}
+            </div>
+            {telegramTest && (
+              <p className="stale-note" style={{ marginTop: 8, color: telegramTest.ok ? 'var(--ok)' : 'var(--warn)' }}>
+                Test: {telegramTest.ok ? '✓ delivered — check the chat' : `✗ ${telegramTest.result?.reason || telegramTest.error || 'failed'}`}
               </p>
             )}
           </>

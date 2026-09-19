@@ -1,4 +1,12 @@
 // Phase 10B — notification policy (simple allow-list, no rule language)
+//
+// One policy document governs every channel: the global gates (enabled, minSeverity,
+// allowedTypes, allowedSources) apply to all of them, and each channel adds its own
+// enabled flag, its own minimum severity, and its own type/source allow-lists. Both
+// levels must pass — the effective severity threshold is the STRICTER of the global
+// and the channel minimum, and a type/source must be allowed by both levels. There is
+// no separate per-provider filtering system; Telegram, webhook, browser and in-app all
+// share this model.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,6 +14,15 @@ import { DATA_DIR } from '../configStore.js';
 
 const DIR = path.join(DATA_DIR, 'notifications');
 const FILE = path.join(DIR, 'policy.json');
+
+const SEVERITIES = ['info', 'notice', 'warning', 'critical'];
+
+const DEFAULT_CHANNEL = Object.freeze({
+  enabled: false,
+  minSeverity: 'warning',
+  allowedTypes: [],
+  allowedSources: [],
+});
 
 const DEFAULT_POLICY = Object.freeze({
   enabled: true,
@@ -15,19 +32,62 @@ const DEFAULT_POLICY = Object.freeze({
   browser: {
     enabled: false,
     minSeverity: 'warning',
+    allowedTypes: [],
+    allowedSources: [],
   },
   webhook: {
     enabled: false,
     minSeverity: 'warning',
+    allowedTypes: [],
+    allowedSources: [],
+  },
+  // Phase 10B completion — Telegram is an outbound provider like webhook: same model,
+  // same gates, no private filtering language.
+  telegram: {
+    enabled: false,
+    minSeverity: 'warning',
+    allowedTypes: [],
+    allowedSources: [],
   },
   inApp: {
     enabled: true,
     minSeverity: 'info',
+    allowedTypes: [],
+    allowedSources: [],
   },
 });
 
+const CHANNELS = ['browser', 'webhook', 'telegram', 'inApp'];
+
 function ensureDir() {
   try { fs.mkdirSync(DIR, { recursive: true }); } catch {}
+}
+
+function cleanTypes(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((t) => typeof t === 'string' && t.length > 0 && t.length <= 80).slice(0, 100);
+}
+
+function cleanSources(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((s) => typeof s === 'string' && s.length > 0 && s.length <= 40).slice(0, 20);
+}
+
+function normalizeChannel(raw, fallback) {
+  const out = {
+    enabled: fallback.enabled,
+    minSeverity: fallback.minSeverity,
+    allowedTypes: [...(fallback.allowedTypes || [])],
+    allowedSources: [...(fallback.allowedSources || [])],
+  };
+  if (!raw || typeof raw !== 'object') return out;
+  if (typeof raw.enabled === 'boolean') out.enabled = raw.enabled;
+  if (typeof raw.minSeverity === 'string' && SEVERITIES.includes(raw.minSeverity)) {
+    out.minSeverity = raw.minSeverity;
+  }
+  if (Array.isArray(raw.allowedTypes)) out.allowedTypes = cleanTypes(raw.allowedTypes);
+  if (Array.isArray(raw.allowedSources)) out.allowedSources = cleanSources(raw.allowedSources);
+  return out;
 }
 
 function readRaw() {
@@ -45,32 +105,13 @@ function normalize(obj) {
   const out = structuredClone(DEFAULT_POLICY);
   if (!obj || typeof obj !== 'object') return out;
   if (typeof obj.enabled === 'boolean') out.enabled = obj.enabled;
-  if (typeof obj.minSeverity === 'string' && ['info', 'notice', 'warning', 'critical'].includes(obj.minSeverity)) {
+  if (typeof obj.minSeverity === 'string' && SEVERITIES.includes(obj.minSeverity)) {
     out.minSeverity = obj.minSeverity;
   }
-  if (Array.isArray(obj.allowedTypes)) {
-    out.allowedTypes = obj.allowedTypes.filter((t) => typeof t === 'string' && t.length <= 80).slice(0, 100);
-  }
-  if (Array.isArray(obj.allowedSources)) {
-    out.allowedSources = obj.allowedSources.filter((s) => typeof s === 'string' && s.length <= 40).slice(0, 20);
-  }
-  if (obj.browser && typeof obj.browser === 'object') {
-    if (typeof obj.browser.enabled === 'boolean') out.browser.enabled = obj.browser.enabled;
-    if (typeof obj.browser.minSeverity === 'string' && ['info', 'notice', 'warning', 'critical'].includes(obj.browser.minSeverity)) {
-      out.browser.minSeverity = obj.browser.minSeverity;
-    }
-  }
-  if (obj.webhook && typeof obj.webhook === 'object') {
-    if (typeof obj.webhook.enabled === 'boolean') out.webhook.enabled = obj.webhook.enabled;
-    if (typeof obj.webhook.minSeverity === 'string' && ['info', 'notice', 'warning', 'critical'].includes(obj.webhook.minSeverity)) {
-      out.webhook.minSeverity = obj.webhook.minSeverity;
-    }
-  }
-  if (obj.inApp && typeof obj.inApp === 'object') {
-    if (typeof obj.inApp.enabled === 'boolean') out.inApp.enabled = obj.inApp.enabled;
-    if (typeof obj.inApp.minSeverity === 'string' && ['info', 'notice', 'warning', 'critical'].includes(obj.inApp.minSeverity)) {
-      out.inApp.minSeverity = obj.inApp.minSeverity;
-    }
+  if (Array.isArray(obj.allowedTypes)) out.allowedTypes = cleanTypes(obj.allowedTypes);
+  if (Array.isArray(obj.allowedSources)) out.allowedSources = cleanSources(obj.allowedSources);
+  for (const ch of CHANNELS) {
+    out[ch] = normalizeChannel(obj[ch], DEFAULT_POLICY[ch]);
   }
   return out;
 }
@@ -88,17 +129,18 @@ export function getPolicy() {
 
 export function putPolicy(patch) {
   const current = readRaw();
-  const next = normalize({ ...current, ...patch,
-    browser: { ...current.browser, ...(patch?.browser || {}) },
-    webhook: { ...current.webhook, ...(patch?.webhook || {}) },
-    inApp: { ...current.inApp, ...(patch?.inApp || {}) },
-  });
-  // special handling for allowedTypes/allowedSources if explicitly set
-  if (patch && Object.hasOwn(patch, 'allowedTypes')) {
-    next.allowedTypes = Array.isArray(patch.allowedTypes) ? patch.allowedTypes.filter((t) => typeof t === 'string').slice(0, 100) : [];
+  const merged = { ...current, ...(patch || {}) };
+  for (const ch of CHANNELS) {
+    merged[ch] = { ...current[ch], ...((patch && patch[ch]) || {}) };
   }
-  if (patch && Object.hasOwn(patch, 'allowedSources')) {
-    next.allowedSources = Array.isArray(patch.allowedSources) ? patch.allowedSources.filter((s) => typeof s === 'string').slice(0, 20) : [];
+  const next = normalize(merged);
+  // Explicit empty arrays are meaningful ("allow all") and must survive the merge above,
+  // which would otherwise keep the previous list when the caller cleared it.
+  if (patch && Object.hasOwn(patch, 'allowedTypes')) next.allowedTypes = cleanTypes(patch.allowedTypes);
+  if (patch && Object.hasOwn(patch, 'allowedSources')) next.allowedSources = cleanSources(patch.allowedSources);
+  for (const ch of CHANNELS) {
+    if (patch?.[ch] && Object.hasOwn(patch[ch], 'allowedTypes')) next[ch].allowedTypes = cleanTypes(patch[ch].allowedTypes);
+    if (patch?.[ch] && Object.hasOwn(patch[ch], 'allowedSources')) next[ch].allowedSources = cleanSources(patch[ch].allowedSources);
   }
   atomicWrite(next);
   return next;
@@ -112,6 +154,7 @@ export function shouldNotify(event, channel = 'inApp') {
   const channelPolicy = policy[channel];
   if (channelPolicy && channelPolicy.enabled === false) return false;
 
+  // Severity: the effective threshold is the stricter of global and channel.
   const eventOrder = ORDER[event.severity] ?? 0;
   const globalMin = ORDER[policy.minSeverity] ?? 0;
   if (eventOrder < globalMin) return false;
@@ -120,8 +163,11 @@ export function shouldNotify(event, channel = 'inApp') {
     if (eventOrder < channelMin) return false;
   }
 
+  // Type/source: both the global and the channel allow-list must pass (empty = all).
   if (policy.allowedTypes.length && !policy.allowedTypes.includes(event.type)) return false;
   if (policy.allowedSources.length && !policy.allowedSources.includes(event.source)) return false;
+  if (channelPolicy?.allowedTypes?.length && !channelPolicy.allowedTypes.includes(event.type)) return false;
+  if (channelPolicy?.allowedSources?.length && !channelPolicy.allowedSources.includes(event.source)) return false;
 
   return true;
 }
@@ -134,8 +180,13 @@ export function shouldSendWebhook(event) {
   return shouldNotify(event, 'webhook');
 }
 
+export function shouldSendTelegram(event) {
+  return shouldNotify(event, 'telegram');
+}
+
 export function shouldSendBrowser(event) {
   return shouldNotify(event, 'browser');
 }
 
 export const POLICY_FILE = FILE;
+export const POLICY_CHANNELS = CHANNELS;
