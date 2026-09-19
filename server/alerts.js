@@ -10,19 +10,10 @@
 import { logEvent, readEvents } from './activity.js';
 import { THRESHOLDS } from './infrastructure/model.js';
 
-// Phase 10B — event bus publish (lazy)
-let _publishEvent = null;
-async function getPublish() {
-  if (_publishEvent) return _publishEvent;
-  try {
-    const mod = await import('./events/index.js');
-    _publishEvent = mod.publishEvent;
-    return _publishEvent;
-  } catch { return null; }
-}
-function publishEventSafe(desc) {
-  getPublish().then((fn) => { if (fn) try { fn(desc); } catch {} }).catch(() => {});
-}
+// Phase 10B — best-effort publish onto the canonical event bus (the failure-isolated
+// wrapper lives with the bus; every producer used to carry an identical local copy).
+import { publishEventSafe } from './events/index.js';
+import { SEVERITY_ORDER as SEV_RANK } from './events/model.js';
 
 export const MAX_ALERTS = 50;
 export const MIN_INTERVAL_MS = 30_000;
@@ -31,8 +22,6 @@ export const MIN_INTERVAL_MS = 30_000;
 const active = new Map();
 let lastRunAt = 0;
 let lastInputsHash = '';
-
-const SEV_RANK = { info: 0, notice: 1, warning: 2, critical: 3 };
 
 /**
  * One alert. `area` is which part of the OpusGrid it belongs to (storage, network, power,

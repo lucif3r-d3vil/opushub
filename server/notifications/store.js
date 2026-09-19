@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from '../configStore.js';
 import { sanitizeNotification } from './model.js';
+import { writeJsonAtomic } from '../lib/atomicFile.js';
+import { SEVERITY_ORDER } from '../events/model.js';
 
 const DIR = path.join(DATA_DIR, 'notifications');
 const FILE = path.join(DIR, 'notifications.json');
@@ -29,9 +31,7 @@ function readRaw() {
 
 function atomicWrite(obj) {
   ensureDir();
-  const tmp = `${FILE}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, FILE);
+  writeJsonAtomic(FILE, obj);
 }
 
 export function listNotifications({ limit = 100, unreadOnly = false, severity = null, source = null, before = null } = {}) {
@@ -40,7 +40,7 @@ export function listNotifications({ limit = 100, unreadOnly = false, severity = 
   items.sort((a, b) => (b.t || 0) - (a.t || 0));
   if (unreadOnly) items = items.filter((n) => !n.read);
   if (severity) {
-    const order = { info: 0, notice: 1, warning: 2, critical: 3 };
+    const order = SEVERITY_ORDER;
     const min = order[severity] ?? 0;
     items = items.filter((n) => (order[n.severity] ?? 0) >= min);
   }

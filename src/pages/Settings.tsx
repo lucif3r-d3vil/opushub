@@ -4,6 +4,9 @@ import { api, invalidateShared, post, put, usePolled, useSave } from '../lib/api
 import { relTime } from '../lib/format';
 import { useLayout, useSettings, type DeepPartial } from '../lib/theme';
 import { useAuth } from '../lib/auth';
+import {
+  canUseBrowserNotifications, requestBrowserPermission, useNotificationPolicy, useTelegramConfig, useWebhookConfig,
+} from '../lib/notifications';
 import type {
   AlertsDoc, CustomDoc, DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
   TemplatesDoc, WidgetCatalogueEntry, WidgetDoc, WidgetInstance, WidgetZone,
@@ -1663,46 +1666,42 @@ function normalizeSymbolInput(raw: string): { symbol: string | null; reason: str
 
 function NotificationsTab() {
   const { data: alertsData } = usePolled<AlertsDoc>('/api/alerts', 30_000);
-  const [policy, setPolicy] = useState<any>(null);
-  const [webhook, setWebhook] = useState<any>(null);
+  // One client per document, and they are the canonical ones from lib/notifications — this tab
+  // used to hand-roll a second set of fetch/save calls for the same three endpoints.
+  const { policy, save: savePolicyDoc } = useNotificationPolicy();
+  const { webhook, save: saveWebhookDoc, test: testWebhookDoc } = useWebhookConfig();
+  const { telegram, save: saveTelegramDoc, test: testTelegramDoc } = useTelegramConfig();
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<any>(null);
   const [webhookForm, setWebhookForm] = useState({ url: '', secret: '', enabled: false, allowInternal: false, allowInsecure: false });
-  const [telegram, setTelegram] = useState<any>(null);
   const [telegramForm, setTelegramForm] = useState({ token: '', chatId: '', enabled: false });
   const [telegramTest, setTelegramTest] = useState<any>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const p = await api<{ policy: any }>('/api/notifications/policy');
-      setPolicy(p.policy);
-      const w = await api<{ webhook: any }>('/api/notifications/webhook');
-      setWebhook(w.webhook);
-      setWebhookForm((prev) => ({
-        ...prev,
-        enabled: w.webhook?.enabled || false,
-        allowInternal: w.webhook?.allowInternal || false,
-        allowInsecure: w.webhook?.allowInsecure || false,
-      }));
-      const t = await api<{ telegram: any }>('/api/notifications/telegram');
-      setTelegram(t.telegram);
-      setTelegramForm((prev) => ({
-        ...prev,
-        enabled: t.telegram?.enabled || false,
-        chatId: t.telegram?.chatId || '',
-      }));
-    } catch {}
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
+  // Editable form state seeds once, when the saved documents first arrive; later polls refresh
+  // the displayed saved state but must never clobber an edit that is half-finished.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || !webhook || !telegram) return;
+    seeded.current = true;
+    setWebhookForm((prev) => ({
+      ...prev,
+      enabled: !!webhook.enabled,
+      allowInternal: !!webhook.allowInternal,
+      allowInsecure: !!webhook.allowInsecure,
+    }));
+    setTelegramForm((prev) => ({
+      ...prev,
+      enabled: !!telegram.enabled,
+      chatId: telegram.chatId || '',
+    }));
+  }, [webhook, telegram]);
 
   const savePolicy = async (patch: any) => {
     setSaving(true); setErr(null); setMsg(null);
     try {
-      const res = await put<{ policy: any }>('/api/notifications/policy', patch);
-      setPolicy(res.policy);
+      await savePolicyDoc(patch);
       setMsg('Policy saved');
     } catch (e: any) { setErr(e.message); }
     finally { setSaving(false); }
@@ -1718,8 +1717,7 @@ function NotificationsTab() {
       };
       if (webhookForm.url.trim()) body.url = webhookForm.url.trim();
       if (webhookForm.secret.trim()) body.secret = webhookForm.secret.trim();
-      const res = await put<{ webhook: any }>('/api/notifications/webhook', body);
-      setWebhook(res.webhook);
+      await saveWebhookDoc(body);
       setMsg('Webhook saved');
       setWebhookForm((f) => ({ ...f, url: '', secret: '' }));
     } catch (e: any) { setErr(e.message); }
@@ -1729,15 +1727,15 @@ function NotificationsTab() {
   const testWebhook = async () => {
     setSaving(true); setErr(null); setTestResult(null);
     try {
-      const res = await post<any>('/api/notifications/webhook/test', {});
+      const res = await testWebhookDoc();
       setTestResult(res);
     } catch (e: any) { setErr(e.message); }
     finally { setSaving(false); }
   };
 
   const requestBrowser = async () => {
-    if (!('Notification' in window)) { setErr('Browser notifications not supported'); return; }
-    const perm = await Notification.requestPermission();
+    if (!canUseBrowserNotifications()) { setErr('Browser notifications not supported'); return; }
+    const perm = await requestBrowserPermission();
     if (perm === 'granted') {
       await savePolicy({ browser: { enabled: true } });
       setMsg('Browser notifications enabled');
@@ -1753,10 +1751,9 @@ function NotificationsTab() {
       // preserves the saved secret server-side (only an explicit removal clears it).
       const body: any = { enabled: telegramForm.enabled, chatId: telegramForm.chatId.trim() || null };
       if (telegramForm.token.trim()) body.botToken = telegramForm.token.trim();
-      const res = await put<{ telegram: any }>('/api/notifications/telegram', body);
-      setTelegram(res.telegram);
-      setTelegramForm((f) => ({ ...f, token: '', enabled: res.telegram?.enabled || false, chatId: res.telegram?.chatId || '' }));
-      setMsg(res.telegram?.configured ? 'Telegram saved' : 'Telegram saved — token and chat ID are both required to send');
+      const saved = await saveTelegramDoc(body);
+      setTelegramForm((f) => ({ ...f, token: '', enabled: saved?.enabled || false, chatId: saved?.chatId || '' }));
+      setMsg(saved?.configured ? 'Telegram saved' : 'Telegram saved — token and chat ID are both required to send');
     } catch (e: any) { setErr(e.message); }
     finally { setSaving(false); }
   };
@@ -1764,8 +1761,7 @@ function NotificationsTab() {
   const clearTelegramToken = async () => {
     setSaving(true); setErr(null); setMsg(null); setTelegramTest(null);
     try {
-      const res = await put<{ telegram: any }>('/api/notifications/telegram', { botToken: null });
-      setTelegram(res.telegram);
+      await saveTelegramDoc({ botToken: null });
       setTelegramForm((f) => ({ ...f, token: '' }));
       setMsg('Saved Telegram token removed');
     } catch (e: any) { setErr(e.message); }
@@ -1776,7 +1772,7 @@ function NotificationsTab() {
     // The test always uses the SAVED config and sends a fixed message — save first.
     setSaving(true); setErr(null); setTelegramTest(null);
     try {
-      const res = await post<any>('/api/notifications/telegram/test', {});
+      const res = await testTelegramDoc();
       setTelegramTest(res);
       if (res?.ok) setMsg('Telegram test delivered — check the chat');
     } catch (e: any) { setErr(e.message); }

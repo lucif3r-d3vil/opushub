@@ -229,33 +229,6 @@ export function NotificationPanel({ anchor, onClose }: { anchor?: HTMLElement | 
   return typeof document === 'undefined' ? panel : createPortal(panel, document.body);
 }
 
-export function NotificationCenterPage() {
-  const { notifications, unread, loading, error, markRead, markAllRead, refresh } = useNotifications(100);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const doRead = async (id: string) => {
-    if (busyId) return;
-    setBusyId(id);
-    try { await markRead(id); } catch {} finally { setBusyId(null); }
-  };
-  return (
-    <div>
-      <header className="page-hero">
-        <h1 className="page-title">Notifications {unread > 0 && <span style={{ color: 'var(--fail)' }}>({unread} unread)</span>}</h1>
-        <p className="page-desc">Live updates from monitoring, alerts, operations, and infrastructure. Mark read to clear the bell.</p>
-      </header>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
-        <button className="btn" disabled={unread === 0} onClick={() => { void markAllRead(); }}>Mark all read</button>
-        <button className="btn" onClick={() => refresh()}>Refresh</button>
-        <LiveChip />
-      </div>
-      {loading && <p>Loading…</p>}
-      {error && <p style={{ color: 'var(--warn)' }}>{error}</p>}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {notifications.length === 0 && !loading && !error && <p className="stale-note" style={{ padding: 16 }}>No notifications.</p>}
-        {notifications.map((n) => (
-          <NotificationRow key={n.id} n={n} busy={busyId === n.id} onRead={(id) => void doRead(id)} onNavigate={() => {}} />
-        ))}
-      </div>
-    </div>
-  );
-}
+// There is deliberately no separate notifications page: the bell + this panel are the one
+// notification UI (Phase 10B). The Activity page owns history, Settings owns policy, and the
+// panel links to both — three surfaces, one system.

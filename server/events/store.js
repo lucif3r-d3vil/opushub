@@ -4,7 +4,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from '../configStore.js';
-import { deserializeEvent, serializeEvent } from './model.js';
+import { writeFileAtomic } from '../lib/atomicFile.js';
+import { SEVERITY_ORDER, deserializeEvent, serializeEvent } from './model.js';
 
 const DIR = path.join(DATA_DIR, 'events');
 const FILE = path.join(DIR, 'events.jsonl');
@@ -60,9 +61,7 @@ function trimIfNeeded() {
         return true;
       });
       if (filtered.length !== raw.length) {
-        const tmp = `${FILE}.tmp-${process.pid}-${Date.now()}`;
-        fs.writeFileSync(tmp, filtered.join('\n') + (filtered.length ? '\n' : ''), 'utf8');
-        fs.renameSync(tmp, FILE);
+        writeFileAtomic(FILE, filtered.join('\n') + (filtered.length ? '\n' : ''));
       }
       return;
     }
@@ -71,9 +70,7 @@ function trimIfNeeded() {
     const parsed = raw.map((line) => ({ line, evt: deserializeEvent(line) })).filter((x) => x.evt);
     const ageFiltered = parsed.filter((x) => now - x.evt.t <= MAX_AGE_MS);
     const keep = ageFiltered.slice(-KEEP_LINES);
-    const tmp = `${FILE}.tmp-${process.pid}-${Date.now()}`;
-    fs.writeFileSync(tmp, keep.map((x) => x.line).join('\n') + (keep.length ? '\n' : ''), 'utf8');
-    fs.renameSync(tmp, FILE);
+    writeFileAtomic(FILE, keep.map((x) => x.line).join('\n') + (keep.length ? '\n' : ''));
   } catch (err) {
     console.warn(`[events] trim failed: ${err.message}`);
   }
@@ -140,7 +137,7 @@ export function readEvents({ limit = 100, before = null, after = null, types = n
   }
   if (source) items = items.filter((e) => e.source === source);
   if (severity) {
-    const order = { info: 0, notice: 1, warning: 2, critical: 3 };
+    const order = SEVERITY_ORDER;
     const min = order[severity] ?? 0;
     items = items.filter((e) => (order[e.severity] ?? 0) >= min);
   }

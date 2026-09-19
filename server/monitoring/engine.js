@@ -23,25 +23,9 @@ import * as docker from '../providers/docker.js';
 import { logEvent } from '../activity.js';
 import { STORE_FILES, createFlusher, docExists, readDoc, removeDoc, writeDoc } from './store.js';
 
-// Phase 10B — event bus publish (lazy to avoid circular)
-let _publishEvent = null;
-async function getPublish() {
-  if (_publishEvent) return _publishEvent;
-  try {
-    const mod = await import('../events/index.js');
-    _publishEvent = mod.publishEvent;
-    return _publishEvent;
-  } catch {
-    return null;
-  }
-}
-function publishEventSafe(descriptor) {
-  getPublish().then((fn) => {
-    if (fn) {
-      try { fn(descriptor); } catch {}
-    }
-  }).catch(() => {});
-}
+// Phase 10B — best-effort publish onto the canonical event bus. Not circular: events/index
+// depends on the activity log and its store, never on the monitoring engine.
+import { publishEventSafe } from '../events/index.js';
 import {
   BOUNDS, MONITOR_TYPES, MonitorError, describeExpected, maintenanceActive, makeMonitor,
   monitorError, newMonitorId, normalizeSettings, normalizeStoredMonitor, publicMonitor,

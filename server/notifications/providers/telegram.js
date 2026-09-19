@@ -28,6 +28,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from '../../configStore.js';
+import { writeJsonAtomic } from '../../lib/atomicFile.js';
 
 const DIR = path.join(DATA_DIR, 'notifications');
 const FILE = path.join(DIR, 'telegram.json');
@@ -82,13 +83,9 @@ function readRaw() {
 
 function atomicWrite(obj) {
   ensureDir();
-  const tmp = `${FILE}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf8');
-  try { fs.chmodSync(tmp, 0o600); } catch {}
-  fs.renameSync(tmp, FILE);
-  // The rename carries the temp file's mode on POSIX; enforce it anyway (best effort,
-  // and a no-op where modes do not apply) because this file holds a secret.
-  try { fs.chmodSync(FILE, 0o600); } catch {}
+  // This file holds a bot token: mode 0o600 before and after the rename (writeJsonAtomic
+  // applies the mode to the temp first, so the secret never exists with wider permissions).
+  writeJsonAtomic(FILE, obj, { mode: 0o600 });
 }
 
 /* ------------------------------------------------------------------ */

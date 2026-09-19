@@ -26,6 +26,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './configStore.js';
+import { writeJsonAtomic } from './lib/atomicFile.js';
 
 export const SESSION_COOKIE = 'opushub_session';
 
@@ -61,11 +62,8 @@ function readJson(file, fallback) {
 }
 
 function writeJsonPrivate(file, value) {
-  const tmp = `${file}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
-  try { fs.chmodSync(tmp, 0o600); } catch { /* best effort (e.g. a filesystem without modes) */ }
-  fs.renameSync(tmp, file);
+  writeJsonAtomic(file, value, { mode: 0o600 });
 }
 
 // ---------------------------------------------------------------------------

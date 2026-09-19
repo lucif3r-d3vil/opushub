@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from '../configStore.js';
+import { writeFileAtomic } from '../lib/atomicFile.js';
 
 const FILE = path.join(DATA_DIR, 'operations.jsonl');
 const MAX_LINES = 2000;
@@ -99,13 +100,11 @@ function trim() {
       const count = text === '' ? 0 : text.trim().split('\n').length;
       if (count <= MAX_LINES) return;
       const lines = text.trim().split('\n').slice(-KEEP);
-      fs.writeFileSync(FILE + '.tmp', lines.join('\n') + '\n');
-      fs.renameSync(FILE + '.tmp', FILE);
+      writeFileAtomic(FILE, lines.join('\n') + '\n');
       return;
     }
     const lines = fs.readFileSync(FILE, 'utf8').trim().split('\n').slice(-KEEP);
-    fs.writeFileSync(FILE + '.tmp', lines.join('\n') + '\n');
-    fs.renameSync(FILE + '.tmp', FILE);
+    writeFileAtomic(FILE, lines.join('\n') + '\n');
   } catch { /* best effort */ }
 }
 

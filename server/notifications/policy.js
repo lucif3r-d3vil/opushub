@@ -11,11 +11,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from '../configStore.js';
+import { writeJsonAtomic } from '../lib/atomicFile.js';
+// The severity vocabulary and its rank order are owned by the canonical event model —
+// notification filtering compares the same words, never a re-declared copy.
+import { SEVERITIES, SEVERITY_ORDER as ORDER } from '../events/model.js';
 
 const DIR = path.join(DATA_DIR, 'notifications');
 const FILE = path.join(DIR, 'policy.json');
-
-const SEVERITIES = ['info', 'notice', 'warning', 'critical'];
 
 const DEFAULT_CHANNEL = Object.freeze({
   enabled: false,
@@ -118,9 +120,7 @@ function normalize(obj) {
 
 function atomicWrite(obj) {
   ensureDir();
-  const tmp = `${FILE}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, FILE);
+  writeJsonAtomic(FILE, obj);
 }
 
 export function getPolicy() {
@@ -145,8 +145,6 @@ export function putPolicy(patch) {
   atomicWrite(next);
   return next;
 }
-
-const ORDER = { info: 0, notice: 1, warning: 2, critical: 3 };
 
 export function shouldNotify(event, channel = 'inApp') {
   const policy = getPolicy();

@@ -731,7 +731,8 @@ function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: strin
             <Route path="/activity" element={<div data-test="activity">activity</div>} />
             <Route path="/stacks/:name" element={<StackDetail />} />
             <Route path="/system" element={<SystemPage />} />
-            <Route path="/infrastructure" element={<InfrastructurePage />} />
+            <Route path="/system/infrastructure" element={<InfrastructurePage />} />
+            <Route path="/system/host" element={<SystemPage />} />
             <Route path="/services/:group/:name" element={<ServiceDetail />} />
             <Route path="/monitoring" element={<MonitoringPage />} />
             <Route path="/monitoring/incidents" element={<MonitoringPage />} />
@@ -919,6 +920,88 @@ export async function runWebTests(): Promise<WebResult> {
     expect(document.activeElement === trigger || document.activeElement === document.body,
       'focus was left somewhere unexpected after closing');
     trigger.remove();
+  });
+
+  /* 4N — the shell's navigation contract: seven destinations above, global utilities below */
+  const AUTH_ROUTES = {
+    '/api/setup/status': { required: false, complete: true, hasAccount: true, version: '0.1.0' },
+    '/api/auth/me': { authenticated: true, user: { username: 'admin' }, setupComplete: true },
+  };
+  await test('nav: exactly seven primary items, in order, with utilities separated below', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('.rail-nav'), 'the primary rail');
+    const items = qa('.rail-nav .rail-item').map((el) => el.getAttribute('aria-label'));
+    expect(items.length === 7,
+      `the primary rail must hold exactly seven destinations, saw ${items.length}: ${items.join(', ')}`);
+    const expected = ['Hub', 'Services / Containers', 'Stacks', 'Monitoring', 'System', 'Activity', 'Settings'];
+    for (let i = 0; i < expected.length; i++) {
+      expect(items[i] === expected[i], `primary slot ${i} must be "${expected[i]}", saw "${items[i]}"`);
+    }
+    // seven destinations, seven distinct icons — phase 6 collapsed the rail because Monitoring and
+    // Activity briefly drew the same glyph
+    const paths = qa('.rail-nav .rail-item svg path').map((el) => el.getAttribute('d'));
+    expect(new Set(paths).size === paths.length && paths.every(Boolean), 'two primary destinations share an icon');
+    // every primary href is one of the seven roots — no Infrastructure/Updates/Autoheal squatters
+    const hrefs = qa('.rail-nav .rail-item').map((el) => el.getAttribute('href'));
+    for (const href of hrefs) {
+      expect(['/', '/services', '/stacks', '/monitoring', '/system', '/activity', '/settings'].includes(href || ''),
+        `an unexpected primary destination slipped into the rail: ${href}`);
+    }
+    // the global actions sit in the rail foot, after the primary nav — one of each
+    const foot = q('.rail-foot')!;
+    expect(!!foot, 'the rail foot is missing');
+    expect(qa('.rail-foot .rail-item').length === 4,
+      `the rail foot holds Search, Notifications, the theme toggle and Sign out — saw ${qa('.rail-foot .rail-item').length}`);
+    expect(!!q('.rail-foot [aria-label="Open search"]'), 'the search action is missing from the rail foot');
+    expect(!!q('.rail-foot .rail-notifications'), 'the bell is missing from the rail foot');
+    expect(!!q('.rail-foot [aria-label^="Theme:"]'), 'the theme toggle is missing from the rail foot');
+    expect(!!q('.rail-foot [aria-label^="Sign out"]'), 'sign out is missing from the rail foot');
+    const nav = q('.rail-nav')!;
+    expect((nav.compareDocumentPosition(foot) & 4) !== 0, 'the rail foot must sit below the primary nav, not above or inside');
+    expect(qa('.rail-nav .rail-notifications').length === 0 && !q('.rail-nav [aria-label="Open search"]'),
+      'a global action leaked into the primary nav');
+    // the mobile bar mirrors the seven destinations (plus the bell and search that cannot fit the rail)
+    const mbar = q('.mobile-bar')!;
+    expect(!!mbar, 'the mobile bar is missing');
+    expect(qa('.mobile-bar a.rail-item').length === 7,
+      `the mobile bar must mirror the seven destinations, saw ${qa('.mobile-bar a.rail-item').length}`);
+    const mhrefs = qa('.mobile-bar a.rail-item').map((el) => el.getAttribute('href'));
+    for (let i = 0; i < expected.length; i++) {
+      expect(mhrefs[i] === hrefs[i], `mobile slot ${i} ("${mhrefs[i]}") does not match rail slot ${i} ("${hrefs[i]}")`);
+    }
+  });
+
+  await test('nav: /system/host and /infrastructure redirect & keep the System item active', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<MemoryRouter initialEntries={['/infrastructure?tab=volumes']}><App /></MemoryRouter>);
+    await h.waitFor(() => text().includes('wave-data'), 'the legacy infrastructure tab to resolve');
+    const systemItem = qa('.rail-nav .rail-item').find((el) => el.getAttribute('aria-label') === 'System')!;
+    expect(systemItem.classList.contains('active'), 'the System rail item is not active on a legacy infrastructure link');
+    expect(!q('.err'), 'the legacy infrastructure link did not resolve');
+  });
+
+  await test('nav: /system/host renders the host view with its sub-navigation', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<MemoryRouter initialEntries={['/system/host']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('.mon-views, .page-views'), 'the host sub-navigation');
+    const nav = q('.mon-views, .page-views')!;
+    const labels = qa('a', nav).map((el) => text(el).trim());
+    expect(labels.includes('Vitals'), `the Vitals chip is missing: ${labels.join(', ')}`);
+    expect(labels.includes('Host'), `the Host chip is missing: ${labels.join(', ')}`);
+    expect(labels.includes('Infrastructure'), `the Infrastructure chip is missing: ${labels.join(', ')}`);
+    const infrastructure = qa('a', nav).find((el) => text(el).trim() === 'Infrastructure')!;
+    expect(infrastructure.getAttribute('href') === '/system/infrastructure',
+      `the Infrastructure chip must route inside System, saw ${infrastructure.getAttribute('href')}`);
+    const host = qa('a', nav).find((el) => text(el).trim() === 'Host')!;
+    expect(host.classList.contains('active') || host.getAttribute('aria-current') === 'page',
+      'the Host chip is not marked active on /system/host');
+    const systemItem = qa('.rail-nav .rail-item').find((el) => el.getAttribute('aria-label') === 'System')!;
+    expect(systemItem.classList.contains('active'), 'the System rail item is not active on /system/host');
+    // the legacy mount still arrives where it meant to
+    await h.mount(<MemoryRouter initialEntries={['/host']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('.mon-views, .page-views'), 'the host view after the legacy redirect');
+    expect(!q('.err'), 'the legacy /host redirect surfaced an error');
   });
 
   /* 5 — the widget menu performs the change it advertises */
@@ -2063,7 +2146,7 @@ export async function runWebTests(): Promise<WebResult> {
 
   /* 35 — Phase 7: the infrastructure page reads engine facts, never invents them */
   await test('infrastructure renders engine facts, tabs and the volume list', async (h) => {
-    await h.mount(<TestApp entry="/infrastructure"><InfrastructurePage /></TestApp>);
+    await h.mount(<TestApp entry="/system/infrastructure"><InfrastructurePage /></TestApp>);
     await h.waitFor(() => text().includes('26.1.0'), 'the engine version');
     expect(text().includes('opusgrid'), 'the hostname is missing');
     expect(text().includes('Intel N100'), 'the CPU model is missing');
@@ -2079,7 +2162,7 @@ export async function runWebTests(): Promise<WebResult> {
   });
 
   await test('infrastructure topology draws daemon-reported attachments', async (h) => {
-    await h.mount(<TestApp entry="/infrastructure?tab=topology"><InfrastructurePage /></TestApp>);
+    await h.mount(<TestApp entry="/system/infrastructure?tab=topology"><InfrastructurePage /></TestApp>);
     await h.waitFor(() => text().includes('proxy'), 'the topology network node');
     const svg = q('.topo-svg');
     expect(!!svg, 'the topology graph is missing');
