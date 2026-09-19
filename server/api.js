@@ -51,6 +51,9 @@ import { versionInfo } from './version.js';
 import { handleEvents, handleEventsSSE, isSSERoute } from './eventsApi.js';
 import { handleNotifications } from './notificationsApi.js';
 import { initEvents } from './events/index.js';
+// Phase 10C — container recovery (Autoheal) & updates (Diun)
+import { handleAutohealRoutes } from './autohealApi.js';
+import { handleUpdatesRoutes } from './updatesApi.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -139,12 +142,14 @@ export async function handleApi(req, res, url) {
   const session = auth.authenticate(req);
   // The cookie token currently in play, so signing in can retire it (see the login routes).
   const activeToken = session?.session?.id ?? null;
-  const isPublic = PUBLIC_ROUTES.has(route);
+  // Inbound webhooks carry their own dedicated Bearer secret authentication and rate limiting
+  const isWebhook = p === '/api/autoheal/webhook' || p === '/api/container-updates/webhook';
+  const isPublic = PUBLIC_ROUTES.has(route) || isWebhook;
   if (!isPublic && !session) {
     res.setHeader('www-authenticate', 'Cookie');
     return send(res, 401, { error: 'Authentication required.', code: 'auth_required' });
   }
-  if (!SAFE_METHODS.has(method)) {
+  if (!SAFE_METHODS.has(method) && !isWebhook) {
     const csrf = auth.csrfCheck(req);
     if (!csrf.ok) {
       logEvent({ source: 'system', type: 'auth.csrf_blocked', subject: route, message: csrf.reason });
@@ -231,6 +236,33 @@ export async function handleApi(req, res, url) {
       query: url.searchParams,
     });
     if (handled !== null) return;
+  }
+
+  // ---------- container recovery (Phase 10C Autoheal) ----------
+  if (p.startsWith('/api/autoheal')) {
+    const handled = await handleAutohealRoutes({
+      req,
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      clientIp: req.socket?.remoteAddress || '127.0.0.1',
+    });
+    if (handled) return;
+  }
+
+  // ---------- container updates (Phase 10C Diun / Update Now) ----------
+  if (p.startsWith('/api/container-updates')) {
+    const handled = await handleUpdatesRoutes({
+      req,
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      actor: session?.username ?? null,
+      sessionId: activeToken ? auth.sessionHandle(activeToken) : null,
+      query: url.searchParams,
+      clientIp: req.socket?.remoteAddress || '127.0.0.1',
+    });
+    if (handled) return;
   }
 
   // ---------- setup (bootstrap; refuses to run twice) ----------

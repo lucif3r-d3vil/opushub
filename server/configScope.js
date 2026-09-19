@@ -41,6 +41,7 @@ export const PROTECTED_STATE = [
   { path: 'data/notifications/', kind: 'notifications', why: 'notification history, policy and provider secrets (webhook secret, Telegram bot token) — not presentation' },
   { path: 'data/monitoring/', kind: 'monitoring', why: 'monitoring state, history and incidents — not presentation' },
   { path: 'data/operations/', kind: 'operations', why: 'operation records and audit trails — not presentation' },
+  { path: 'data/updates/', kind: 'updates', why: 'container update states and registry cache — not presentation' },
   { path: 'config/.env', kind: 'secrets', why: 'environment secrets — values never leave the server' },
   { path: '.env', kind: 'secrets', why: 'environment secrets — values never leave the server' },
   { path: 'data/config-history/', kind: 'history', why: 'the history store itself — restoring a version into history would recurse' },

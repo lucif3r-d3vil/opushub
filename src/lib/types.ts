@@ -1188,3 +1188,64 @@ export interface MonitoringSettingsDoc {
   settings: MonitoringSettings;
   bounds: Record<string, { min: number; max: number; step?: number; default: number; unit?: string; label?: string }>;
 }
+
+export type ContainerUpdateStatus =
+  | 'current'
+  | 'update_available'
+  | 'updating'
+  | 'updated'
+  | 'failed'
+  | 'unknown';
+
+export interface ContainerUpdateRecord {
+  containerId: string;
+  serviceId?: string | null;
+  imageRef: string;
+  currentDigest?: string | null;
+  currentTag?: string | null;
+  availableDigest?: string | null;
+  availableTag?: string | null;
+  registry?: string;
+  detectedAt?: number;
+  lastCheckedAt?: number;
+  status: ContainerUpdateStatus;
+  updateAvailable: boolean;
+  updateEligible: boolean;
+  ineligibilityReason?: string | null;
+}
+
+export interface ContainerUpdatesDoc {
+  updates: ContainerUpdateRecord[];
+  count: number;
+  availableCount: number;
+}
+
+export interface AutohealStatusDoc {
+  available: boolean;
+  running: boolean;
+  containerId?: string | null;
+  version?: string | null;
+  monitoredCount: number;
+  optedInCount: number;
+  unhealthyCount: number;
+  monitoredContainers: { id: string; name: string; state?: string; health?: string | null }[];
+  unhealthyContainers: { id: string; name: string; state?: string }[];
+  recentRecoveries: {
+    id: string;
+    t: number;
+    containerId: string;
+    containerName: string;
+    service: string;
+    success: boolean;
+    message: string;
+  }[];
+  lastRecovery?: {
+    id: string;
+    t: number;
+    containerId: string;
+    containerName: string;
+    service: string;
+    success: boolean;
+    message: string;
+  } | null;
+}

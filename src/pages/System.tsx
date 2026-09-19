@@ -6,6 +6,7 @@ import type { HistoryPoint, ProvidersDoc, SystemSnapshot } from '../lib/types';
 import { AreaChart, MeterBar } from '../components/Charts';
 import { Freshness, PageHero, ProviderNote } from '../components/ui';
 import { StatusLine } from '../components/ui';
+import { AutohealStatusArea } from '../components/AutohealStatus';
 
 const WINDOWS = [
   { label: '15m', ms: 15 * 60_000 },
@@ -269,6 +270,11 @@ export default function SystemPage() {
             <KV k="Updated" v={sys.fetchedAt ? relTime(sys.fetchedAt) : '—'} />
           </dl>
         </div>
+      </section>
+
+      {/* Autoheal Recovery Area */}
+      <section className="sys-band">
+        <AutohealStatusArea />
       </section>
 
       {sys.error && <p className="stale-note" style={{ color: 'var(--warn)' }}>last refresh failed: {sys.error} — showing data from {relTime(sys.fetchedAt || Date.now())}.</p>}

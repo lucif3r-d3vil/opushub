@@ -43,6 +43,12 @@ export const PUBLIC_EVENT_TYPES = new Set([
   'service.healthy',
   'service.down',
   'service.up',
+  // Phase 10C: container recovery & updates
+  'container.update_available',
+  'container.updated',
+  'container.update_failed',
+  'container.autoheal.restarted',
+  'container.autoheal.failed',
   // system / auth (public safe subset)
   'system.boot',
   'system.shutdown',

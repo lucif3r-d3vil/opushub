@@ -47,8 +47,8 @@ const CATEGORY_BY_TYPE = new Map(Object.entries({
   operation: 'service',
   // Phase 10A: monitoring.
   monitor: 'monitoring', incident: 'monitoring',
-  // Phase 9: infrastructure domains.
-  zfs: 'storage', storage: 'storage', dataset: 'storage',
+  // Phase 10C: container recovery & updates
+  autoheal: 'docker', update: 'service',
   network: 'network',
   ups: 'power', pdu: 'power', power: 'power',
 }));
