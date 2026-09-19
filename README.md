@@ -1,241 +1,166 @@
 # OpusHub
 
-**The control center of the OpusGrid homelab.** Not a dashboard — a website you visit: a Hub that
-greets you with the state of your machines and your morning, a directory of services with real
-detail pages, stacks with their containers, host vitals from `/proc` and nothing else, an activity
-timeline of things that genuinely happened, and a settings surface where everything you change is
-written to real YAML you can read and edit by hand.
+**The calm control center for your homelab.**
 
-**Your containers are the inventory.** Whatever is on the Docker host shows up, named, grouped and
-linked by what its own metadata says — Compose project, Traefik rules, published ports. Uninstall
-something and it disappears from every page. Nothing is hardcoded, and no domain is assumed, so the
-same image runs on any host with no code change. YAML config is optional *presentation*: it renames,
-files, icons and orders what Docker already knows about.
+OpusHub is a website you open in your browser that shows you the real state of your Docker containers, your machines, and your infrastructure — honestly, cleanly, and without the usual dashboard noise.
 
-## Install
+It discovers whatever is already running on your Docker host, groups it sensibly, and lets you browse services, stacks, host vitals, activity, and monitoring from one place. Configuration is optional YAML you can read and edit by hand. Nothing is hardcoded. Nothing is invented.
+
+---
+
+### Who this is for
+
+- People running a **homelab** (a personal server or collection of servers at home)
+- Anyone using **Docker** / Docker Compose who wants a nicer way to see what’s running
+- Users who prefer tools that show **real data** instead of pretty placeholders
+- People who value **safety** — OpusHub is designed so it cannot accidentally (or maliciously) wreck your containers
+
+You do **not** need to be a developer or know React/Node to use it.
+
+---
+
+## What you actually get
+
+| Area | What it shows you |
+|------|-------------------|
+| **Hub** | A personalized home page with a greeting, live host summary, draggable service launcher, and useful widgets (clock, weather, news, bookmarks, activity, attention items…) |
+| **Services** | Every container Docker knows about, automatically grouped. Click any service for a real detail page with stats, ports, volumes, networks, and logs |
+| **Stacks** | Your Compose projects exactly as Docker reports them, with member containers and aggregate health |
+| **Monitoring** | OpusHub’s own uptime engine. Create monitors for HTTP, TCP, or Docker state. It records incidents with real durations and never pretends a service is up when it isn’t |
+| **System** | Honest host metrics — CPU, memory, storage, network — read directly from the Linux kernel (`/proc` and `/sys`) |
+| **Infrastructure** | Filesystems, ZFS pools/datasets (when present), network interfaces, optional OPNsense firewall status, and a physical topology map you can define |
+| **Activity** | A clean timeline of things that actually happened: config changes, container state changes, operations, etc. |
+| **Settings** | Appearance, Hub layout (drag & drop), widgets, icons, integrations, monitoring defaults, and more — all written to real files on disk |
+
+---
+
+## Why OpusHub feels different
+
+Most “homelab dashboards” either:
+
+- Hardcode a list of services you have to maintain by hand, or
+- Show a lot of flashy cards with fake or incomplete data, or
+- Give the browser dangerous power over your Docker socket
+
+OpusHub takes a different approach:
+
+- **Docker is the source of truth.** If a container exists, it appears. If you remove it, it disappears from every page. No stale entries.
+- **YAML is only presentation.** You can rename services, pick icons, change groups, and set order — but you cannot invent a container that doesn’t exist.
+- **No fake data.** If Docker is disconnected or a metric is unavailable, the UI says so clearly instead of showing zeros or placeholders.
+- **Safety by design.** The Docker socket is mounted read-only. The limited operations that do exist (start / restart / stop a single container) require explicit confirmation and are fully audited.
+- **One local administrator account.** Simple, honest authentication. Designed for LAN / VPN use, not the public internet.
+
+---
+
+## Quick start (2 minutes)
 
 ```bash
 mkdir -p ~/opushub && cd ~/opushub
-# save docker-compose.yml from this repository here, then:
+
+# Download the compose file from this repository, then:
 docker compose up -d
 ```
 
-Open `http://<this-host>:3000`. The first-run wizard takes it from there: create the administrator
-account, confirm the Docker endpoint, look over what discovery found, and finish — signed in, on the
-Hub. (Set the socket group first if you want Docker visible immediately: `stat -c '%g'
-/var/run/docker.sock`, then uncomment `group_add` in the compose file. Without it the wizard honestly
-reports Docker as not connected.)
+Open **http://\<your-server-ip\>:3000** in a browser.
 
-The image is `ghcr.io/lucif3r-d3vil/opushub:latest`, and the compose file mounts exactly what the app
-needs: `./config` (your presentation), `./data` (the account and runtime state) and
-`/var/run/docker.sock:ro`.
+The first-run wizard will:
+1. Let you create the administrator account
+2. Confirm the Docker connection
+3. Show you what was discovered
+4. Drop you on the Hub, signed in
 
-**Keep port 3000 on your LAN.** OpusHub reads host vitals, container logs and your whole inventory;
-its login is one local account, not an identity provider. Use a VPN or a reverse proxy with its own
-auth if you need it from outside — never publish 3000 to the Internet.
+> **Tip:** For Docker to be visible immediately, give the container access to the socket’s group:
+> ```bash
+> stat -c '%g' /var/run/docker.sock   # note the number (often 999)
+> ```
+> Then uncomment the `group_add` line in `docker-compose.yml` and set that number.
 
-Full detail — tags, persistence, backups, updating, the socket's implications and a troubleshooting
-table — is in [`docs/07-distribution.md`](docs/07-distribution.md); the authentication model is in
-[`docs/06-auth.md`](docs/06-auth.md).
-
-### Run from source instead
+The official image is:
 
 ```
+ghcr.io/lucif3r-d3vil/opushub:latest
+```
+
+It only needs three mounts:
+- `./config` — your presentation settings, icons, layouts (optional)
+- `./data` — account, sessions, monitoring history, backups
+- `/var/run/docker.sock:ro` — read-only access to Docker
+
+---
+
+## Important security note
+
+**Keep port 3000 on your local network (or behind a VPN / reverse proxy with its own authentication).**
+
+OpusHub can see your entire container inventory, host metrics, and logs. Its login is a single local account — it is not a full identity provider. Do not expose it directly to the public internet.
+
+---
+
+## Optional configuration
+
+Everything lives in the `config/` folder. You can start with an empty folder — pure discovery already gives you a complete, useful interface.
+
+| File | Purpose |
+|------|---------|
+| `services.yaml` | Optional: rename services, set icons, descriptions, groups, order, or override URLs |
+| `stacks.yaml` | Optional: rename or describe Compose projects |
+| `settings.yaml` | Appearance, weather location, news feeds, markets, host address, etc. |
+| `bookmarks.yaml` | Simple list of links |
+| `layout.json` | Hub composition (written automatically when you drag widgets) |
+| `icons/` | Your own icon files |
+| `backgrounds/` | Custom background images |
+| `.env` | Secrets (never sent to the browser) |
+
+You can also edit most of these from the Settings UI. Changes are written as clean, readable YAML.
+
+---
+
+## Philosophy in one sentence
+
+> Show what is actually there, never invent what isn’t, and never give the browser more power than it needs.
+
+This principle guides every feature — from how service URLs are resolved, to how monitoring treats a refused address as “no verdict” instead of an outage, to how the operations engine requires a server-minted confirmation token.
+
+---
+
+## Documentation
+
+Deeper technical docs live in the `docs/` folder:
+
+- [Architecture](docs/02-architecture.md)
+- [Design system](docs/03-design-system.md)
+- [Discovery contract](docs/04-discovery.md)
+- [Authentication model](docs/06-auth.md)
+- [Distribution & troubleshooting](docs/07-distribution.md)
+- Phase documents (service intelligence, operations engine, infrastructure awareness, monitoring engine…)
+
+---
+
+## Running from source
+
+```bash
 npm install
-npm run build      # builds the SPA into dist/
-npm start          # serves app + /api on :3000 (OPUSHUB_PORT to change)
+npm run build
+npm start          # serves the app + API on port 3000
 ```
 
-During development: `npm run dev:web` (vite build --watch) in one terminal and `npm run dev`
-(node --watch) in another, or just use the built app — the node server serves it.
+Development mode:
 
-## What OpusHub is
-
-| Page | What it shows |
-| --- | --- |
-| **Hub** (`/`) | Greeting (name, date, real time, weather when configured) + global search (`/` or ⌘K), host summary strip, the draggable service launcher built from the live inventory, and rail widgets — clock, weather, news, markets, bookmarks, activity, stacks, attention. Every widget has a zone (main/sidebar), a size (S/M/L), visibility and its own config; drag to reorder, resize or hide, all persisted. Composition presets live in Settings → Templates |
-| **Services** (`/services`) | Every discovered container, grouped; applications and infrastructure rails separated by what the engine says about them; click → OpusHub's own service page |
-| **Service page** (`/services/:group/:name`) | Identity, runtime stats (real, from Docker), infrastructure (ports/networks/volumes), related activity, Open/Logs actions only where actually implemented |
-| **Stacks** (`/stacks`) | Compose projects as Docker reports them (`com.docker.compose.project`), with their member containers, plus standalone containers; aggregate status |
-| **Stack page** (`/stacks/:name`) | Member containers with stats, ports, networks, volumes, logs drawer |
-| **Monitoring** (`/monitoring`) | OpusHub's own uptime engine: monitors over services (HTTP status, a TCP endpoint, Docker state), an honest state machine (`up` / `degraded` / `down` / `recovering` / `paused` / no verdict), incidents with real durations, bounded check history and uptime, and a monitor list grouped the way your services are. It detects and records — it never restarts anything |
-| **System** (`/system`) | CPU / memory / storage / network / host — oversized numerals, per-core grid, charts from a real 5s sample history, honest `Unavailable` where the kernel offers nothing |
-| **Activity** (`/activity`) | Timeline of real events: config writes, launches, app lifecycle, Docker state changes |
-| **Settings** (`/settings/…`) | Appearance (theme, accent, density), Background, Hub layout (composition presets + a live preview of the real Hub), Widgets, Templates, Services (customization overlay + icon picker), Groups, Bookmarks, Integrations, Monitoring (check defaults, retention, internal targets, discovery), System (paths, discovery) and Advanced (custom CSS/JS, refresh intervals) |
-| **Icons** (`/icons`) | Bundled Lucide + Material Design Icons + Simple Icons (resolve offline), Iconify when online, your own files in `config/icons/`, monogram fallback by design |
-
-## Configuration & `.env` discovery
-
-Everything user-facing lives in `config/`:
-
-```
-config/services.yaml    OPTIONAL presentation overlay — one entry per container: displayName, icon,
-                        description, group, order, visibility, manual url override
-config/stacks.yaml      OPTIONAL presentation overlay — renames/describes a compose project that exists
-config/settings.yaml    appearance, hub behavior, integrations (news feeds, weather, markets),
-                        host address + proxy entrypoint ports used by URL discovery
-config/bookmarks.yaml   flat links
-config/layout.json      hub composition (v2): widget instances with zone/size/visibility/config,
-                        spacing, section order, per-group service order — written by drag & drop
-config/theme.css        optional custom CSS (enable in Settings → System)
-config/app.js           optional custom JS (enable deliberately)
-config/icons/           served at /user/icons/*
-config/backgrounds/     served at /user/backgrounds/*
-config/.env             secrets — see below
+```bash
+npm run dev:web   # Vite build --watch
+npm run dev       # Node with --watch
 ```
 
-Both overlay files may be empty or absent — the app then shows pure discovery, which is a complete
-and useful UI (`docs/04-discovery.md` is the contract: what Docker decides, what config may decide,
-and how a URL is resolved). A config entry whose container is gone is reported in
-Settings → System → Service discovery and rendered nowhere.
+---
 
-`.env` is discovered in an explicit order (first hit wins per key, real environment always beats
-files, every attempt is logged on boot and reported — by *name only* — at `GET /api/health`):
+## Status
 
-1. `$OPUSHUB_ENV_FILE` 2. `config/.env` 3. `./.env` 4. `$HOMEPAGE_DIR/.env` 5. `/app/config/.env`
+OpusHub is the front door of the larger **OpusGrid** vision — a calm, honest control plane for a homelab.  
+It currently focuses on **visibility**, **safe navigation**, and **bounded operations**.  
+Full orchestration, multi-host control planes, and advanced automation are intentional future work.
 
-This exists because a previous build shipped a `.env` that the app simply never looked for. See
-`docs/01-audit.md`.
+---
 
-## Data policy
-
-- **No fake data, ever.** System metrics are read from `/proc` and `/sys`. The service inventory,
-  stack membership, URLs and status all come from the Engine API over the socket
-  (`OPUSHUB_DOCKER_SOCKET` / `DOCKER_HOST`) — read-only, GET requests only, never cached to disk. News fetches
-  your RSS feeds through the server. Weather uses Open-Meteo, markets use Yahoo Finance's
-  public chart endpoint (both keyless).
-- If a source is missing, disconnected, or unreachable, every affected widget says **Unavailable**
-  and shows the real reason ("no Docker socket found…", `SSL_ERROR_SYSCALL`…) with a link to fix it.
-- Secrets never cross the API boundary: `.env` values stay in the server, container env vars are
-  stripped from Docker projections, `/api/health` exposes key *names* only.
-- No shell execution. No container restart/update endpoints in V1 — buttons exist only where the
-  action genuinely works.
-
-## Architecture
-
-See `docs/02-architecture.md` (layout, provider contract, API surface) and
-`docs/03-design-system.md` (the visual rules this UI is held to). Frontend: React + TypeScript,
-no UI framework, hand-drawn SVG charts, in-house drag & drop. Backend: plain Node 22, the `yaml`
-package, one process.
-
-```
-docs/01-audit.md            what was found in the repo before any change (an empty tree)
-docs/02-architecture.md     seams: providers, config store, API
-docs/03-design-system.md    type, color, space, motion — the anti-"AI dashboard" rules
-docs/04-discovery.md        the inventory contract: Docker decides existence, config decides appearance
-docs/05-service-intelligence.md  Phase 3: read-only depth — stats, logs, history, stack health,
-                            provider health — and the read-only boundary that bounds all of it
-docs/06-auth.md             the door: account, sessions, cookies, CSRF, throttle, what is public,
-                            and the security review table
-docs/07-distribution.md     the image and GHCR tags, installing, the socket, volumes, backups,
-                            updating, troubleshooting
-Dockerfile                  multi-stage build; runtime config is a mount, never a COPY
-docker-compose.yml          the clean install (image + name + restart + volumes + socket :ro)
-.github/workflows/ghcr.yml  publishes the image on main and on v* tags, with GITHUB_TOKEN only
-scripts/opusgrid-inspect.sh read-only inspection of the metadata discovery reads, on your host
-server/                     HTTP API + discovery + providers + atomic config store
-src/                        React app (pages · shell · components · styles)
-config/                     YOUR state, committed here in this repo
-data/                       runtime log + metric history (gitignored)
-```
-
-## The container image
-
-Three stages (deps → build → runtime), production dependencies only, running as the unprivileged
-`node` user, `SIGTERM`-aware, with a healthcheck on `/api/health`. The image contains code only:
-`.dockerignore` keeps `config/`, `data/`, `.env`, keys and `dist/` out of the build context, so
-nothing host-specific is baked into a layer — `test/docker.test.js` asserts that line by line.
-
-Published to GHCR as `ghcr.io/lucif3r-d3vil/opushub` (`:latest`, `:1.4.0`, `:sha-abc1234`), built
-for `linux/amd64` first, authenticated with `GITHUB_TOKEN` and verified (`typecheck` + tests + build)
-before anything is pushed. The container user gets socket access through `group_add` (the socket's
-GID) rather than root, and `OPUSHUB_HOST_ADDRESS` is the only networking hint it can be given — and
-it is optional, used solely for containers that publish a port without proxy labels.
-
-Build it yourself with `docker build -t opushub .`; full details in
-[`docs/07-distribution.md`](docs/07-distribution.md).
-
-## Status & scope
-
-OpusHub is V1 of the OpusGrid vision: visibility and safe navigation, not orchestration. Kubernetes,
-VMs, backups and automation belong to the future control plane — this app is its front door, and
-the provider/registry seams are drawn so it can grow into that without a rewrite.
-
-**Phase 3 — read-only service intelligence.** The service page now answers what a container is
-doing right now: state and health (a container *without* a healthcheck is never called unhealthy),
-uptime, restart count, on-demand resource readings with compact sparklines, read-only logs with
-local search/level filtering, published vs exposed ports, mounts and image facts. Stacks get a
-documented deterministic status (Operational / Degraded / Attention / Stopped / Unknown) and
-rollups; the Activity page is a witnessed timeline with burst grouping and honest *watching since*
-markers; Settings → System reports provider health. All of it is strictly observational — no
-restart, exec, pull, deploy or write of any kind was added; see
-`docs/05-service-intelligence.md` for the boundary and the rules.
-
-**Phase 4 — the door, the details, and distribution.** OpusHub now has one local administrator
-account (scrypt, never a plaintext password), server-side sessions in an HttpOnly cookie, CSRF
-defence, and a first-run wizard that must be completed before any application API answers. Discovery
-got sharper: every compose project becomes a Hub group with a generic display name, service identity
-follows a documented precedence (compose service → container name → image → overlay → humanized),
-icons resolve through the existing pipeline with a monogram as the honest fallback, and infrastructure
-containers are classified and shown on their own rail rather than hidden. The group editor, the
-"…" menus and the system charts were rebuilt on real primitives (an anchored portaled menu, an
-index-addressed name field, a measured 1:1 chart region). The image is published to GHCR with a
-compose file that installs it cleanly. Authentication is a door, not a control plane: nothing about
-the read-only boundary changed — no restart, exec, pull or deploy anywhere.
-
-**Phase 10A — the monitoring engine.** OpusHub now answers "is it up?" with its own engine: a
-monitor is a validated target (a service reference with a resolved endpoint, one explicit TCP
-host + port, or a canonical service reference for Docker state), checked from a single bounded
-scheduler with one timer and a bounded worker pool, evaluated by a documented state machine (three
-consecutive failures to call something down, two successes to call it back, `recovering` in
-between so a flapping service is visible rather than instant), and recorded as incidents with real
-durations, bounded check history and uptime that can never invent a check. It is provider-agnostic —
-a discovered endpoint can come from Traefik, a published port or your own override, and the monitor
-follows the service rather than freezing today's URL. Monitoring **detects and records only**: no
-notification of any kind, no container start/stop/restart, no shell, no Docker operation, no AI,
-and the Phase 8 operations engine is never invoked. Private, CGNAT and ULA targets are a deliberate,
-bounded capability (the homelab is *supposed* to be watched); loopback, link-local/metadata,
-multicast and friends are always refused, every resolved address and every redirect hop is
-re-checked, and a refused address is "no verdict" — never an outage. See
-`docs/12-phase-10a.md`.
-
-Run it on the LAN or behind a VPN — see `docs/07-distribution.md` for why, and `docs/06-auth.md` for
-what the login does and does not protect against.
-
-## Development checks
-
-```
-npm run check               # tsc + production build
-npm test                    # 797 tests: label grammar, URL precedence, the discovery join, layout v2
-                            # normalisation and templates, model integration (with and without
-                            # overlays), provider, env, API boundary, the offline contract, the
-                            # Phase 3 contract (detail/stats/logs/history/activity/stacks/security),
-                            # and Phase 4 (password hashing/sessions/CSRF/throttle, the API door,
-                            # generic grouping, labels and packaging), and Phase 10A (the monitor
-                            # model, the state machine, the checks, the scheduler, the engine, the
-                            # monitoring API and the static security proofs) — all against the mock
-                            # engine
-npm run test:web            # 67 DOM interaction checks in jsdom: search hotkeys/arrows/Enter, widget
-                            # menus writing the layout, keyboard reordering, preview inertness,
-                            # shared-data request counts, the setup/login gate, the group-name
-                            # contract (service and bookmark groups), the anchored menu's placement,
-                            # the measured chart region, and the monitoring pages (needs the jsdom
-                            # devDependency)
-npm run verify              # the whole API surface against a *scratch* config dir on its own port:
-                            # empty config, overlay, hidden/reordered services, templates, search,
-                            # detail pages, provider-unavailable paths, and the monitoring surface
-                            # incl. every target refusal (68 checks without a Docker engine, 110
-                            # with one). Safe on a live host — your config/ is never touched.
-                            # OPUSHUB_DOCKER_SOCKET=/var/run/docker.sock npm run verify points it
-                            # at the real engine
-npm run smoke               # server-render checks: every route renders; the Hub under thirteen data
-                            # states (empty, docker off, providers down, unconfigured, hidden,
-                            # reordered, unknown widget type, preview, loading, stacks rollup,
-                            # attention surfacing incl. provider failures)
-npm run smoke:live          # fetches a *running* OpusHub and renders the real Hub from its payloads
-                            # (OPUSHUB_URL=http://host:3000 points it at another instance)
-npm run mock-engine         # standalone fake Engine API for live validation:
-                            # OPUSHUB_DOCKER_SOCKET=/tmp/opushub-mock-docker.sock npm start
-                            # (OPUSHUB_MOCK_HIDE=seerr removes a container to test disappearance)
-./scripts/opusgrid-inspect.sh   # the same inspection against a real Docker host, read-only
-```
+<p align="center">
+  <sub>Built to be useful every day, not just impressive on day one.</sub>
+</p>
