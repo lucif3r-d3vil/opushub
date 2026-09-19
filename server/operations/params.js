@@ -186,7 +186,10 @@ export function paramsHash(params) {
 /** The confirmation target key: type, canonical id, and the hash of what will be done. */
 export function confirmationKey(target, params) {
   const id = target?.containerId || target?.id || 'none';
-  return `${target?.type || 'container'}:${id}:${paramsHash(params)}`;
+  // a stack confirmation is bound to the document revision it was shown for: editing the stack
+  // between the dry-run and the execute invalidates the token
+  const rev = target?.type === 'stack' && target.revision ? `@${target.revision}` : '';
+  return `${target?.type || 'container'}:${id}${rev}:${paramsHash(params)}`;
 }
 
 export const _internals = Object.freeze({ NAME_RE, NETWORK_RE, ALIAS_RE, MAX_COMPOSE });

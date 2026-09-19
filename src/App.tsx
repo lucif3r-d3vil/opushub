@@ -19,6 +19,7 @@ const Monitoring = lazy(() => import('./pages/Monitoring'));
 const MonitorDetail = lazy(() => import('./pages/MonitorDetail'));
 const Stacks = lazy(() => import('./pages/Stacks'));
 const StackDetail = lazy(() => import('./pages/StackDetail'));
+const ManagedStack = lazy(() => import('./pages/ManagedStack'));
 const Infrastructure = lazy(() => import('./pages/Infrastructure'));
 const Host = lazy(() => import('./pages/Host'));
 const SystemPage = lazy(() => import('./pages/System'));
@@ -282,6 +283,8 @@ function ShellWithRoutes() {
             <Route path="monitoring/incidents" element={<Monitoring />} />
             <Route path="monitoring/:id" element={<MonitorDetail />} />
             <Route path="stacks" element={<Stacks />} />
+            <Route path="stacks/new" element={<ManagedStack />} />
+            <Route path="stacks/:id/edit" element={<ManagedStack />} />
             <Route path="stacks/:name" element={<StackDetail />} />
             {/* System is the parent for the machine: live vitals, the host itself, and the
                 infrastructure views (engine, storage/ZFS, network, power, topology). */}

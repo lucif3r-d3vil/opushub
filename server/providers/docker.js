@@ -527,6 +527,20 @@ export async function listNetworks() {
 }
 
 /**
+ * Networks with their labels — for ownership decisions server-side (which networks a stack
+ * created, so only those may be removed). Not a browser projection: labels are not served.
+ */
+export async function listNetworksRaw() {
+  const list = await requestJson('/networks');
+  return (Array.isArray(list) ? list : []).slice(0, 500).map((n) => ({
+    id: typeof n.Id === 'string' ? n.Id.slice(0, 12) : null,
+    name: n.Name ?? null,
+    driver: n.Driver ?? null,
+    labels: n.Labels && typeof n.Labels === 'object' ? { ...n.Labels } : {},
+  }));
+}
+
+/**
  * Docker volumes, projected safe: names + usage only. Mountpoints are host paths and are
  * deliberately NOT projected (see the read-only boundary: no arbitrary filesystem locations).
  */

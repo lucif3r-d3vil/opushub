@@ -27,11 +27,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * @param {number} [o.verifyMs]      how long to wait for the replacement to be running
  * @param {function} [o.onStep]      (state) => void — progress callback
  * @param {object} [o.ops]           adapter override (tests)
+ * @param {string} [o.newName]       create the replacement under a different name (stack rename); rollback restores the original name
  * @returns {Promise<{ok:true, newId:string, tx:object} | {ok:false, code:string, reason:string, tx:object, rolledBack:boolean}>}
  */
 export async function recreateContainer({
   containerId, containerName, createBody, auxiliaryNetworks = [], kind = 'recreate', wasRunning = true,
   verifyMs = 8_000, stopTimeout = 15, onStep = null, ops = adapter, service = null, tx: existingTx = null,
+  newName = null,
 }) {
   const originalName = String(containerName || '').replace(/^\//, '');
   const tempName = `${originalName}-old-${Date.now().toString(36)}`;
@@ -71,7 +73,7 @@ export async function recreateContainer({
 
     // 3 — create the replacement under the original name
     step('creating');
-    const createRes = await ops.createContainer(originalName, createBody);
+    const createRes = await ops.createContainer(newName || originalName, createBody);
     if (!createRes.ok || !createRes.id) {
       step('rolling_back');
       await ops.renameContainer(containerId, originalName).catch(() => {});

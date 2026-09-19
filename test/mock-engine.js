@@ -535,6 +535,7 @@ export function createHandler({ log = null } = {}) {
         if (project && service && f.Names[0] !== '/jellyfin') push(`${project}-${service}-data`, 50000000, 1);
       }
       push('orphan-volume-nothing-uses', 12000000, 0);
+      for (const [name] of CREATED_VOLUMES) push(name, 0, 0);
       return send(200, { Volumes: vols, Warnings: [] });
     }
     if (req.method === 'GET' && p === '/system/df') {
@@ -633,7 +634,10 @@ export function createHandler({ log = null } = {}) {
         ExitCodeOverride: /exit-immediately/.test(newName) ? 1 : 0,
         Mounts: (bodyData.HostConfig?.Binds || []).map((b) => {
           const parts = b.split(':');
-          return { Type: 'bind', Source: parts[0], Destination: parts[1], RW: parts[2] !== 'ro' };
+          // a bind whose source is not an absolute path is a named volume (as the daemon reports it)
+          return parts[0].startsWith('/')
+            ? { Type: 'bind', Source: parts[0], Destination: parts[1], RW: parts[2] !== 'ro' }
+            : { Type: 'volume', Name: parts[0], Source: `/var/lib/docker-mock/volumes/${parts[0]}/_data`, Destination: parts[1], RW: parts[2] !== 'ro' };
         }),
       };
       FLEET.push(newFx);

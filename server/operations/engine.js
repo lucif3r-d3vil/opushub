@@ -346,7 +346,7 @@ async function runControlled({ op, action, target, params, plan, actor, sessionI
     const timeoutErr = Symbol('timeout');
     let timer = null;
     const res = await Promise.race([
-      dispatchControlled(action, { target, params, plan, onStep }),
+      dispatchControlled(action, { target, params, plan, onStep, actor, operationId: op.id }),
       new Promise((resolve) => { timer = setTimeout(() => resolve(timeoutErr), action.timeoutMs); }),
     ]).finally(() => clearTimeout(timer));
     if (res === timeoutErr) {

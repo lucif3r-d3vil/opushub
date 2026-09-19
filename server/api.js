@@ -55,6 +55,7 @@ import { initEvents } from './events/index.js';
 import { handleAutohealRoutes } from './autohealApi.js';
 import { handleUpdatesRoutes } from './updatesApi.js';
 import { handleContainersRoutes } from './containersApi.js';
+import { handleStacksRoutes } from './stacksApi.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -259,6 +260,21 @@ export async function handleApi(req, res, url) {
       p, method,
       send: (status, obj) => send(res, status, obj),
       jsonBody,
+    });
+    if (handled) return;
+  }
+
+  // ---------- managed stacks (Phase 10D-B) ----------
+  // Compose documents as data: stored, validated, planned; deployed only through the operations
+  // engine. Sits before the unversioned /api/stacks discovery routes so `/api/stacks/managed` and
+  // the `/api/stacks/:id/<verb>` wrappers never fall through to the projection routes.
+  if (p.startsWith('/api/stacks/') || p.startsWith('/api/v1/stacks/')) {
+    const handled = await handleStacksRoutes({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      actor: session?.username ?? null,
+      sessionId: activeToken ? auth.sessionHandle(activeToken) : null,
     });
     if (handled) return;
   }
@@ -1784,6 +1800,8 @@ const V1_ROUTES = new Set([
   '/notifications/telegram',
   // Phase 10D — containers (the /:ref forms are patterns, matched by the handler itself)
   '/containers/spec-fields',
+  // Phase 10D — managed stacks (the /:id forms are patterns, matched by the handler itself)
+  '/stacks/managed',
 ]);
 
 export function rewriteV1(pathname) {

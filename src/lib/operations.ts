@@ -45,7 +45,7 @@ export interface PlanDiffEntry {
 export interface PlanDiff {
   changed: string[]; unchanged: string[]; entries: PlanDiffEntry[]; inPlace: boolean; recreate: boolean; summary: string[];
 }
-export interface PolicyFinding { level: 'SAFE' | 'WARNING' | 'DANGEROUS' | 'BLOCKED'; code: string; message: string; field?: string | null; preexisting?: boolean }
+export interface PolicyFinding { level: 'SAFE' | 'WARNING' | 'DANGEROUS' | 'BLOCKED'; code: string; message: string; field?: string | null; preexisting?: boolean; service?: string | null }
 export interface PlanDoc {
   kind: string | null;
   summary: string[];

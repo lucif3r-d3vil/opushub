@@ -119,7 +119,9 @@ export function specFromInspect(inspect) {
     ports,
     volumes,
     networks,
-    networkMode: NETWORK_MODES.includes(mode) ? mode : (mode.startsWith('container:') ? mode : 'bridge'),
+    // a named network as the primary (`NetworkMode: myproject_default`) is kept as such — the
+    // create body writes it back the same way, so a compare between the two is exact
+    networkMode: NETWORK_MODES.includes(mode) || mode === 'default' ? (mode === 'default' ? 'bridge' : mode) : (mode.startsWith('container:') || NETWORK_RE.test(mode) ? mode : 'bridge'),
     restartPolicy: { name: RESTART_POLICIES.includes(hc.RestartPolicy?.Name) ? hc.RestartPolicy.Name : 'no', maxRetries: Number(hc.RestartPolicy?.MaximumRetryCount) || 0 },
     healthcheck: health,
     resources: {
@@ -607,7 +609,7 @@ function normalizePath(pth) {
 
 /** "8080:80/tcp", "127.0.0.1:8080:80", "80" */
 export function parsePortString(s) {
-  const m = String(s).trim().match(/^(?:(\[[0-9a-f:]+\]|[0-9.]+):)?(?:(\d{1,5}):)?(\d{1,5})(?:\/(tcp|udp|sctp))?$/i);
+  const m = String(s).trim().match(/^(?:(\[[0-9a-f:]+\]|\d{1,3}(?:\.\d{1,3}){3}):)?(?:(\d{1,5}):)?(\d{1,5})(?:\/(tcp|udp|sctp))?$/i);
   if (!m) return null;
   return { hostIp: m[1] ? m[1].replace(/^\[|\]$/g, '') : null, host: m[2] ? Number(m[2]) : (m[1] ? null : Number(m[3])), container: Number(m[3]), protocol: (m[4] || 'tcp').toLowerCase() };
 }

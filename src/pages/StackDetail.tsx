@@ -10,6 +10,7 @@ import { Loading, PageHero, ProviderNote, SectionHead, StatusLine } from '../com
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
 import { ServiceActionMenu } from '../components/ServiceActions';
+import { requestOperation, useOperationsCapabilities } from '../lib/operations';
 
 interface StackRollup {
   containers: number; running: number; stopped: number; unhealthy: number; reporting: number;
@@ -128,6 +129,7 @@ export default function StackDetailPage() {
     (settings?.behavior?.refresh?.services ?? 30) * 1000,
   );
   const activity = usePolled<{ items: ActivityEvent[] }>('/api/activity?limit=80', 60_000);
+  const caps = useOperationsCapabilities();
 
   if (loading && !data) return <div style={{ padding: 'var(--sp-12) 0' }}><Loading what="this stack" note="one container at a time, bounded" /></div>;
   if (error && !data) return <ProviderNote status="error" reason={error} fixHref="/stacks" fixLabel="All stacks →" />;
@@ -169,6 +171,13 @@ export default function StackDetailPage() {
             {roll?.upSince != null && <span className="stale-note">up {uptime((Date.now() - roll.upSince) / 1000)}</span>}
             <button className="btn btn-quiet btn-sm" onClick={refresh}>Refresh</button>
             {fetchedAt && <span className="stale-note">{relTime(fetchedAt)}</span>}
+            {data.project && caps.can('stack.deploy') && (
+              <>
+                <Link to={`/stacks/${encodeURIComponent(data.project)}/edit`} className="btn btn-sm">Manage…</Link>
+                {data.runningCount < data.containerCount && <button className="btn btn-sm" onClick={() => requestOperation('stack.start', { type: 'stack', id: data.project! })}>Start all…</button>}
+                {data.runningCount > 0 && <button className="btn btn-sm btn-quiet stop" onClick={() => requestOperation('stack.stop', { type: 'stack', id: data.project! })}>Stop all…</button>}
+              </>
+            )}
           </div>
           {/* compact rollup — the page stays readable; deep detail lives on the service pages */}
           <div className="stack-rollup" role="group" aria-label="Stack health summary">
