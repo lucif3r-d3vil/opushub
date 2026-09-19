@@ -11,13 +11,53 @@
 import { useMemo } from 'react';
 import { api, usePolled } from './api';
 
-export type OperationAction = 'container.start' | 'container.restart' | 'container.stop';
+export type OperationAction =
+  | 'container.start' | 'container.restart' | 'container.stop'
+  | 'container.pause' | 'container.unpause' | 'container.kill'
+  | 'container.rename' | 'container.pull_image' | 'container.network_attach' | 'container.network_detach'
+  | 'container.update' | 'container.recreate' | 'container.edit' | 'container.change_image'
+  | 'container.duplicate' | 'container.create' | 'container.remove'
+  | 'stack.deploy' | 'stack.start' | 'stack.stop' | 'stack.remove'
+  | 'image.pull' | 'service.install';
+
+/** The lifecycle actions a service page offers as buttons. */
+export const LIFECYCLE_ACTIONS: OperationAction[] = ['container.start', 'container.restart', 'container.stop', 'container.pause', 'container.unpause', 'container.kill'];
 
 export interface OperationTargetRef {
-  type: 'service' | 'container';
-  id: string;
+  type: 'service' | 'container' | 'stack' | 'image' | 'new' | 'catalog';
+  id?: string;
   group?: string;
   name?: string;
+}
+
+/**
+ * Operation parameters — an object the server validates against the action's declared schema.
+ * The browser never invents fields: what each action accepts is documented next to the action
+ * in server/operations/params.js, and anything else is refused (not ignored).
+ */
+export type OperationParams = Record<string, unknown>;
+
+export interface PlanDiffEntry {
+  field: string; label: string; kind: 'added' | 'removed' | 'changed';
+  current: string | null; next: string | null; inPlace: boolean;
+  keys?: { added: string[]; removed: string[]; changed: string[] };
+}
+export interface PlanDiff {
+  changed: string[]; unchanged: string[]; entries: PlanDiffEntry[]; inPlace: boolean; recreate: boolean; summary: string[];
+}
+export interface PolicyFinding { level: 'SAFE' | 'WARNING' | 'DANGEROUS' | 'BLOCKED'; code: string; message: string; field?: string | null; preexisting?: boolean }
+export interface PlanDoc {
+  kind: string | null;
+  summary: string[];
+  steps: string[];
+  diff: PlanDiff | null;
+  current: Record<string, unknown> | null;
+  next: Record<string, unknown> | null;
+  policy: { level: PolicyFinding['level']; findings: PolicyFinding[] } | null;
+  services?: unknown;
+  resources?: unknown;
+  integrations?: unknown;
+  notes: string[];
 }
 
 export type OperationStatus =
@@ -47,26 +87,28 @@ export interface OperationDoc {
   startedAt: number | null;
   completedAt: number | null;
   durationMs: number | null;
-  result: { state?: string | null; health?: string | null; unchanged?: boolean } | null;
+  result: ({ state?: string | null; health?: string | null; unchanged?: boolean } & Record<string, unknown>) | null;
   error: OperationError | null;
   verification: OperationVerification | null;
   confirmation: { required: boolean; mode: string; consumed: boolean } | null;
   auditId: string | null;
   dryRun?: boolean;
+  plan?: PlanDoc | null;
 }
 
 export interface DryRunCheck { key: string; label: string; ok: boolean; detail: string | null }
 
 export interface DryRunDoc {
   ready: boolean;
-  action: { id: string; label: string; risk: string; verb: string; timeoutMs: number } | null;
-  target: { label: string; containerName: string; state: string | null; health: string | null; group: string | null; stack: string | null; self: boolean } | null;
+  action: { id: string; label: string; risk: string; verb: string; timeoutMs: number; targetType?: string; executor?: string } | null;
+  target: { type?: string; id?: string | null; label: string; containerName: string | null; state: string | null; health: string | null; group: string | null; stack: string | null; self: boolean } | null;
   permission: boolean;
   risk: string | null;
   docker: boolean;
   engineAction: string | null;
   confirmation: { required: boolean; mode: string };
   checks: DryRunCheck[];
+  plan: PlanDoc | null;
   error: OperationError | null;
 }
 
@@ -101,7 +143,7 @@ export interface ExecuteResponse { operation: OperationDoc; error?: string | nul
 export interface OperationsOverview {
   at: number;
   actor: { username: string | null; role: string; roleLabel: string; description: string; permissions: string[] };
-  actions: { id: string; label: string; permission: string; risk: string; confirmation: string; summary: string; timeoutMs: number; verifyMs: number; enabled: boolean; permitted: boolean }[];
+  actions: { id: string; label: string; permission: string; risk: string; confirmation: string; summary: string; timeoutMs: number; verifyMs: number; enabled: boolean; permitted: boolean; targetType?: string; params?: string; executor?: string; offerWhen?: string[] }[];
   docker: { read: boolean; operations: boolean; channel: 'shared' | 'dedicated' };
   counts: { running: number; failed: number; recent: number };
   running: OperationDoc[];
@@ -122,12 +164,15 @@ export const TERMINAL: OperationStatus[] = ['succeeded', 'failed', 'rejected', '
 export const isTerminal = (s: OperationStatus | string | null | undefined) => TERMINAL.includes(s as OperationStatus);
 
 /** Ask the server what it would do. Never operates. */
-export const dryRun = (action: string, target: OperationTargetRef) =>
-  api<DryRunResponse>('/api/v1/operations/dry-run', { method: 'POST', body: JSON.stringify({ action, target }) });
+export const dryRun = (action: string, target: OperationTargetRef, params?: OperationParams) =>
+  api<DryRunResponse>('/api/v1/operations/dry-run', { method: 'POST', body: JSON.stringify({ action, target, ...(params ? { params } : {}) }) });
 
-/** Spend a confirmation. The server re-checks everything before it touches Docker. */
-export const execute = (action: string, target: OperationTargetRef, confirmationToken: string, operationId: string) =>
-  api<ExecuteResponse>('/api/v1/operations', { method: 'POST', body: JSON.stringify({ action, target, confirmationToken, operationId }) });
+/**
+ * Spend a confirmation. The server re-checks everything before it touches Docker — and the token
+ * is bound to the exact parameters the dry-run evaluated, so the same `params` must be sent.
+ */
+export const execute = (action: string, target: OperationTargetRef, confirmationToken: string, operationId: string, params?: OperationParams) =>
+  api<ExecuteResponse>('/api/v1/operations', { method: 'POST', body: JSON.stringify({ action, target, ...(params ? { params } : {}), confirmationToken, operationId }) });
 
 export const fetchOperation = (id: string) => api<{ operation: OperationDoc }>(`/api/v1/operations/${id}`);
 
@@ -174,6 +219,26 @@ export const ACTION_WORDS: Record<string, { verb: string; progressive: string; p
   'container.start': { verb: 'start', progressive: 'Starting', past: 'started', imperative: 'Start' },
   'container.restart': { verb: 'restart', progressive: 'Restarting', past: 'restarted', imperative: 'Restart' },
   'container.stop': { verb: 'stop', progressive: 'Stopping', past: 'stopped', imperative: 'Stop' },
+  'container.pause': { verb: 'pause', progressive: 'Pausing', past: 'paused', imperative: 'Pause' },
+  'container.unpause': { verb: 'unpause', progressive: 'Unpausing', past: 'unpaused', imperative: 'Unpause' },
+  'container.kill': { verb: 'kill', progressive: 'Killing', past: 'killed', imperative: 'Kill' },
+  'container.rename': { verb: 'rename', progressive: 'Renaming', past: 'renamed', imperative: 'Rename' },
+  'container.remove': { verb: 'remove', progressive: 'Removing', past: 'removed', imperative: 'Remove' },
+  'container.pull_image': { verb: 'pull', progressive: 'Pulling image for', past: 'image pulled', imperative: 'Pull image' },
+  'container.network_attach': { verb: 'attach', progressive: 'Attaching network to', past: 'network attached', imperative: 'Attach network' },
+  'container.network_detach': { verb: 'detach', progressive: 'Detaching network from', past: 'network detached', imperative: 'Detach network' },
+  'container.update': { verb: 'update', progressive: 'Updating', past: 'updated', imperative: 'Update' },
+  'container.recreate': { verb: 'recreate', progressive: 'Recreating', past: 'recreated', imperative: 'Recreate' },
+  'container.edit': { verb: 'edit', progressive: 'Applying changes to', past: 'reconfigured', imperative: 'Apply changes' },
+  'container.change_image': { verb: 'change image of', progressive: 'Changing image of', past: 'moved to a new image', imperative: 'Change image' },
+  'container.duplicate': { verb: 'duplicate', progressive: 'Duplicating', past: 'duplicated', imperative: 'Duplicate' },
+  'container.create': { verb: 'create', progressive: 'Creating', past: 'created', imperative: 'Create' },
+  'stack.deploy': { verb: 'deploy', progressive: 'Deploying', past: 'deployed', imperative: 'Deploy' },
+  'stack.start': { verb: 'start', progressive: 'Starting', past: 'started', imperative: 'Start' },
+  'stack.stop': { verb: 'stop', progressive: 'Stopping', past: 'stopped', imperative: 'Stop' },
+  'stack.remove': { verb: 'remove', progressive: 'Removing', past: 'removed', imperative: 'Remove' },
+  'image.pull': { verb: 'pull', progressive: 'Pulling', past: 'pulled', imperative: 'Pull' },
+  'service.install': { verb: 'install', progressive: 'Installing', past: 'installed', imperative: 'Install' },
 };
 
 export const wordsFor = (action: string) =>
@@ -207,22 +272,39 @@ export function healthWord(health: string | null | undefined): string | null {
  * The UI's opinion only: the server re-checks everything and stays authoritative. These rules
  * exist so a button that cannot work is not offered, not to enforce anything.
  */
-export function allowedActions(state: string | null | undefined): Record<OperationAction, boolean> {
+export function allowedActions(state: string | null | undefined): Record<string, boolean> {
   const s = String(state || '');
+  const exists = s !== '';
+  const stopped = s === 'exited' || s === 'created' || s === 'dead';
+  const running = s === 'running';
+  const paused = s === 'paused';
   return {
-    'container.start': s === 'exited' || s === 'created' || s === 'dead',
-    'container.restart': s === 'running',
-    'container.stop': s === 'running',
+    'container.start': stopped,
+    'container.restart': running,
+    'container.stop': running,
+    'container.pause': running,
+    'container.unpause': paused,
+    'container.kill': running || paused || s === 'restarting',
+    'container.rename': exists,
+    'container.remove': exists,
+    'container.pull_image': exists,
+    'container.network_attach': running || stopped || paused,
+    'container.network_detach': running || stopped || paused,
+    'container.update': running || stopped || paused,
+    'container.recreate': exists,
+    'container.edit': exists,
+    'container.change_image': exists,
+    'container.duplicate': exists,
   };
 }
 
 /** Ask for an operation from anywhere: the palette, a menu, a service page. */
-export function requestOperation(action: OperationAction, target: OperationTargetRef) {
+export function requestOperation(action: OperationAction, target: OperationTargetRef, params?: OperationParams) {
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent('opushub:operation', { detail: { action, target } }));
+  window.dispatchEvent(new CustomEvent('opushub:operation', { detail: { action, target, params } }));
 }
 
-export const onOperationRequest = (fn: (detail: { action: OperationAction; target: OperationTargetRef }) => void) => {
+export const onOperationRequest = (fn: (detail: { action: OperationAction; target: OperationTargetRef; params?: OperationParams }) => void) => {
   if (typeof window === 'undefined') return () => {};
   const handler = (e: Event) => fn((e as CustomEvent).detail);
   window.addEventListener('opushub:operation', handler);

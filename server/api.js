@@ -54,6 +54,7 @@ import { initEvents } from './events/index.js';
 // Phase 10C — container recovery (Autoheal) & updates (Diun)
 import { handleAutohealRoutes } from './autohealApi.js';
 import { handleUpdatesRoutes } from './updatesApi.js';
+import { handleContainersRoutes } from './containersApi.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -246,6 +247,18 @@ export async function handleApi(req, res, url) {
       send: (status, obj) => send(res, status, obj),
       jsonBody,
       clientIp: req.socket?.remoteAddress || '127.0.0.1',
+    });
+    if (handled) return;
+  }
+
+  // ---------- containers (Phase 10D-A) ----------
+  // The read surface behind the Edit Container UI: inspect, canonical spec, processes, volumes,
+  // and a side-effect-free diff preview. Every write is an operation (POST /api/v1/operations).
+  if (p.startsWith('/api/containers') || p.startsWith('/api/v1/containers')) {
+    const handled = await handleContainersRoutes({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
     });
     if (handled) return;
   }
@@ -1769,6 +1782,8 @@ const V1_ROUTES = new Set([
   '/notifications', '/notifications/unread-count', '/notifications/stats',
   '/notifications/policy', '/notifications/providers', '/notifications/webhook',
   '/notifications/telegram',
+  // Phase 10D — containers (the /:ref forms are patterns, matched by the handler itself)
+  '/containers/spec-fields',
 ]);
 
 export function rewriteV1(pathname) {

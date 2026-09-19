@@ -14,8 +14,10 @@
 // G. Crash during transaction → detect on boot via transactions.json; expose "recovery_required".
 
 import * as docker from '../providers/docker.js';
+import * as model from '../model.js';
 import * as recreateAdapter from './recreateAdapter.js';
 import { buildReplacementConfig } from './preserveConfig.js';
+import { recreateContainer } from '../containers/recreate.js';
 import { resolveTarget, revalidateTarget } from '../operations/targets.js';
 import { issue as issueConfirmation, verify as spendConfirmation, cancel as cancelConfirmation } from '../operations/confirmation.js';
 import { acquire, release, checkRate } from '../operations/locks.js';
@@ -289,112 +291,28 @@ export async function executeUpdate({ targetRef, confirmationToken, actor = null
 
     const { createBody, auxiliaryNetworks, containerName } = buildReplacementConfig(inspectRes.data, updateRecord.imageRef);
     const originalName = containerName || target.containerName || target.service;
-    const tempName = `${originalName}-old-${Date.now().toString(36)}`;
-    tx.tempName = tempName;
-    txStore.saveTransaction(tx);
 
-    // 8. Stop old container (gracefully)
-    tx.state = 'stopping';
-    txStore.saveTransaction(tx);
-    const stopRes = await recreateAdapter.stopContainer(target.containerId, { stopTimeout: 15 });
-    if (!stopRes.ok) {
-      tx.state = 'failed';
-      txStore.saveTransaction(tx);
-      return {
-        ok: false,
-        status: 500,
-        error: operationError('stop_failed', 'Failed to stop existing container for update.'),
-      };
+    // 8–14. The shared recreate ladder (containers/recreate.js): stop → rename → create → connect
+    // → start → verify → remove old, with rollback at every rung. One transaction, one story.
+    const wasRunning = inspectRes.data?.State?.Running !== false;
+    const rec = await recreateContainer({
+      containerId: target.containerId,
+      containerName: originalName,
+      createBody,
+      auxiliaryNetworks,
+      kind: 'update',
+      wasRunning,
+      service: target.service,
+      verifyMs: 1500,
+      tx,
+    });
+    if (!rec.ok) {
+      store.putUpdate({ ...updateRecord, status: 'failed', ineligibilityReason: rec.reason, lastCheckedAt: Date.now() });
+      emitUpdateEvent('failed', target, updateRecord, rec.reason);
+      logActivity(target, 'failed', rec.reason);
+      return { ok: false, status: 500, error: operationError(rec.code, rec.reason) };
     }
-
-    // 9. Rename old container
-    tx.state = 'renaming';
-    txStore.saveTransaction(tx);
-    const renameRes = await recreateAdapter.renameContainer(target.containerId, tempName);
-    if (!renameRes.ok) {
-      // Rollback: restart old container
-      await recreateAdapter.startContainer(target.containerId);
-      tx.state = 'rolled_back';
-      txStore.saveTransaction(tx);
-      return {
-        ok: false,
-        status: 500,
-        error: operationError('rename_failed', 'Failed to rename old container; original container restarted.'),
-      };
-    }
-
-    // 10. Create replacement container
-    tx.state = 'creating';
-    txStore.saveTransaction(tx);
-    const createRes = await recreateAdapter.createContainer(originalName, createBody);
-    if (!createRes.ok || !createRes.id) {
-      // Rollback: rename old container back and start it!
-      tx.state = 'rolling_back';
-      txStore.saveTransaction(tx);
-      await recreateAdapter.renameContainer(target.containerId, originalName);
-      await recreateAdapter.startContainer(target.containerId);
-      tx.state = 'rolled_back';
-      txStore.saveTransaction(tx);
-      return {
-        ok: false,
-        status: 500,
-        error: operationError('create_failed', `Failed to create replacement container: ${createRes.code}; previous version restored.`),
-      };
-    }
-
-    const newContainerId = createRes.id;
-    tx.newId = newContainerId;
-    txStore.saveTransaction(tx);
-
-    // 11. Connect auxiliary networks
-    for (const net of auxiliaryNetworks) {
-      await recreateAdapter.connectNetwork(net.name, newContainerId, net.endpointConfig).catch(() => {});
-    }
-
-    // 12. Start replacement container
-    tx.state = 'starting';
-    txStore.saveTransaction(tx);
-    const startRes = await recreateAdapter.startContainer(newContainerId);
-    if (!startRes.ok) {
-      // Rollback: remove replacement, rename old back and start old!
-      tx.state = 'rolling_back';
-      txStore.saveTransaction(tx);
-      await recreateAdapter.deleteContainer(newContainerId, { removeVolumes: false });
-      await recreateAdapter.renameContainer(target.containerId, originalName);
-      await recreateAdapter.startContainer(target.containerId);
-      tx.state = 'rolled_back';
-      txStore.saveTransaction(tx);
-      return {
-        ok: false,
-        status: 500,
-        error: operationError('start_failed', 'Replacement container failed to start; previous version restored.'),
-      };
-    }
-
-    // 13. Verify replacement health
-    tx.state = 'verifying';
-    txStore.saveTransaction(tx);
-    await new Promise((r) => setTimeout(r, 1000));
-    const postInspect = await recreateAdapter.inspectContainer(newContainerId);
-    if (!postInspect.ok || postInspect.data?.State?.Running !== true) {
-      // Failure after start — attempt rollback
-      tx.state = 'rolling_back';
-      txStore.saveTransaction(tx);
-      await recreateAdapter.stopContainer(newContainerId, { stopTimeout: 5 });
-      await recreateAdapter.deleteContainer(newContainerId, { removeVolumes: false });
-      await recreateAdapter.renameContainer(target.containerId, originalName);
-      await recreateAdapter.startContainer(target.containerId);
-      tx.state = 'rolled_back';
-      txStore.saveTransaction(tx);
-      return {
-        ok: false,
-        status: 500,
-        error: operationError('verification_failed', 'Replacement container crashed on startup; previous version restored.'),
-      };
-    }
-
-    // 14. Cleanup old temporary container (volumes preserved via v=0)
-    await recreateAdapter.deleteContainer(target.containerId, { removeVolumes: false });
+    const newContainerId = rec.newId;
 
     // 15. Complete transaction
     tx.state = 'completed';
@@ -430,6 +348,7 @@ export async function executeUpdate({ targetRef, confirmationToken, actor = null
     txStore.unmarkContainerUpdating(target.containerId);
     if (target.containerName) txStore.unmarkContainerUpdating(target.containerName);
     release(target.containerId);
+    try { model.invalidateDiscovery(); } catch {}
   }
 }
 

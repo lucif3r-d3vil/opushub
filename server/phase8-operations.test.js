@@ -32,6 +32,7 @@ let confirmation = null;
 let locks = null;
 let targetsModule = null;
 let registry = null;
+let permissions = null;
 let store = null;
 let audit = null;
 let engine = null;
@@ -122,6 +123,7 @@ test.before(async () => {
   locks = await import('./operations/locks.js');
   targetsModule = await import('./operations/targets.js');
   registry = await import('./operations/registry.js');
+  permissions = await import('./operations/permissions.js');
   store = await import('./operations/store.js');
   audit = await import('./operations/audit.js');
   engine = await import('./operations/engine.js');
@@ -149,22 +151,28 @@ test.beforeEach(() => {
 
 /* --------------------------- 1. the action registry ------------------------ */
 
-test('the registry holds exactly the three approved lifecycle actions', () => {
-  assert.deepEqual(registry.ACTION_IDS, ['container.start', 'container.restart', 'container.stop']);
+test('the registry holds the approved lifecycle actions first, and every action is fully declared', () => {
+  // the full frozen set is proved in phase8-proof.test.js; here: the Phase 8 three are still the
+  // first three, and every entry (Phase 8 or 10D) carries the same complete declaration
+  assert.deepEqual(registry.ACTION_IDS.slice(0, 3), ['container.start', 'container.restart', 'container.stop']);
   for (const id of registry.ACTION_IDS) {
     const a = registry.getAction(id);
-    assert.ok(a.permission.startsWith('operations.container.'), `${id} declares an operation permission`);
+    assert.ok(a.permission.startsWith('operations.'), `${id} declares an operation permission`);
     assert.ok(['none', 'normal', 'strong'].includes(a.confirmation), `${id} declares a confirmation strength`);
     assert.ok(['low', 'medium', 'high'].includes(a.risk), `${id} declares a risk`);
     assert.ok(a.timeoutMs > 0 && a.verifyMs > 0, `${id} is bounded`);
-    assert.ok(['start', 'stop', 'restart'].includes(a.adapter), `${id} maps to an approved adapter method`);
+    assert.ok(typeof a.adapter === 'string' && a.adapter.length, `${id} maps to a named adapter method`);
+    assert.ok(typeof a.params === 'string', `${id} declares a parameter schema`);
+  }
+  for (const id of ['container.start', 'container.restart', 'container.stop']) {
+    assert.ok(['start', 'stop', 'restart'].includes(registry.getAction(id).adapter), `${id} maps to a lifecycle adapter method`);
   }
 });
 
 test('no other action is reachable, whatever it is called', async () => {
   const target = { type: 'service', id: 'jellyfin' };
   let n = 0;
-  for (const action of ['container.remove', 'container.kill', 'container.exec', 'docker.exec', 'image.pull', 'compose.up', 'shell', '../../exec', '', null, 42, { a: 1 }, ['container.stop']]) {
+  for (const action of ['container.exec', 'docker.exec', 'container.prune', 'compose.up', 'compose.exec', 'shell', '../../exec', '', null, 42, { a: 1 }, ['container.stop']]) {
     // the per-session rate limit is a real control (and tested on its own below); clear it here
     // so this loop is about the action registry and nothing else
     if (++n % 5 === 0) locks._resetLimits();
@@ -265,10 +273,12 @@ test('a replaced container is detected when the engine is re-read just before wr
 /* --------------------------- 3. permissions & roles ------------------------ */
 
 test('the administrator holds every operation permission; a viewer holds none', () => {
-  assert.deepEqual([...registry.OPERATION_PERMISSIONS].sort(), [
-    'operations.container.restart', 'operations.container.start', 'operations.container.stop',
-  ].sort());
-  assert.equal(registry.OPERATION_PERMISSIONS.length, 3);
+  for (const p of ['operations.container.restart', 'operations.container.start', 'operations.container.stop']) {
+    assert.ok(registry.OPERATION_PERMISSIONS.includes(p), p);
+  }
+  const perms = permissions.permissionsForRole('administrator');
+  for (const p of registry.OPERATION_PERMISSIONS) assert.ok(perms.includes(p), `admin holds ${p}`);
+  assert.deepEqual([...permissions.permissionsForRole('viewer')], []);
 });
 
 test('an unauthenticated request cannot reach any operations route', async () => {
@@ -299,7 +309,10 @@ test('a cross-site request is refused by the CSRF gate before the engine sees it
 
 test('an account without the permission is refused every operation', async () => {
   const target = { type: 'service', id: 'jellyfin' };
+  let n = 0;
   for (const action of registry.ACTION_IDS) {
+    // the per-session rate limit is a real control (tested on its own); it is not what this loop is about
+    if (++n % 4 === 0) locks._resetLimits();
     const r = await dryRun(action, target) && await post('/api/v1/operations/dry-run', { action, target }, null, VIEWER_COOKIE);
     assert.equal(r.status, 403, `${action} must be refused for a viewer`);
     assert.equal(r.json.operation.error.code, 'not_permitted');
@@ -310,9 +323,10 @@ test('an account without the permission is refused every operation', async () =>
 test('the overview tells the caller exactly which actions it may run', async () => {
   const mine = await get('/api/v1/operations');
   assert.equal(mine.status, 200);
-  assert.deepEqual(mine.json.actions.map((a) => a.permitted), [true, true, true]);
+  assert.ok(mine.json.actions.length >= 3);
+  assert.ok(mine.json.actions.every((a) => a.permitted === true), 'the administrator may run every action');
   const theirs = await get('/api/v1/operations', null, VIEWER_COOKIE);
-  assert.deepEqual(theirs.json.actions.map((a) => a.permitted), [false, false, false]);
+  assert.ok(theirs.json.actions.every((a) => a.permitted === false), 'a viewer may run none');
   assert.equal(theirs.json.actor.role, 'viewer');
 });
 
@@ -746,7 +760,7 @@ test('the operations API is inert: no route runs anything on its own', async () 
   assert.equal(overview.status, 200);
   assert.equal(overview.json.docker.channel, 'shared');
   assert.ok(Array.isArray(overview.json.actions));
-  assert.equal(overview.json.actions.length, 3);
+  assert.equal(overview.json.actions.length, registry.ACTION_IDS.length);
   assert.equal(typeof overview.json.counts.running, 'number');
   // reading the operations surface never touches the engine in a mutating way
   assert.deepEqual(wirePosts(), []);

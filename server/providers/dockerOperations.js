@@ -7,21 +7,26 @@
 // unreadable. So: two modules, two guarantees.
 //
 //   DockerReadProvider        (docker.js)             GET only; no mutation endpoint exists in it
-//   DockerOperationsAdapter   (this file)             three endpoints, three methods, no more
+//   DockerOperationsAdapter   (this file)             six lifecycle endpoints, six methods, no more
+//   DockerControlAdapter      (updates/recreateAdapter.js)  the enumerated create/recreate surface
 //
 // What exists here
 // ----------------
 //   POST /v<api>/containers/<id>/start
 //   POST /v<api>/containers/<id>/stop
 //   POST /v<api>/containers/<id>/restart
+//   POST /v<api>/containers/<id>/pause      (Phase 10D)
+//   POST /v<api>/containers/<id>/unpause    (Phase 10D)
+//   POST /v<api>/containers/<id>/kill       (Phase 10D — the daemon's default signal, SIGKILL)
 //
 // What does NOT exist here, and must never be added without revisiting the whole phase
 // ------------------------------------------------------------------------------------
 //   • no request(method, path) / dockerCall(...) / execute(...) — there is no generic helper, and
 //     `post()` below is module-private and takes only a path suffix from a frozen allow-list
-//   • no `/exec`, `/kill`, `/remove`, `/prune`, `/commit`, `/rename`, `/update`, `/pause`,
-//     `/unpause`, `/attach`, `/resize`, `/copy`, `/archive`, no `/images/*`, `/volumes/*`,
-//     `/networks/*`, `/containers/create`, no compose endpoints
+//   • no exec, `/remove`, `/prune`, `/commit`, `/rename`, `/update`, `/attach`, `/resize`,
+//     `/copy`, `/archive`, no `/images/*`, `/volumes/*`, `/networks/*`, `/containers/create`, no
+//     compose endpoints — the create/recreate surface lives in the control adapter, which is
+//     enumerated and proven separately
 //   • no query parameters at all (no `t=`, no `force=`, no `signal=`) — every call is exactly
 //     the daemon's default lifecycle behaviour for that endpoint
 //   • no request body
@@ -42,6 +47,9 @@ const OP_PATHS = Object.freeze({
   start: '/start',
   stop: '/stop',
   restart: '/restart',
+  pause: '/pause',
+  unpause: '/unpause',
+  kill: '/kill',
 });
 
 const CONTAINER_ID = /^[0-9a-f]{12}$|^[0-9a-f]{64}$/;
@@ -218,6 +226,21 @@ export function stopContainer(id, { timeoutMs = 15_000 } = {}) {
 /** Restart a container. */
 export function restartContainer(id, { timeoutMs = 25_000 } = {}) {
   return post('restart', id, timeoutMs);
+}
+
+/** Pause every process in a running container (cgroup freezer). */
+export function pauseContainer(id, { timeoutMs = 10_000 } = {}) {
+  return post('pause', id, timeoutMs);
+}
+
+/** Resume a paused container. */
+export function unpauseContainer(id, { timeoutMs = 10_000 } = {}) {
+  return post('unpause', id, timeoutMs);
+}
+
+/** Kill a running container with the daemon's default signal. No `signal=` parameter exists. */
+export function killContainer(id, { timeoutMs = 10_000 } = {}) {
+  return post('kill', id, timeoutMs);
 }
 
 /** Test/ops visibility — the endpoint set is the security boundary, so let tests read it. */

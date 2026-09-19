@@ -158,7 +158,15 @@ export const FLEET = FIXTURES.filter((f) => !HIDE.has(String(f.Names[0]).replace
 const HEALTHY = new Set(['jellyfin', 'immich', 'nextcloud', 'vaultwarden', 'radarr', 'postgres', 'redis', 'photos-db', 'mariadb']);
 const UNHEALTHY = new Set(['navidrome']);
 
+/** Networks attached at runtime (Phase 10D network attach/detach), by container id. */
+export const EXTRA_NETWORKS = new Map();
+/** Networks created at runtime (Phase 10D stacks), by name. */
+export const CREATED_NETWORKS = new Map();
+/** Volumes created at runtime, by name. */
+export const CREATED_VOLUMES = new Map();
+
 function inspectPayload(fx) {
+  if (fx.Created10D) return inspectCreated(fx);
   const running = fx.State === 'running';
   const name = fx.Names[0].slice(1);
   const project = fx.Labels['com.docker.compose.project'];
@@ -171,6 +179,8 @@ function inspectPayload(fx) {
   if (project) nets[`${project}_default`] = { IPAddress: '172.28.0.5', Gateway: '172.28.0.1', Aliases: [name], MacAddress: '02:42:ac:1c:00:05' };
   if (String(fx.Labels['traefik.docker.network'] || '') === 'proxy' || name === 'traefik') nets.proxy = { IPAddress: '172.29.0.7', Gateway: '172.29.0.1', Aliases: [name], MacAddress: '02:42:ac:1d:00:07' };
   if (!project && name !== 'traefik') nets.bridge = { IPAddress: '172.17.0.3', Gateway: '172.17.0.1', Aliases: [], MacAddress: '02:42:ac:11:00:03' };
+  for (const [n, cfg] of (EXTRA_NETWORKS.get(fx.Id) || new Map())) nets[n] = { IPAddress: '172.30.0.9', Gateway: '172.30.0.1', Aliases: cfg?.Aliases || [], MacAddress: '02:42:ac:1e:00:09' };
+  for (const n of fx.DetachedNetworks || []) delete nets[n];
   const mounts = [];
   if (name === 'jellyfin') {
     mounts.push(
@@ -202,9 +212,50 @@ function inspectPayload(fx) {
       OOMKilled: false,
       Health: health ? { Status: health, FailingStreak: health === 'healthy' ? 0 : 3 } : undefined,
     },
-    HostConfig: { PortBindings: portBindings, RestartPolicy: { Name: project ? 'unless-stopped' : name === 'restart-loop' ? 'always' : 'no' } },
+    HostConfig: {
+      PortBindings: portBindings,
+      RestartPolicy: fx.RestartPolicyOverride || { Name: project ? 'unless-stopped' : name === 'restart-loop' ? 'always' : 'no' },
+      NetworkMode: project ? `${project}_default` : 'bridge',
+      Memory: fx.MemoryOverride || 0, MemorySwap: 0, NanoCpus: fx.NanoCpusOverride || 0, CpuShares: 0,
+      ...(name === 'host-pid' ? { PidMode: 'host' } : {}),
+      ...(name === 'privileged-box' ? { Privileged: true } : {}),
+    },
     RestartCount: name === 'navidrome' ? 2 : name === 'restart-loop' ? 42 : 0,
     Mounts: mounts,
+    NetworkSettings: { Networks: nets },
+  };
+}
+
+/** A container the control plane created during a test: its inspect is its create body. */
+function inspectCreated(fx) {
+  const running = fx.State === 'running';
+  const body = fx.Config || {};
+  const hc = body.HostConfig || {};
+  const nets = {};
+  const primary = hc.NetworkMode && !['bridge', 'host', 'none'].includes(hc.NetworkMode) ? hc.NetworkMode : (hc.NetworkMode === 'host' || hc.NetworkMode === 'none' ? null : 'bridge');
+  if (primary) nets[primary] = { IPAddress: '172.31.0.4', Gateway: '172.31.0.1', Aliases: body.NetworkingConfig?.EndpointsConfig?.[primary]?.Aliases || [], MacAddress: '02:42:ac:1f:00:04' };
+  for (const [n, cfg] of (EXTRA_NETWORKS.get(fx.Id) || new Map())) nets[n] = { IPAddress: '172.30.0.9', Gateway: '172.30.0.1', Aliases: cfg?.Aliases || [], MacAddress: '02:42:ac:1e:00:09' };
+  return {
+    Id: fx.Id,
+    Name: fx.Names[0],
+    Created: new Date(fx.Created * 1000).toISOString(),
+    Config: {
+      Image: body.Image, Cmd: body.Cmd || null, Entrypoint: body.Entrypoint || null, Env: body.Env || [], Labels: body.Labels || {},
+      User: body.User, WorkingDir: body.WorkingDir, Hostname: body.Hostname, Tty: !!body.Tty, OpenStdin: !!body.OpenStdin,
+      StopSignal: body.StopSignal, StopTimeout: body.StopTimeout, Healthcheck: body.Healthcheck, ExposedPorts: body.ExposedPorts,
+    },
+    State: {
+      Status: fx.State, Running: running, Paused: fx.State === 'paused', Restarting: false,
+      StartedAt: running ? new Date(fx.StartedAtOverride || Date.now()).toISOString() : '0001-01-01T00:00:00Z',
+      FinishedAt: '0001-01-01T00:00:00Z', ExitCode: fx.ExitCodeOverride || 0, OOMKilled: false,
+    },
+    HostConfig: {
+      ...hc,
+      RestartPolicy: fx.RestartPolicyOverride || hc.RestartPolicy || { Name: 'no' },
+      Memory: fx.MemoryOverride ?? hc.Memory ?? 0, NanoCpus: fx.NanoCpusOverride ?? hc.NanoCpus ?? 0,
+    },
+    RestartCount: 0,
+    Mounts: fx.Mounts || [],
     NetworkSettings: { Networks: nets },
   };
 }
@@ -275,6 +326,13 @@ const EVENTS = [
   { time: 1789200200, Type: 'container', Action: 'health_status: unhealthy', Actor: { Attributes: { name: 'navidrome' } } },
 ];
 
+/** Images pulled at runtime and how many times (a pull changes the image id). */
+export const PULLED = new Map();
+/** Registry auth headers seen on pulls (tests assert they are present and never logged). */
+export const PULL_AUTH = [];
+let CREATED_SEQ = 0;
+const netId = (seed) => `${seed}net${'0'.repeat(57)}`.slice(0, 64);
+
 function findRef(ref) {
   return FLEET.find((f) => f.Names[0] === `/${ref}` || f.Id === ref || f.Id.startsWith(ref));
 }
@@ -341,7 +399,7 @@ export function createHandler({ log = null } = {}) {
     // Nothing else in this mock accepts POST. That is the point: a test can assert that the
     // engine was never asked for anything outside this list, because the engine cannot answer
     // anything outside this list.
-    m = p.match(/^\/containers\/([^/]+)\/(start|stop|restart)$/);
+    m = p.match(/^\/containers\/([^/]+)\/(start|stop|restart|pause|unpause|kill)$/);
     if (req.method === 'POST' && m) {
       const op = m[2];
       const fx = findRef(decodeURIComponent(m[1]));
@@ -353,6 +411,12 @@ export function createHandler({ log = null } = {}) {
         if (process.env.OPUSHUB_MOCK_OP_NOSTATE) return send(204, ''); // accepted, state unchanged
         if (op === 'start') {
           if (fx.State === 'running') return send(304, '');
+          if (fx.ExitCodeOverride) {
+            // a container that dies right after starting (Phase 10D rollback tests)
+            fx.State = 'exited';
+            fx.Status = `Exited (${fx.ExitCodeOverride}) 0 seconds ago`;
+            return send(204, '');
+          }
           fx.State = 'running';
           fx.StartedAtOverride = Date.now() - 1000;
           fx.Status = 'Up 1 second';
@@ -360,6 +424,18 @@ export function createHandler({ log = null } = {}) {
           if (fx.State === 'exited') return send(304, '');
           fx.State = 'exited';
           fx.Status = 'Exited (0) 1 second ago';
+        } else if (op === 'pause') {
+          if (fx.State !== 'running') return send(409, { message: 'Container is not running' });
+          fx.State = 'paused';
+          fx.Status = 'Up 1 second (Paused)';
+        } else if (op === 'unpause') {
+          if (fx.State !== 'paused') return send(409, { message: 'Container is not paused' });
+          fx.State = 'running';
+          fx.Status = 'Up 1 second';
+        } else if (op === 'kill') {
+          if (fx.State !== 'running' && fx.State !== 'paused') return send(409, { message: 'Container is not running' });
+          fx.State = 'exited';
+          fx.Status = 'Exited (137) 1 second ago';
         } else {
           // restart: the container runs again with a NEW start time — that change is what
           // verification checks, so a restart cannot be reported on the strength of "running"
@@ -379,6 +455,13 @@ export function createHandler({ log = null } = {}) {
       const until = Number(url.searchParams.get('until')) || Number.MAX_SAFE_INTEGER;
       const lines = EVENTS.filter((e) => e.time >= since && e.time <= until).map((e) => JSON.stringify(e));
       return send(200, lines.join('\n') + (lines.length ? '\n' : ''), 'application/json');
+    }
+    m = p.match(/^\/images\/(.+)\/json$/);
+    if (req.method === 'GET' && m) {
+      const ref = decodeURIComponent(m[1]);
+      if (/missing|nonexistent|not-present/.test(ref) && !PULLED.has(ref)) return send(404, { message: 'No such image' });
+      const bump = PULLED.get(ref) || 0;
+      return send(200, { Id: `sha256:${String(bump).padStart(2, '0')}${'a'.repeat(62)}`, RepoTags: [ref], RepoDigests: [`${ref.split(':')[0]}@sha256:${'b'.repeat(64)}`], Architecture: 'amd64', Os: 'linux', Created: '2026-09-01T08:00:00Z', Size: 12345678 });
     }
     if (req.method === 'GET' && p === '/images/json') {
       return send(200, FLEET.slice(0, 8).map((f, i) => ({ Id: `sha256:${String(i).repeat(64)}`, RepoTags: [f.Image], Size: 100_000_000 + i })));
@@ -404,7 +487,6 @@ export function createHandler({ log = null } = {}) {
       // project, plus the shared `proxy` network and the default `bridge`. TEST DATA ONLY.
       const projects = [...new Set(FLEET.map((f) => f.Labels['com.docker.compose.project']).filter(Boolean))];
       const nets = [];
-      const netId = (seed) => `${seed}net${'0'.repeat(57)}`.slice(0, 64);
       for (const project of projects) {
         const members = FLEET.filter((f) => f.Labels['com.docker.compose.project'] === project);
         const containers = {};
@@ -430,6 +512,7 @@ export function createHandler({ log = null } = {}) {
         Id: netId('bridge'), Name: 'bridge', Driver: 'bridge', Scope: 'local',
         Internal: false, Attachable: false, Ingress: false, Created: '2026-01-01T00:00:00Z', Containers: {},
       });
+      for (const [name, n] of CREATED_NETWORKS) nets.push({ Id: n.Id, Name: name, Driver: n.Driver || 'bridge', Scope: 'local', Internal: !!n.Internal, Attachable: true, Ingress: false, Labels: n.Labels || {}, Created: '2026-09-19T00:00:00Z', Containers: {} });
       return send(200, nets);
     }
     if (req.method === 'GET' && p === '/volumes') {
@@ -464,13 +547,62 @@ export function createHandler({ log = null } = {}) {
       if (fromImage.includes('fake-digest') || fromImage.includes('nonexistent') || fromImage.includes('invalid')) {
         return send(404, { message: `manifest unknown or not found: ${fromImage}` });
       }
+      if (req.headers['x-registry-auth']) PULL_AUTH.push({ image: fromImage, header: String(req.headers['x-registry-auth']) });
+      PULLED.set(fromImage, (PULLED.get(fromImage) || 0) + 1);
       return send(200, { status: 'Download complete' });
+    }
+    m = p.match(/^\/containers\/([^/]+)\/update$/);
+    if (req.method === 'POST' && m) {
+      const fx = findRef(decodeURIComponent(m[1]));
+      if (!fx) return send(404, { message: 'No such container' });
+      let bodyData = {};
+      try { const chunks = []; for await (const c of req) chunks.push(c); bodyData = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
+      if (bodyData.RestartPolicy) fx.RestartPolicyOverride = { Name: bodyData.RestartPolicy.Name, MaximumRetryCount: bodyData.RestartPolicy.MaximumRetryCount || 0 };
+      if (bodyData.Memory !== undefined) fx.MemoryOverride = bodyData.Memory;
+      if (bodyData.NanoCpus !== undefined) fx.NanoCpusOverride = bodyData.NanoCpus;
+      return send(200, { Warnings: [] });
+    }
+    m = p.match(/^\/networks\/([^/]+)\/disconnect$/);
+    if (req.method === 'POST' && m) {
+      let bodyData = {};
+      try { const chunks = []; for await (const c of req) chunks.push(c); bodyData = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
+      const fx = findRef(String(bodyData.Container || ''));
+      if (!fx) return send(404, { message: 'No such container' });
+      const net = decodeURIComponent(m[1]);
+      const extra = EXTRA_NETWORKS.get(fx.Id);
+      if (extra?.has(net)) { extra.delete(net); return send(200, {}); }
+      // detaching a fixture's built-in network: record it as removed via a negative override
+      (fx.DetachedNetworks ||= new Set()).add(net);
+      return send(200, {});
+    }
+    if (req.method === 'POST' && p === '/networks/create') {
+      let bodyData = {};
+      try { const chunks = []; for await (const c of req) chunks.push(c); bodyData = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
+      if (!bodyData.Name) return send(400, { message: 'name required' });
+      if (CREATED_NETWORKS.has(bodyData.Name)) return send(409, { message: 'network already exists' });
+      CREATED_NETWORKS.set(bodyData.Name, { ...bodyData, Id: netId(bodyData.Name) });
+      return send(201, { Id: netId(bodyData.Name), Warning: '' });
+    }
+    m = p.match(/^\/networks\/([^/]+)$/);
+    if (req.method === 'DELETE' && m) {
+      const name = decodeURIComponent(m[1]);
+      if (!CREATED_NETWORKS.has(name)) return send(404, { message: 'No such network' });
+      CREATED_NETWORKS.delete(name);
+      return send(204, '');
+    }
+    if (req.method === 'POST' && p === '/volumes/create') {
+      let bodyData = {};
+      try { const chunks = []; for await (const c of req) chunks.push(c); bodyData = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
+      if (!bodyData.Name) return send(400, { message: 'name required' });
+      CREATED_VOLUMES.set(bodyData.Name, { ...bodyData });
+      return send(201, { Name: bodyData.Name, Driver: 'local', Mountpoint: `/var/lib/docker-mock/volumes/${bodyData.Name}/_data` });
     }
     m = p.match(/^\/containers\/([^/]+)\/rename$/);
     if (req.method === 'POST' && m) {
       const fx = findRef(decodeURIComponent(m[1]));
       if (!fx) return send(404, { message: 'No such container' });
       const newName = url.searchParams.get('name') || 'renamed';
+      if (FLEET.some((f) => f !== fx && f.Names[0] === `/${newName}`)) return send(409, { message: 'Conflict. name already in use' });
       fx.Names = [`/${newName}`];
       return send(204, '');
     }
@@ -482,9 +614,12 @@ export function createHandler({ log = null } = {}) {
         bodyData = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       } catch {}
       const newName = url.searchParams.get('name') || 'new-container';
-      const id64 = 'e1e2e3e4e5e6'.padEnd(64, '0');
+      if (FLEET.some((f) => f.Names[0] === `/${newName}`)) return send(409, { message: `Conflict. The container name "/${newName}" is already in use` });
+      if (/missing|nonexistent|not-present/.test(bodyData.Image || '') && !PULLED.has(bodyData.Image)) return send(404, { message: 'No such image' });
+      const id64 = `e1e2e3${(++CREATED_SEQ).toString(16).padStart(6, '0')}`.padEnd(64, '0');
       const newFx = {
         Id: id64,
+        Created10D: true,
         Names: [`/${newName}`],
         Image: bodyData.Image || 'updated:latest',
         ImageID: `sha256:${'9'.repeat(64)}`,
@@ -495,6 +630,7 @@ export function createHandler({ log = null } = {}) {
         Created: Math.floor(Date.now() / 1000),
         Config: { ...bodyData },
         HostConfig: bodyData.HostConfig || {},
+        ExitCodeOverride: /exit-immediately/.test(newName) ? 1 : 0,
         Mounts: (bodyData.HostConfig?.Binds || []).map((b) => {
           const parts = b.split(':');
           return { Type: 'bind', Source: parts[0], Destination: parts[1], RW: parts[2] !== 'ro' };
@@ -505,12 +641,25 @@ export function createHandler({ log = null } = {}) {
     }
     m = p.match(/^\/networks\/([^/]+)\/connect$/);
     if (req.method === 'POST' && m) {
+      let bodyData = {};
+      try { const chunks = []; for await (const c of req) chunks.push(c); bodyData = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
+      const net = decodeURIComponent(m[1]);
+      if (net === 'no-such-network') return send(404, { message: 'network not found' });
+      const fx = findRef(String(bodyData.Container || ''));
+      if (!fx) return send(404, { message: 'No such container' });
+      if (!EXTRA_NETWORKS.has(fx.Id)) EXTRA_NETWORKS.set(fx.Id, new Map());
+      EXTRA_NETWORKS.get(fx.Id).set(net, bodyData.EndpointConfig || {});
       return send(200, {});
     }
     m = p.match(/^\/containers\/([^/]+)$/);
     if (req.method === 'DELETE' && m) {
       const idx = FLEET.findIndex((f) => f.Id.startsWith(m[1]) || f.Names[0] === `/${m[1]}`);
-      if (idx >= 0) FLEET.splice(idx, 1);
+      if (idx < 0) return send(404, { message: 'No such container' });
+      const fx = FLEET[idx];
+      if (url.searchParams.get('v') === '1') return send(400, { message: 'mock engine: volume removal is never allowed' });
+      if ((fx.State === 'running' || fx.State === 'paused') && url.searchParams.get('force') !== '1') return send(409, { message: 'You cannot remove a running container. Stop the container before attempting removal or force remove' });
+      FLEET.splice(idx, 1);
+      EXTRA_NETWORKS.delete(fx.Id);
       return send(204, '');
     }
 

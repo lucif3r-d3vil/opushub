@@ -114,6 +114,8 @@ export function publicOperation(op) {
       : null,
     auditId: op.auditId ?? null,
     dryRun: op.dryRun === true,
+    // Phase 10D — the plan that was confirmed (already browser-safe: env values masked)
+    plan: op.plan ?? null,
   };
 }
 

@@ -15,6 +15,18 @@ export const PERMISSIONS = Object.freeze({
   START: 'operations.container.start',
   RESTART: 'operations.container.restart',
   STOP: 'operations.container.stop',
+  // Phase 10D
+  PAUSE: 'operations.container.pause',
+  KILL: 'operations.container.kill',
+  CONFIGURE: 'operations.container.configure',   // rename, network attach/detach, in-place update, edit
+  RECREATE: 'operations.container.recreate',     // recreate, change image
+  CREATE: 'operations.container.create',         // create, duplicate, catalog install
+  REMOVE: 'operations.container.remove',
+  IMAGE_PULL: 'operations.image.pull',
+  STACK_DEPLOY: 'operations.stack.deploy',
+  STACK_REMOVE: 'operations.stack.remove',
+  STACK_MANAGE: 'operations.stack.manage',       // create/edit managed stack definitions
+  REGISTRY_MANAGE: 'operations.registry.manage', // registries (credentials) — server-side config
 });
 
 /**
@@ -33,13 +45,13 @@ export const ROLES = Object.freeze({
     id: 'administrator',
     label: 'Administrator',
     description: 'Full control: every approved operation.',
-    permissions: Object.freeze(['operations.container.start', 'operations.container.restart', 'operations.container.stop']),
+    permissions: Object.freeze(Object.values(PERMISSIONS)),
   }),
   operator: Object.freeze({
     id: 'operator',
     label: 'Operator',
     description: 'Reserved: lifecycle operations without the high-risk ones.',
-    permissions: Object.freeze(['operations.container.start', 'operations.container.restart']),
+    permissions: Object.freeze(['operations.container.start', 'operations.container.restart', 'operations.container.pause', 'operations.image.pull']),
   }),
   viewer: Object.freeze({
     id: 'viewer',

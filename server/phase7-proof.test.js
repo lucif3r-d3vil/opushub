@@ -83,6 +83,13 @@ test('no other server module talks to the engine socket', () => {
         .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
       if (/OPUSHUB_DOCKER_SOCKET|DOCKER_HOST|docker\.sock/.test(src)
         && !full.endsWith('server/providers/docker.js') && !full.endsWith('server/env.js')) {
+        // Phase 10D — the container configuration policy names the socket path in order to
+        // REFUSE a container that mounts it. It is a deny-list, not a client: it must contain no
+        // transport at all.
+        if (full.endsWith('server/containers/policy.js')) {
+          assert.ok(!/node:net|node:http|socketPath|request\(|fetch\(/.test(src), 'containers/policy.js must not contain a transport');
+          continue;
+        }
         offenders.push(path.relative(ROOT, full));
       }
     }

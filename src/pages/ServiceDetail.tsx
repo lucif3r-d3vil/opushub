@@ -18,6 +18,7 @@ import { StateBadge, TargetLine, TypeChip, UptimeValue } from '../components/mon
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
 import { ServiceActions, RecentOperations } from '../components/ServiceActions';
+import { openContainerEditor } from '../components/ContainerEditor';
 import { useOperationsCapabilities } from '../lib/operations';
 import { UpdateItemRow } from '../components/Updates';
 import type { ContainerUpdateRecord } from '../lib/types';
@@ -188,6 +189,14 @@ export default function ServiceDetail() {
             ) : (
               <>
                 <ServiceActions name={s.name} group={s.group} state={c.state.status} dockerAvailable={data.dockerAvailable} />
+                {opsCap.can('container.edit') && (
+                  <div className="cedit-launch">
+                    <button className="btn btn-sm" onClick={() => openContainerEditor(s.name, s.group, 'edit')}>Edit configuration…</button>
+                    <button className="btn btn-sm btn-quiet" onClick={() => openContainerEditor(s.name, s.group, 'change_image')}>Change image…</button>
+                    <button className="btn btn-sm btn-quiet" onClick={() => openContainerEditor(s.name, s.group, 'networks')}>Networks…</button>
+                    <button className="btn btn-sm btn-quiet" onClick={() => openContainerEditor(s.name, s.group, 'duplicate')}>Duplicate…</button>
+                  </div>
+                )}
                 <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>
                   Each one asks first: OpusHub checks permission, target and Docker, shows you what it would do,
                   and only then runs. The result is verified against the engine and recorded in Activity.
