@@ -394,12 +394,7 @@ const alertsDoc = {
     },
   ],
   counts: { critical: 0, warning: 1 },
-  channels: [
-    { id: 'webhook', label: 'Webhook', blurb: 'POST the alert as JSON to a URL you choose.', status: 'coming-later', configured: false },
-    { id: 'email', label: 'Email', blurb: 'Send alerts through your own SMTP server.', status: 'coming-later', configured: false },
-    { id: 'telegram', label: 'Telegram', blurb: 'Message a chat via a bot token you create.', status: 'coming-later', configured: false },
-    { id: 'slack', label: 'Slack', blurb: 'Post to a channel via an incoming webhook.', status: 'coming-later', configured: false },
-  ],
+  // no channels field: delivery status lives with the canonical Phase 10B providers now
 };
 const updatesDoc = {
   check: { state: 'available', current: '0.1.0', latest: '0.2.0', url: 'https://github.com/lucif3r-d3vil/opushub/releases/tag/v0.2.0', checkedAt: Date.now() - 3600_000, reason: '0.2.0 is published; this install runs 0.1.0' },
@@ -2137,14 +2132,16 @@ export async function runWebTests(): Promise<WebResult> {
     expect(lastQuery.includes('severity=warning'), `the severity filter never reached the API (${lastQuery})`);
   });
 
-  /* 7E — the notifications tab names the channels and their honest status */
-  await test('settings notifications names the channels as coming later', async (h) => {
+  /* 7E/10B — the notifications tab is the canonical provider UI: no legacy channel list,
+     no "coming later" anywhere, and the active-alert count survives */
+  await test('settings notifications shows the canonical providers and no legacy channels', async (h) => {
     await h.mount(<TestApp entry="/settings/notifications"><Hub /></TestApp>);
-    await h.waitFor(() => text().includes('Webhook'), 'the channels list');
-    for (const name of ['Webhook', 'Email', 'Telegram', 'Slack']) {
-      expect(text().includes(name), `${name} is not listed`);
+    await h.waitFor(() => text().includes('Telegram provider'), 'the canonical provider blocks');
+    for (const name of ['Notification Center', 'Browser notifications', 'Webhook provider', 'Telegram provider']) {
+      expect(text().includes(name), `${name} block is missing`);
     }
-    expect(text().includes('Coming later'), 'the honest status is missing');
+    expect(!text().includes('Coming later'), 'a legacy "coming later" channel is still shown');
+    expect(!text().includes('Alert channels'), 'the legacy alert-channels block is still shown');
     expect(text().includes('1 active alert'), 'the active-alert count is missing');
   });
 

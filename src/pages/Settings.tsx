@@ -1663,7 +1663,6 @@ function normalizeSymbolInput(raw: string): { symbol: string | null; reason: str
 
 function NotificationsTab() {
   const { data: alertsData } = usePolled<AlertsDoc>('/api/alerts', 30_000);
-  const channels = alertsData?.channels || [];
   const [policy, setPolicy] = useState<any>(null);
   const [webhook, setWebhook] = useState<any>(null);
   const [saving, setSaving] = useState(false);
@@ -1917,20 +1916,8 @@ function NotificationsTab() {
         {err && <p className="stale-note" style={{ color: 'var(--fail)', marginTop: 8 }}>{err}</p>}
       </Block>
 
-      <Block title="Alert channels (legacy)" aside={alertsData ? <span className="stale-note">{alertsData.alerts.length} active</span> : undefined}>
-        {!alertsData && <Loading what="notification channels" />}
-        <div className="editor-list">
-          {channels.map((c: any) => (
-            <div className="editor-item" key={c.id}>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <b style={{ fontWeight: 560 }}>{c.label}</b>
-                <div className="stale-note">{c.blurb}</div>
-              </span>
-              <span className="chip">{c.configured ? 'Configured' : c.status === 'ready' ? 'Not configured' : 'Coming later'}</span>
-            </div>
-          ))}
-        </div>
-      </Block>
+      {/* Delivery status lives in each provider block above (Webhook, Telegram) — there is
+          one notification architecture, and this page is its whole surface. */}
     </>
   );
 }

@@ -989,12 +989,10 @@ export interface AlertItem {
   firedAt: number;
   acknowledged: boolean; ackAt: number | null;
 }
-export interface AlertChannel { id: string; label: string; blurb: string; status: string; configured: boolean }
 export interface AlertsDoc {
   at: string;
   alerts: AlertItem[];
   counts: { critical: number; warning: number };
-  channels: AlertChannel[];
 }
 
 /* ------------------------------------------------------------------ */
