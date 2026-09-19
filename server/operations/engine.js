@@ -20,6 +20,20 @@ import * as dockerOps from '../providers/dockerOperations.js';
 import { logEvent } from '../activity.js';
 import { evaluateServiceHealth } from '../healthModel.js';
 import * as model from '../model.js';
+
+// Phase 10B — event bus publish (lazy)
+let _publishEvent = null;
+async function getPublish() {
+  if (_publishEvent) return _publishEvent;
+  try {
+    const mod = await import('../events/index.js');
+    _publishEvent = mod.publishEvent;
+    return _publishEvent;
+  } catch { return null; }
+}
+function publishEventSafe(desc) {
+  getPublish().then((fn) => { if (fn) try { fn(desc); } catch {} }).catch(() => {});
+}
 import { getAction, isKnownAction, registrySummary } from './registry.js';
 import { describeActor, can } from './permissions.js';
 import { parseTargetRef, revalidateTarget } from './targets.js';
@@ -91,6 +105,16 @@ export async function requestOperation({ actionId, targetRef, actor = null, sess
     confirmation: { required: true, mode, tokenIssued: true, consumedAt: null },
   }));
   store.append(awaiting, 'confirmation', { at, note: `${mode} confirmation issued` });
+
+  publishEventSafe({
+    type: 'operation.requested',
+    severity: 'info',
+    source: 'operation',
+    subject: { kind: 'service', id: target?.containerId || op.id, label: target?.label || target?.containerName || op.action, href: `/services` },
+    message: `${action.id} requested for ${target?.label || target?.containerName || 'service'}`,
+    payload: { action: action.id, target: target?.containerName || null },
+    correlation: { operationId: op.id },
+  });
 
   return {
     operation: publicOperation(awaiting),
@@ -224,6 +248,16 @@ export async function executeOperation({ operationId = null, actionId, targetRef
 
   const running = store.update(op.id, (o) => ({ ...o, status: 'running', startedAt: Date.now() }));
   store.append(running, 'execution', { at: running.startedAt, note: `docker ${action.verb}` });
+
+  publishEventSafe({
+    type: 'operation.started',
+    severity: 'notice',
+    source: 'operation',
+    subject: { kind: 'service', id: target.containerId, label: target.label || target.containerName, href: `/services` },
+    message: `${action.id} started for ${target.label || target.containerName}`,
+    payload: { action: action.id, target: target.containerName },
+    correlation: { operationId: op.id },
+  });
 
   // Deliberately not awaited: the route answers now, the operation finishes on its own clock,
   // and the client follows the operation record. Bounded, never queued for later.
@@ -379,6 +413,42 @@ function settle(op, { status, error = null, result = null, verification = null, 
   store.put(next);
   store.append(next, 'completed', { at });
   logActivity(next);
+  // Phase 10B — publish operation completion events
+  try {
+    const target = next.target || {};
+    const subject = { kind: 'service', id: target.containerId || next.id, label: target.label || target.containerName || next.action, href: `/services` };
+    if (status === 'succeeded') {
+      publishEventSafe({
+        type: 'operation.completed',
+        severity: 'notice',
+        source: 'operation',
+        subject,
+        message: `${next.action} completed for ${subject.label}`,
+        payload: { action: next.action, state: verification?.state || null },
+        correlation: { operationId: next.id },
+      });
+    } else if (status === 'failed') {
+      publishEventSafe({
+        type: 'operation.failed',
+        severity: 'warning',
+        source: 'operation',
+        subject,
+        message: `${next.action} failed for ${subject.label}: ${error?.reason || 'failed'}`,
+        payload: { action: next.action, code: error?.code || null },
+        correlation: { operationId: next.id },
+      });
+    } else if (status === 'timed_out') {
+      publishEventSafe({
+        type: 'operation.timed_out',
+        severity: 'warning',
+        source: 'operation',
+        subject,
+        message: `${next.action} timed out for ${subject.label}`,
+        payload: { action: next.action },
+        correlation: { operationId: next.id },
+      });
+    }
+  } catch {}
   return next;
 }
 

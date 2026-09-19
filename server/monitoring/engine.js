@@ -22,6 +22,26 @@ import * as model from '../model.js';
 import * as docker from '../providers/docker.js';
 import { logEvent } from '../activity.js';
 import { STORE_FILES, createFlusher, docExists, readDoc, removeDoc, writeDoc } from './store.js';
+
+// Phase 10B — event bus publish (lazy to avoid circular)
+let _publishEvent = null;
+async function getPublish() {
+  if (_publishEvent) return _publishEvent;
+  try {
+    const mod = await import('../events/index.js');
+    _publishEvent = mod.publishEvent;
+    return _publishEvent;
+  } catch {
+    return null;
+  }
+}
+function publishEventSafe(descriptor) {
+  getPublish().then((fn) => {
+    if (fn) {
+      try { fn(descriptor); } catch {}
+    }
+  }).catch(() => {});
+}
 import {
   BOUNDS, MONITOR_TYPES, MonitorError, describeExpected, maintenanceActive, makeMonitor,
   monitorError, newMonitorId, normalizeSettings, normalizeStoredMonitor, publicMonitor,
@@ -402,6 +422,15 @@ function record(monitor, result, { settings = state.settings } = {}) {
       severity: suppression ? 'info' : 'warning', category: 'monitoring',
       signature: `incident.opened:${opened.id}`,
     });
+    publishEventSafe({
+      type: 'monitor.incident.opened',
+      severity: suppression ? 'info' : 'warning',
+      source: 'monitor',
+      subject: { kind: 'monitor', id: monitor.id, label: monitor.name, href: `/monitoring/${monitor.id}` },
+      message: `${monitor.name} incident opened: ${opened.reason}`,
+      payload: { reason: opened.reason, type: monitor.type, maintenance: suppression },
+      correlation: { monitorId: monitor.id, incidentId: opened.id },
+    });
   }
   if (before && !state.incidents.some((i) => i.id === before.id && i.status !== 'resolved')) {
     const resolved = state.incidents.find((i) => i.id === before.id) || before;
@@ -411,6 +440,15 @@ function record(monitor, result, { settings = state.settings } = {}) {
       meta: { monitorId: monitor.id, incidentId: resolved.id, durationMs: resolved.durationMs, resolvedBy: resolved.resolvedBy },
       severity: 'notice', category: 'monitoring',
       signature: `incident.resolved:${resolved.id}`,
+    });
+    publishEventSafe({
+      type: 'monitor.incident.recovered',
+      severity: 'notice',
+      source: 'monitor',
+      subject: { kind: 'monitor', id: monitor.id, label: monitor.name, href: `/monitoring/${monitor.id}` },
+      message: `${monitor.name} incident resolved after ${Math.round((resolved.durationMs || 0) / 1000)}s`,
+      payload: { durationMs: resolved.durationMs, reason: resolved.reason || null },
+      correlation: { monitorId: monitor.id, incidentId: resolved.id },
     });
   }
 
@@ -430,6 +468,15 @@ function logTransitions(monitor, { previous, result, maintenanceOpen }) {
   if (monitor.status === previous) return;
   if (monitor.status === 'down') {
     logEvent({ ...base, source: 'system', type: 'monitor.down', message: `${monitor.name} monitor went down${badge}: ${result.reason || 'the check failed'}`, severity: maintenanceOpen ? 'info' : 'warning', signature: `monitor.down:${monitor.id}` });
+    publishEventSafe({
+      type: 'monitor.state_changed',
+      severity: maintenanceOpen ? 'info' : 'warning',
+      source: 'monitor',
+      subject: { kind: 'monitor', id: monitor.id, label: monitor.name, href: `/monitoring/${monitor.id}` },
+      message: `${monitor.name} went down${badge}: ${result.reason || 'the check failed'}`,
+      payload: { from: previous, to: 'down', reason: result.reason || null, maintenance: maintenanceOpen, service: monitor.target?.service || null },
+      correlation: { monitorId: monitor.id },
+    });
     return;
   }
   if (monitor.status === 'up') {
@@ -437,10 +484,28 @@ function logTransitions(monitor, { previous, result, maintenanceOpen }) {
     // be broken. Announcing it would put an event in Activity for every monitor ever created.
     if (previous === 'pending' || previous === 'paused') return;
     logEvent({ ...base, source: 'system', type: 'monitor.recovered', message: `${monitor.name} recovered${badge}`, severity: 'notice', signature: `monitor.recovered:${monitor.id}` });
+    publishEventSafe({
+      type: 'monitor.state_changed',
+      severity: 'notice',
+      source: 'monitor',
+      subject: { kind: 'monitor', id: monitor.id, label: monitor.name, href: `/monitoring/${monitor.id}` },
+      message: `${monitor.name} recovered${badge}`,
+      payload: { from: previous, to: 'up', maintenance: maintenanceOpen, service: monitor.target?.service || null },
+      correlation: { monitorId: monitor.id },
+    });
     return;
   }
   if (monitor.status === 'degraded') {
     logEvent({ ...base, source: 'system', type: 'monitor.degraded', message: `${monitor.name} is degraded${badge}: ${result.reason || 'the check responded outside its expectations'}`, severity: maintenanceOpen ? 'info' : 'warning', signature: `monitor.degraded:${monitor.id}` });
+    publishEventSafe({
+      type: 'monitor.state_changed',
+      severity: maintenanceOpen ? 'info' : 'warning',
+      source: 'monitor',
+      subject: { kind: 'monitor', id: monitor.id, label: monitor.name, href: `/monitoring/${monitor.id}` },
+      message: `${monitor.name} is degraded${badge}: ${result.reason || 'check outside expectations'}`,
+      payload: { from: previous, to: 'degraded', reason: result.reason || null, maintenance: maintenanceOpen },
+      correlation: { monitorId: monitor.id },
+    });
     return;
   }
   if (monitor.status === 'recovering') {
@@ -662,6 +727,15 @@ export function setMaintenance(id, window, { actor = null, at = now() } = {}) {
       : `${monitor.name} maintenance ended${actor ? ` (${actor})` : ''}`,
     meta: { monitorId: monitor.id, until: window?.until ?? null, reason: window?.reason ?? null },
     severity: 'notice', category: 'monitoring',
+  });
+  publishEventSafe({
+    type: window ? 'monitor.maintenance.started' : 'monitor.maintenance.ended',
+    severity: 'notice',
+    source: 'monitor',
+    subject: { kind: 'monitor', id: monitor.id, label: monitor.name, href: `/monitoring/${monitor.id}` },
+    message: window ? `${monitor.name} entered maintenance until ${new Date(window.until).toISOString()}` : `${monitor.name} maintenance ended`,
+    payload: { until: window?.until ?? null, reason: window?.reason ?? null },
+    correlation: { monitorId: monitor.id },
   });
   schedulePersist();
   return monitor;

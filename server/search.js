@@ -12,6 +12,9 @@ import { ACTIONS, ACTION_IDS } from './operations/registry.js';
 import { searchEntries as monitoringSearchEntries } from './monitoring/engine.js';
 import { describeActor } from './operations/permissions.js';
 import * as dockerOps from './providers/dockerOperations.js';
+// Phase 10B — notifications and live events are destinations too
+import { listNotifications } from './notifications/store.js';
+import { readEvents as readLiveEvents } from './events/store.js';
 
 const PAGES = [
   { title: 'Hub', href: '/', hint: 'Your digital home', kind: 'page', keywords: ['home', 'start', 'dashboard'] },
@@ -90,7 +93,7 @@ export function scoreMatch(needle, ...fields) {
 const score = scoreMatch;
 
 /** Category weights — services and stacks rank highest: they are the point of the index. */
-const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, monitor: 0.98, incident: 0.99, page: 0.92, config: 0.9, setting: 0.88, operation: 0.86, infra: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75 };
+const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, monitor: 0.98, incident: 0.99, page: 0.92, config: 0.9, setting: 0.88, operation: 0.86, infra: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75, notification: 0.94, event: 0.9 };
 
 /**
  * Which registered operations make sense to offer for a container in this state.
@@ -121,6 +124,32 @@ export async function searchAll(q, { newsItems = [], actor = null } = {}) {
         entry.kind === 'incident' ? KIND_WEIGHT.incident : KIND_WEIGHT.monitor);
     }
   } catch { /* monitoring unavailable — search still answers everything else */ }
+
+  // Phase 10B — notifications: unread and recent
+  try {
+    const notifs = listNotifications({ limit: 20 });
+    for (const n of notifs) {
+      add({
+        title: n.title,
+        subtitle: `Notification · ${n.severity} · ${n.type}${n.read ? '' : ' · unread'}`,
+        href: n.href || '/activity',
+        kind: 'notification',
+        status: n.severity === 'critical' ? 'down' : n.severity === 'warning' ? 'degraded' : 'up',
+      }, score(needle, n.title, n.message, n.type, 'notification'), KIND_WEIGHT.notification);
+    }
+  } catch {}
+  // Phase 10B — live events: recent
+  try {
+    const evs = readLiveEvents({ limit: 20 });
+    for (const e of evs) {
+      add({
+        title: e.message || e.type,
+        subtitle: `Event · ${e.severity} · ${e.source} · ${e.type}`,
+        href: e.subject?.href || '/activity',
+        kind: 'event',
+      }, score(needle, e.message, e.type, e.source, 'event'), KIND_WEIGHT.event);
+    }
+  } catch {}
 
   // the one canonical inventory: containers, their resolved URLs, and their presentation overlay
   let inv = null;

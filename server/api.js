@@ -48,6 +48,10 @@ import { describeProviders } from './infrastructure/registry.js';
 import { aggregateHealth } from './infrastructure/health.js';
 import { storageDocument, networkDocument } from './infrastructure/opusgrid.js';
 import { versionInfo } from './version.js';
+// Phase 10B — live events & notifications
+import { handleEvents, handleEventsSSE, isSSERoute } from './eventsApi.js';
+import { handleNotifications } from './notificationsApi.js';
+import { initEvents } from './events/index.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -194,6 +198,40 @@ export async function handleApi(req, res, url) {
       actor: session?.username ?? null,
     });
     return;
+  }
+
+  // ---------- events & notifications (Phase 10B) ----------
+  // SSE is a long-lived GET that hijacks the response — it must be detected before the JSON
+  // helper is used, but after the auth gate (same session cookie, same CSRF rules for safe method).
+  if (isSSERoute(p, method)) {
+    // Ensure events subsystem is initialized
+    initEvents();
+    await handleEventsSSE(req, res, {
+      query: url.searchParams,
+      session,
+      sessionHandle: activeToken ? auth.sessionHandle(activeToken) : 'anon',
+    });
+    return;
+  }
+  if (p.startsWith('/api/events')) {
+    initEvents();
+    const handled = await handleEvents({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      query: url.searchParams,
+      sessionHandle: activeToken ? auth.sessionHandle(activeToken) : 'anon',
+    });
+    if (handled !== null) return;
+  }
+  if (p.startsWith('/api/notifications')) {
+    initEvents();
+    const handled = await handleNotifications({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      query: url.searchParams,
+    });
+    if (handled !== null) return;
   }
 
   // ---------- setup (bootstrap; refuses to run twice) ----------
@@ -1694,6 +1732,10 @@ const V1_ROUTES = new Set([
   // Phase 8 — the canonical operations routes; the /:id and /:id/trail forms keep their v1
   // prefix because they are patterns, not fixed paths, and are matched by the handler itself.
   '/operations', '/operations/dry-run',
+  // Phase 10B — events & notifications
+  '/events', '/events/stream', '/events/stats',
+  '/notifications', '/notifications/unread-count', '/notifications/stats',
+  '/notifications/policy', '/notifications/providers', '/notifications/webhook',
 ]);
 
 export function rewriteV1(pathname) {

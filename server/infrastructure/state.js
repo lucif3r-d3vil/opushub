@@ -11,6 +11,20 @@
 import { logEvent } from '../activity.js';
 import { THRESHOLDS } from './model.js';
 
+// Phase 10B — event bus publish (lazy)
+let _publishEvent = null;
+async function getPublish() {
+  if (_publishEvent) return _publishEvent;
+  try {
+    const mod = await import('../events/index.js');
+    _publishEvent = mod.publishEvent;
+    return _publishEvent;
+  } catch { return null; }
+}
+function publishEventSafe(desc) {
+  getPublish().then((fn) => { if (fn) try { fn(desc); } catch {} }).catch(() => {});
+}
+
 const lastPoolHealth = new Map();   // pool name → health word
 const lastIfaceState = new Map();   // interface name → operstate
 const lastThreshold = new Map();    // subject → 'warning' | 'critical' | null
@@ -54,6 +68,15 @@ export function notePoolHealth(pools = []) {
       signature: `zfs.pool.health:${pool.name}:${prev}>${pool.health}`,
       dedupeWindowMs: 10 * 60_000,
     });
+    publishEventSafe({
+      type: 'infrastructure.storage.health_changed',
+      severity: ok ? 'notice' : 'warning',
+      source: 'infrastructure',
+      subject: { kind: 'storage', id: pool.name, label: `ZFS pool ${pool.name}`, href: '/infrastructure?tab=storage' },
+      message: `ZFS pool ${pool.name} is ${pool.health} (was ${prev})`,
+      payload: { pool: pool.name, from: prev, to: pool.health },
+      correlation: { provider: 'zfs' },
+    });
   }
 }
 
@@ -75,6 +98,14 @@ export function noteFilesystemThresholds(mounts = []) {
         signature: `storage.threshold:${m.mount}:${prev}>none`,
         dedupeWindowMs: 30 * 60_000,
       });
+      publishEventSafe({
+        type: 'infrastructure.health_changed',
+        severity: 'notice',
+        source: 'infrastructure',
+        subject: { kind: 'storage', id: m.mount, label: m.mount, href: '/infrastructure?tab=storage' },
+        message: `${m.mount} is back below the ${THRESHOLDS.warning}% usage threshold`,
+        payload: { mount: m.mount, from: prev, to: null, usedPct: m.usedPct },
+      });
       continue;
     }
     logEvent({
@@ -85,6 +116,14 @@ export function noteFilesystemThresholds(mounts = []) {
       category: 'storage',
       signature: `storage.threshold:${m.mount}:${prev}>${level}`,
       dedupeWindowMs: 30 * 60_000,
+    });
+    publishEventSafe({
+      type: 'infrastructure.health_changed',
+      severity: level === 'critical' ? 'warning' : 'info',
+      source: 'infrastructure',
+      subject: { kind: 'storage', id: m.mount, label: m.mount, href: '/infrastructure?tab=storage' },
+      message: `${m.mount} is ${Math.round(m.usedPct)}% used`,
+      payload: { mount: m.mount, from: prev, to: level, usedPct: m.usedPct },
     });
   }
 }
@@ -134,6 +173,14 @@ export function noteInterfaceStates(interfaces = []) {
       category: 'network',
       signature: `network.interface:${i.name}:${prev}>${i.state}`,
       dedupeWindowMs: 10 * 60_000,
+    });
+    publishEventSafe({
+      type: 'infrastructure.network.changed',
+      severity: down && inUse ? 'warning' : 'info',
+      source: 'infrastructure',
+      subject: { kind: 'network', id: i.name, label: `Interface ${i.name}`, href: '/infrastructure?tab=network' },
+      message: `Interface ${i.name} is ${i.state} (was ${prev})`,
+      payload: { interface: i.name, from: prev, to: i.state, hasAddress: inUse },
     });
   }
 }

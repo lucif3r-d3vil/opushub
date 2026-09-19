@@ -294,7 +294,13 @@ test('monitoring runs no command and reads no file it did not write', async () =
   }
   // and the data is not part of the exportable configuration (it is operational state)
   const scope = read('server/configScope.js');
-  assert.equal(/monitoring/.test(scope), false, 'monitoring state is not presented as configuration');
+  const scopeCode = stripComments(scope);
+  // PRESENTATION_FILES must not contain monitoring — it is operational state, not presentation
+  const presBlock = scopeCode.match(/PRESENTATION_FILES\s*=\s*\[([\s\S]*?)\];/);
+  assert.ok(presBlock, 'PRESENTATION_FILES block found');
+  assert.equal(/monitoring/.test(presBlock[1]), false, 'monitoring state is not presented as configuration');
+  // Phase 10B — monitoring, events, notifications are explicitly protected
+  assert.ok(/PROTECTED_STATE/.test(scopeCode), 'protected state exists');
 });
 
 /* ==================================================================== */

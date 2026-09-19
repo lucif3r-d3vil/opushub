@@ -51,10 +51,28 @@ if (!window.PointerEvent) {
     constructor(type, init = {}) { super(type, init); this.pointerId = init.pointerId || 1; }
   };
 }
+// jsdom has no EventSource — stub it so live-event hooks mount without throwing
+class FakeEventSource {
+  constructor() { this.readyState = 0; this.withCredentials = false; }
+  addEventListener() {}
+  removeEventListener() {}
+  close() { this.readyState = 2; }
+  dispatchEvent() { return true; }
+  set onopen(_) {}
+  get onopen() { return null; }
+  set onmessage(_) {}
+  get onmessage() { return null; }
+  set onerror(_) {}
+  get onerror() { return null; }
+}
+FakeEventSource.CONNECTING = 0;
+FakeEventSource.OPEN = 1;
+FakeEventSource.CLOSED = 2;
+window.EventSource = FakeEventSource;
 
 const globals = [
   'window', 'document', 'navigator', 'location', 'history', 'getComputedStyle', 'requestAnimationFrame',
-  'cancelAnimationFrame', 'ResizeObserver', 'HTMLElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'Element', 'Node',
+  'cancelAnimationFrame', 'ResizeObserver', 'EventSource', 'HTMLElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'Element', 'Node',
   'Event', 'CustomEvent', 'KeyboardEvent', 'MouseEvent', 'PointerEvent', 'MessageChannel', 'matchMedia',
   'DocumentFragment', 'CSSStyleDeclaration', 'DOMRect', 'MutationObserver',
 ];

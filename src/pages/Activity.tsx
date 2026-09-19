@@ -5,6 +5,7 @@ import { dayLabel, relTime, timeOfDay } from '../lib/format';
 import type { ActivityEvent, ActivityGroup, AlertItem, AlertsDoc, EventCategory, EventSeverity } from '../lib/types';
 import { PageHero, ProviderNote } from '../components/ui';
 import { humanEvent, humanGroup } from '../lib/events';
+import { useLiveEvents, type LiveEvent } from '../lib/sse';
 
 const SOURCES = ['all', 'system', 'config', 'user', 'docker'] as const;
 type Source = (typeof SOURCES)[number];
@@ -90,6 +91,7 @@ export default function ActivityPage() {
   const [severity, setSeverity] = useState(() => params.get('severity') || '');
   const [windowMs, setWindowMs] = useState(() => Number(params.get('since')) || 0);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [liveBuffer, setLiveBuffer] = useState<LiveEvent[]>([]);
 
   // The window is pinned when it is chosen (not recomputed on every render) so the query path — and
   // therefore the shared cache entry — stays stable while the page is open. Picking "Last hour"
@@ -106,8 +108,36 @@ export default function ActivityPage() {
     if (since) q.set('since', String(since));
     return `/api/activity?${q.toString()}`;
   }, [source, service, stack, type, category, severity, since]);
-  const { data, error } = usePolled<ActivityDoc>(query, 30_000);
-  const items = data?.items ?? [];
+  const { data, error, refresh } = usePolled<ActivityDoc>(query, 30_000);
+  const { connected, events: sseEvents } = useLiveEvents({
+    enabled: true,
+    onEvent: (evt) => {
+      setLiveBuffer((prev) => {
+        if (prev.some((e) => e.id === evt.id)) return prev;
+        return [evt, ...prev].slice(0, 30);
+      });
+    },
+  });
+  // Merge live buffer into items (dedup by id)
+  const polledItems = data?.items ?? [];
+  const items = (() => {
+    if (!liveBuffer.length) return polledItems;
+    // Convert LiveEvent to Activity-like for display? Keep separate banner instead.
+    // For now, merge by prepending live events that are not already in polled
+    const polledIds = new Set(polledItems.map((i: any) => i.id || i.eventId));
+    const extra = liveBuffer.filter((e) => !polledIds.has(e.id)).map((e) => ({
+      id: e.id,
+      t: e.t,
+      type: e.type,
+      source: e.source,
+      subject: e.subject?.label || e.subject?.id || '',
+      message: e.message,
+      severity: e.severity,
+      category: 'monitoring' as any,
+      live: true,
+    } as any));
+    return [...extra, ...polledItems];
+  })();
   const active = [
     service.trim() && { key: 'service', label: `service: ${service.trim()}`, clear: () => setService('') },
     stack.trim() && { key: 'stack', label: `stack: ${stack.trim()}`, clear: () => setStack('') },
@@ -154,12 +184,22 @@ export default function ActivityPage() {
       <PageHero
         title="Activity"
         desc="Everything OpusHub has witnessed: configuration changes, host and engine events, launches. Real events only — bursts that happen together are grouped, and the group expands to its parts."
-        meta={data ? (
-          <span>
-            {data.total} recorded event{data.total === 1 ? '' : 's'}
-            {data.watchingSince ? ` · watching since ${new Date(data.watchingSince).toLocaleString()}` : ' · the log is empty, so nothing has been witnessed yet'}
+        meta={
+          <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {data ? (
+              <>
+                {data.total} recorded event{data.total === 1 ? '' : 's'}
+                {data.watchingSince ? ` · watching since ${new Date(data.watchingSince).toLocaleString()}` : ' · the log is empty, so nothing has been witnessed yet'}
+              </>
+            ) : 'Loading…'}
+            <span className={`chip ${connected ? 'active' : ''}`} title={connected ? 'Live updates connected' : 'Live updates disconnected — polling fallback'}>
+              {connected ? '● Live' : '○ Polling'} {liveBuffer.length ? `· ${liveBuffer.length} new` : ''}
+            </span>
+            {liveBuffer.length > 0 && (
+              <button className="btn btn-sm" onClick={() => { setLiveBuffer([]); refresh(); }}>Clear live & refresh</button>
+            )}
           </span>
-        ) : undefined}
+        }
       />
       <AlertsStrip />
       <div className="tl-filters" role="tablist" aria-label="Filter by source">
