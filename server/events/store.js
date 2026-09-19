@@ -79,20 +79,52 @@ function trimIfNeeded() {
   }
 }
 
+let approxCount = null;
+let writesSinceCountCheck = 0;
+
+function getApproxCount() {
+  if (approxCount != null) return approxCount;
+  try {
+    approxCount = readAllRaw().length;
+  } catch {
+    approxCount = 0;
+  }
+  return approxCount;
+}
+
 export function writeEvent(evt) {
   if (!evt || !evt.id) return;
   try {
     const line = serializeEvent(evt);
     atomicAppend(line);
-    // trim synchronously but bounded: only every 100 writes or when over limit
-    // to avoid per-event read of whole file, check file size heuristic
+    if (approxCount != null) approxCount++;
+    else getApproxCount(); // init
+    writesSinceCountCheck++;
+
+    // Always enforce MAX_LINES deterministically: if we know we are over, trim now
+    if (getApproxCount() > MAX_LINES) {
+      trimIfNeeded();
+      try { approxCount = readAllRaw().length; } catch { approxCount = 0; }
+      writesSinceCountCheck = 0;
+      return;
+    }
+
+    // Heuristic: size-based + periodic count check to enforce TTL and corrupt cleanup
     try {
       const st = fs.statSync(FILE);
-      if (st.size > 2_000_000) trimIfNeeded();
+      if (st.size > 2_000_000) {
+        trimIfNeeded();
+        try { approxCount = readAllRaw().length; } catch { approxCount = 0; }
+        writesSinceCountCheck = 0;
+        return;
+      }
     } catch {}
-    // opportunistic: if raw lines count is high, trim
-    // we do a quick line count every 50 writes via modulo on timestamp? Simpler: random sampling
-    if (Math.random() < 0.02) trimIfNeeded();
+    // Periodic check every 100 writes or 2% random sampling for TTL enforcement
+    if (writesSinceCountCheck >= 100 || Math.random() < 0.02) {
+      trimIfNeeded();
+      try { approxCount = readAllRaw().length; } catch { approxCount = 0; }
+      writesSinceCountCheck = 0;
+    }
   } catch (err) {
     console.warn(`[events] write failed: ${err.message}`);
   }
@@ -130,6 +162,8 @@ export function clearAll() {
   try {
     ensureDir();
     fs.writeFileSync(FILE, '', 'utf8');
+    approxCount = 0;
+    writesSinceCountCheck = 0;
   } catch {}
 }
 

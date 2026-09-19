@@ -112,10 +112,13 @@ export function shouldNotify(event, channel = 'inApp') {
   const channelPolicy = policy[channel];
   if (channelPolicy && channelPolicy.enabled === false) return false;
 
-  const minSev = (channelPolicy && channelPolicy.minSeverity) || policy.minSeverity;
   const eventOrder = ORDER[event.severity] ?? 0;
-  const minOrder = ORDER[minSev] ?? 0;
-  if (eventOrder < minOrder) return false;
+  const globalMin = ORDER[policy.minSeverity] ?? 0;
+  if (eventOrder < globalMin) return false;
+  if (channelPolicy && channelPolicy.minSeverity) {
+    const channelMin = ORDER[channelPolicy.minSeverity] ?? 0;
+    if (eventOrder < channelMin) return false;
+  }
 
   if (policy.allowedTypes.length && !policy.allowedTypes.includes(event.type)) return false;
   if (policy.allowedSources.length && !policy.allowedSources.includes(event.source)) return false;
