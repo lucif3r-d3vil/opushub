@@ -56,6 +56,7 @@ import { handleAutohealRoutes } from './autohealApi.js';
 import { handleUpdatesRoutes } from './updatesApi.js';
 import { handleContainersRoutes } from './containersApi.js';
 import { handleStacksRoutes } from './stacksApi.js';
+import { handleRegistriesRoutes } from './registriesApi.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -275,6 +276,20 @@ export async function handleApi(req, res, url) {
       jsonBody,
       actor: session?.username ?? null,
       sessionId: activeToken ? auth.sessionHandle(activeToken) : null,
+    });
+    if (handled) return;
+  }
+
+  // ---------- registries (Phase 10D-C) ----------
+  // Credentials are stored encrypted and never returned; remote calls are the five fixed shapes
+  // of registries/client.js against a validated endpoint. Pulls are operations, not routes here.
+  if (p.startsWith('/api/registries') || p.startsWith('/api/v1/registries')) {
+    const handled = await handleRegistriesRoutes({
+      p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      actor: session?.username ?? null,
+      query: url.searchParams,
     });
     if (handled) return;
   }
@@ -1802,6 +1817,8 @@ const V1_ROUTES = new Set([
   '/containers/spec-fields',
   // Phase 10D — managed stacks (the /:id forms are patterns, matched by the handler itself)
   '/stacks/managed',
+  // Phase 10D — registries
+  '/registries',
 ]);
 
 export function rewriteV1(pathname) {

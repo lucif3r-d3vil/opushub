@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { startMockEngine, FLEET, PULLED } from '../test/mock-engine.js';
+import { startMockEngine, FLEET, PULLED, PULL_AUTH } from '../test/mock-engine.js';
 import { stripComments } from '../test/source-scan.js';
 
 const OLD_ENV = { ...process.env };
@@ -306,6 +306,30 @@ test('pull image reports whether the image changed and never touches the contain
   assert.ok(PULLED.get('mariadb:11') >= 1);
   const img = await run('image.pull', { type: 'image', id: 'docker.io/library/alpine:3.20' }, {});
   assert.equal(img.operation.status, 'succeeded', JSON.stringify(img.operation.error));
+});
+
+test('image.pull carries the stored registry credential only for a matching host, and never into events', async () => {
+  process.env.OPUSHUB_SECRET_KEY = 'c'.repeat(64);
+  const store = await import('./registries/store.js');
+  const crypto = await import('./registries/crypto.js');
+  crypto._resetCryptoCache();
+  store.upsertRegistry({ id: 'corp', name: 'Corp', kind: 'oci', endpoint: 'https://reg.example.com', host: 'reg.example.com', username: 'bob', secret: 'pw-SECRET', actor: 'root' });
+  PULL_AUTH.length = 0;
+  const anon = await run('image.pull', { type: 'image', id: 'docker.io/library/alpine:3.20' }, {});
+  assert.equal(anon.operation.status, 'succeeded');
+  assert.equal(PULL_AUTH.length, 0, 'no credential for an unmatched host');
+  const authed = await run('image.pull', { type: 'image', id: 'reg.example.com/team/app:1' }, { registryId: 'corp' });
+  assert.equal(authed.operation.status, 'succeeded', JSON.stringify(authed.operation.error));
+  assert.equal(PULL_AUTH.length, 1);
+  assert.equal(JSON.parse(Buffer.from(PULL_AUTH[0].header, 'base64').toString()).password, 'pw-SECRET');
+  const mismatch = await run('image.pull', { type: 'image', id: 'docker.io/library/alpine:3.20' }, { registryId: 'corp' });
+  assert.equal(mismatch.operation.status, 'succeeded');
+  assert.equal(PULL_AUTH.length, 1, 'an explicit registry whose host does not match the image is ignored');
+  const blob = JSON.stringify([anon.operation, authed.operation, mismatch.operation, anon.dryRun.json, authed.dryRun.json]);
+  assert.ok(!blob.includes('pw-SECRET') && !blob.includes(PULL_AUTH[0].header));
+  const { getRecentEvents } = await import('./events/index.js');
+  assert.ok(!JSON.stringify(getRecentEvents({ limit: 500 })).includes('pw-SECRET'));
+  store._resetRegistriesStore();
 });
 
 test('duplicate creates a copy without host ports or named volumes; create refuses a name clash', async () => {
