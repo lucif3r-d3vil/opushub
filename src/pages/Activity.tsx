@@ -36,6 +36,9 @@ const CATEGORIES: { value: '' | EventCategory; label: string }[] = [
   { value: 'network', label: 'Network' },
   { value: 'power', label: 'Power' },
   { value: 'provider', label: 'Providers' },
+  // Phase 11A — file access is only ever recorded when it is security-relevant: a protected path
+  // asked for, a sensitive read, a failed download, a privilege request. Browsing logs nothing.
+  { value: 'files', label: 'Files' },
 ];
 
 const SEVERITIES: { value: '' | EventSeverity; label: string }[] = [

@@ -28,6 +28,8 @@ const PAGES = [
   { title: 'Power', href: '/infrastructure?tab=power', hint: 'UPS and PDU', kind: 'page', keywords: ['ups', 'pdu', 'battery', 'outlet', 'electric'] },
   { title: 'Topology', href: '/infrastructure?tab=topology', hint: 'How the OpusGrid fits together', kind: 'page', keywords: ['graph', 'map', 'layers', 'physical', 'relationship'] },
   { title: 'System', href: '/system', hint: 'Host vitals', kind: 'page', keywords: ['cpu', 'memory', 'disk', 'network', 'uptime'] },
+  // Phase 11A — the read-only file manager is a destination like any other.
+  { title: 'Files', href: '/files', hint: 'Browse, inspect, preview and download files (read-only)', kind: 'page', keywords: ['file', 'files', 'folder', 'directory', 'browse', 'explorer', 'manager', 'download', 'preview', 'permissions', 'owner', 'search'] },
   { title: 'Activity', href: '/activity', hint: 'What happened, when', kind: 'page', keywords: ['events', 'history', 'log'] },
   { title: 'Icon browser', href: '/icons', hint: 'Find an icon and apply it', kind: 'page', keywords: ['logo', 'glyph', 'symbol'] },
   { title: 'Settings', href: '/settings/appearance', hint: 'Everything you can change', kind: 'page', keywords: ['config', 'preferences'] },

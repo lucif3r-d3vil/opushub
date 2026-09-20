@@ -5,6 +5,9 @@ import App from './App';
 
 const routes = [
   '/', '/services', '/services/Media/Stream', '/stacks', '/stacks/Media', '/monitoring', '/system', '/activity',
+  // Phase 11A — the file manager is a route of its own (lazy pages resolve on the client, so this
+  // proves the route mounts and the module graph imports cleanly).
+  '/files', '/files?root=nope&path=a/b',
   // Host and Infrastructure live under System now (legacy /host and /infrastructure redirect and
   // render an empty shell under SSR, so smoke the canonical mounts, not the shims).
   '/system/host', '/system/infrastructure',

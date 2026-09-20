@@ -45,6 +45,18 @@ services:
     # environment:
     #   OPUSHUB_HOST_ADDRESS: "192.168.1.20"
 
+    # Files (Phase 11A) — a read-only file manager for directories YOU name. It is off until you
+    # both mount the directory and list it here; the container sees nothing of your host by default.
+    #
+    #   volumes:
+    #     - /tank/media:/tank/media:ro        # :ro — OpusHub has no write path at all, and this
+    #     - /opt/stacks:/opt/stacks:ro        #       makes that true at the kernel level too
+    #   environment:
+    #     OPUSHUB_FILES_ROOTS: "/tank/media,/opt/stacks"
+    #
+    # Mount read-only. Not because OpusHub would write — it cannot — but because a mount is the one
+    # place where "read-only" can be enforced by something other than our own code.
+
     # Node drops no privileges and needs none; this stops a compromised container from gaining
     # any through a setuid binary, and keeps PID 1 reaping children correctly.
     security_opt:
