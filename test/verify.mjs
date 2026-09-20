@@ -87,6 +87,16 @@ async function main() {
   fs.mkdirSync(configDir, { recursive: true });
   fs.mkdirSync(dataDir, { recursive: true });
 
+  // Phase 11A — a real directory tree for the read-only file manager, including the one thing the
+  // path policy exists to stop: a symlink that leaves the root.
+  const filesRoot = join(scratch, 'files-root');
+  fs.mkdirSync(join(filesRoot, 'stacks', 'media'), { recursive: true });
+  fs.writeFileSync(join(filesRoot, 'notes.txt'), 'compose notes for the verify run\n');
+  fs.writeFileSync(join(filesRoot, 'stacks', 'media', 'compose.yml'), 'services:\n  wave:\n    image: wave:latest\n');
+  // a PNG signature followed by junk: enough for the preview detector to judge by content
+  fs.writeFileSync(join(filesRoot, 'poster.png'), Buffer.from('89504e470d0a1a0a0000000d4948445200000001', 'hex'));
+  try { fs.symlinkSync('/etc', join(filesRoot, 'escape')); } catch { /* a platform without symlinks */ }
+
   console.log(`verifying against a scratch config dir: ${scratch}`);
   console.log(socket ? `engine: ${socket}` : 'engine: none — verifying the unavailable path');
 
@@ -98,6 +108,8 @@ async function main() {
       OPUSHUB_DATA_DIR: dataDir,
       OPUSHUB_PORT: String(PORT),
       OPUSHUB_HOST: '127.0.0.1',
+      // one exposed root, named by the environment — never by a request
+      OPUSHUB_FILES_ROOTS: filesRoot,
       ...(socket ? { OPUSHUB_DOCKER_SOCKET: socket } : { OPUSHUB_DOCKER_SOCKET: '/nonexistent/docker.sock' }),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -651,6 +663,155 @@ async function main() {
         clamped.body?.appearance?.background?.blur >= 0 && clamped.body?.appearance?.background?.scrim <= 100,
         JSON.stringify(clamped.body?.appearance?.background));
       await send('PUT', '/api/settings', { appearance: { theme: 'system', background: { mode: 'quiet', blur: 24, scrim: 62 } } });
+    }
+
+    // ---- 11. files: the read-only explorer, against a real directory ----------
+    {
+      const surface = await get('/api/files');
+      const rootId = surface.body?.roots?.[0]?.id || null;
+      check('files: the surface exposes exactly the configured root, read-only',
+        surface.status === 200 && surface.body?.readOnly === true && surface.body?.source === 'configured'
+        && surface.body?.roots?.length === 1 && surface.body.roots[0].path === filesRoot,
+        JSON.stringify(surface.body?.roots ?? surface.body).slice(0, 140));
+      check('files: the surface publishes the operations this phase does not have',
+        Array.isArray(surface.body?.notSupported)
+        && ['delete', 'rename', 'upload', 'mkdir', 'chmod', 'chown', 'shell'].every((op) => surface.body.notSupported.includes(op)),
+        JSON.stringify(surface.body?.notSupported));
+      check('files: the only write verb is the privilege request',
+        JSON.stringify(surface.body?.routes?.post) === JSON.stringify(['/api/files/privilege/request']),
+        JSON.stringify(surface.body?.routes?.post));
+      check('files: a host with no privileged provider says so instead of implying one',
+        surface.body?.privileged?.available === false && !!surface.body?.privileged?.reason,
+        JSON.stringify(surface.body?.privileged));
+
+      const enc = encodeURIComponent(rootId);
+      const list = await get(`/api/files/list?root=${enc}&path=`);
+      const names = (list.body?.entries || []).map((e) => e.name);
+      check('files: a listing is addressed by root id plus a relative path',
+        list.status === 200 && names.includes('notes.txt') && names.includes('stacks'),
+        names.join(', ') || `status ${list.status}`);
+      check('files: an entry carries its mode, owner and type — and nothing writable',
+        (list.body?.entries || []).every((e) => 'modeText' in e && 'octal' in e && 'owner' in e && 'typeLabel' in e)
+        && !JSON.stringify(list.body?.entries).includes('"writable":true'),
+        JSON.stringify(list.body?.entries?.[0]).slice(0, 140));
+      const nested = await get(`/api/files/list?root=${enc}&path=stacks/media`);
+      check('files: a nested folder lists through the same addressing',
+        nested.status === 200 && (nested.body?.entries || []).some((e) => e.name === 'compose.yml'),
+        `status ${nested.status}`);
+      const stat = await get(`/api/files/stat?root=${enc}&path=notes.txt&context=1`);
+      check('files: stat reports ownership, mode and whether OpusHub may read it',
+        stat.status === 200 && stat.body?.modeText === '-rw-r--r--' && stat.body?.writable === false
+        && typeof stat.body?.readable === 'boolean',
+        JSON.stringify(stat.body).slice(0, 140));
+
+      const traversal = await get(`/api/files/list?root=${enc}&path=../../etc`);
+      // 400 bad_path with the rule that caught it, or 403 root_isolation once it resolved: either
+      // way the answer names the rule, and neither way reaches the host.
+      check('files: a traversal out of the root is refused, naming the rule that caught it',
+        (traversal.status === 400 && traversal.body?.code === 'bad_path' && traversal.body?.rule === 'traversal')
+        || (traversal.status === 403 && traversal.body?.code === 'root_isolation'),
+        `status ${traversal.status} ${JSON.stringify(traversal.body).slice(0, 120)}`);
+      const encoded = await get(`/api/files/list?root=${enc}&path=stacks%2f%2e%2e%2f%2e%2e%2fetc`);
+      check('files: an encoded traversal is refused the same way',
+        encoded.status >= 400 && !!encoded.body?.code, `status ${encoded.status} ${JSON.stringify(encoded.body).slice(0, 120)}`);
+      const nulled = await get(`/api/files/list?root=${enc}&path=notes.txt%00.png`);
+      check('files: a null byte in a path is refused', nulled.status >= 400, `status ${nulled.status}`);
+      const absolute = await get(`/api/files/list?root=${enc}&path=/etc/passwd`);
+      check('files: an absolute path is refused', absolute.status >= 400 && !!absolute.body?.code, `status ${absolute.status}`);
+      const escape = await get(`/api/files/list?root=${enc}&path=escape`);
+      check('files: a symlink that leaves the root is refused, not followed',
+        escape.status === 403 && escape.body?.code === 'symlink_escape',
+        `status ${escape.status} ${JSON.stringify(escape.body).slice(0, 120)}`);
+      const unknown = await get(`/api/files/list?root=${encodeURIComponent('/etc')}&path=`);
+      check('files: a root that was never exposed is unknown, not interpreted',
+        unknown.status === 404 && unknown.body?.code === 'unknown_root', `status ${unknown.status}`);
+      const notADir = await get(`/api/files/list?root=${enc}&path=notes.txt`);
+      check('files: listing a file says it is not a directory',
+        notADir.status === 400 && notADir.body?.code === 'not_a_directory', `status ${notADir.status}`);
+
+      const preview = await get(`/api/files/preview?root=${enc}&path=notes.txt`);
+      check('files: a text preview arrives in JSON with its detected type',
+        preview.status === 200 && preview.body?.inline === 'text' && /compose notes/.test(preview.body?.text || '')
+        && !!preview.body?.label && !!preview.body?.detectedBy,
+        JSON.stringify(preview.body).slice(0, 140));
+      const image = await get(`/api/files/preview?root=${enc}&path=poster.png`);
+      const imageHref = image.body?.bytesHref || '';
+      check('files: an image preview is a minted reference, not bytes in JSON',
+        image.status === 200 && image.body?.inline === 'image' && image.body?.text === null
+        && imageHref.startsWith('/api/files/raw?token='),
+        JSON.stringify(image.body).slice(0, 140));
+      const raw = await fetch(`${BASE}${imageHref}`, { headers: jar({}), redirect: 'manual' });
+      check('files: the reference serves those bytes inline, with a content policy',
+        raw.status === 200 && (raw.headers.get('content-type') || '').startsWith('image/png')
+        && /sandbox|default-src 'none'|no-store/.test(`${raw.headers.get('content-security-policy') || ''}${raw.headers.get('cache-control') || ''}`),
+        `${raw.status} ${raw.headers.get('content-type')} csp=${raw.headers.get('content-security-policy')}`);
+      await raw.arrayBuffer();
+      const swapped = await fetch(`${BASE}/api/files/download?token=${imageHref.split('token=')[1]}`, { headers: jar({}), redirect: 'manual' });
+      check('files: a preview reference cannot be spent on the download route',
+        swapped.status === 403 && swapped.headers.get('content-type')?.includes('json'),
+        `status ${swapped.status}`);
+      await swapped.text();
+
+      const dl = await get(`/api/files/download?root=${enc}&path=stacks/media/compose.yml`);
+      const location = dl.headers.get('location') || '';
+      check('files: a download is a redirect to a minted reference — no host path in a URL',
+        dl.status === 302 && location.startsWith('/api/files/download?token=') && !location.includes('files-root')
+        && !location.includes(scratch),
+        `status ${dl.status} ${location.slice(0, 90)}`);
+      const streamed = await fetch(`${BASE}${location}`, { headers: jar({}), redirect: 'manual' });
+      const body = await streamed.text();
+      check('files: the reference streams the file as a named attachment',
+        streamed.status === 200 && /attachment/.test(streamed.headers.get('content-disposition') || '')
+        && /compose\.yml/.test(streamed.headers.get('content-disposition') || '') && body.includes('wave:latest'),
+        `${streamed.status} ${streamed.headers.get('content-disposition')}`);
+      const dirDl = await get(`/api/files/download?root=${enc}&path=stacks`);
+      check('files: a directory cannot be downloaded', dirDl.status === 400 && dirDl.body?.code === 'is_a_directory', `status ${dirDl.status}`);
+
+      const search = await get(`/api/files/search?root=${enc}&q=compose`);
+      check('files: search matches names, bounds the walk and never follows folder symlinks',
+        search.status === 200 && search.body?.count >= 1 && search.body?.followedSymlinks === false
+        && (search.body?.matches || []).some((m) => m.path === 'stacks/media/compose.yml')
+        && typeof search.body?.visited === 'number' && !!search.body?.limits,
+        JSON.stringify(search.body).slice(0, 140));
+      const shortSearch = await get(`/api/files/search?root=${enc}&q=`);
+      check('files: an empty search is a bad request, not a walk of the whole root',
+        shortSearch.status === 400 && shortSearch.body?.code === 'bad_query', `status ${shortSearch.status}`);
+
+      const mutations = [];
+      for (const [method, target] of [
+        ['POST', '/api/files/delete'], ['POST', '/api/files/rename'], ['POST', '/api/files/move'],
+        ['POST', '/api/files/copy'], ['POST', '/api/files/upload'], ['POST', '/api/files/mkdir'],
+        ['POST', '/api/files/chmod'], ['POST', '/api/files/chown'], ['POST', '/api/files/write'],
+        ['POST', '/api/files/exec'], ['POST', '/api/files/shell'],
+        ['DELETE', `/api/files/list?root=${enc}&path=notes.txt`],
+        ['PUT', `/api/files/stat?root=${enc}&path=notes.txt`],
+        ['PATCH', `/api/files/preview?root=${enc}&path=notes.txt`],
+      ]) {
+        const r = await send(method, target, method === 'POST' ? {} : undefined);
+        if (r.status !== 404 && r.status !== 405) mutations.push(`${method} ${target} → ${r.status}`);
+      }
+      check('files: no mutation route exists, under any verb', mutations.length === 0, mutations.join(', '));
+      check('files: the fixture files survived every request above',
+        fs.existsSync(join(filesRoot, 'notes.txt')) && fs.existsSync(join(filesRoot, 'stacks', 'media', 'compose.yml'))
+        && fs.readFileSync(join(filesRoot, 'notes.txt'), 'utf8') === 'compose notes for the verify run\n');
+
+      const privilege = await send('POST', '/api/files/privilege/request', {
+        root: rootId, path: 'notes.txt', operation: 'read', command: 'rm -rf /', shell: '/bin/sh', user: 'root',
+      });
+      check('files: the privilege broker answers honestly and drops a smuggled command',
+        [200, 501].includes(privilege.status)
+        && ['unavailable', 'not_needed', 'denied'].includes(privilege.body?.state)
+        && !JSON.stringify(privilege.body).includes('rm -rf') && !JSON.stringify(privilege.body).includes('/bin/sh'),
+        `status ${privilege.status} ${JSON.stringify(privilege.body).slice(0, 140)}`);
+      const badOp = await send('POST', '/api/files/privilege/request', { root: rootId, path: 'notes.txt', operation: 'execute' });
+      check('files: an operation outside the fixed vocabulary is refused',
+        badOp.status >= 400 && badOp.body?.state !== 'granted', `status ${badOp.status} ${JSON.stringify(badOp.body).slice(0, 120)}`);
+
+      const act = await get('/api/activity?limit=200');
+      const fileEvents = (act.body?.items || []).filter((e) => e.category === 'files');
+      check('files: browsing, previewing and downloading wrote no activity events — asking for privilege did',
+        fileEvents.length >= 1 && fileEvents.every((e) => String(e.type).startsWith('files.privilege')),
+        JSON.stringify(fileEvents.map((e) => e.type)).slice(0, 140));
     }
 
     console.log('');

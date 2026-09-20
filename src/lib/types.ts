@@ -220,7 +220,7 @@ export interface SystemSnapshot {
 export interface HistoryPoint { t: number; cpu: number | null; memUsedPct: number | null; load: number | null; rx: number | null; tx: number | null; temp: number | null; procs: number | null }
 
 export type EventSeverity = 'info' | 'notice' | 'warning' | 'critical';
-export type EventCategory = 'service' | 'stack' | 'docker' | 'system' | 'security' | 'config' | 'storage' | 'network' | 'power' | 'provider';
+export type EventCategory = 'service' | 'stack' | 'docker' | 'system' | 'security' | 'config' | 'storage' | 'network' | 'power' | 'provider' | 'files';
 export interface ActivityEvent {
   id: string; t: number; iso: string;
   source: 'system' | 'config' | 'user' | 'docker' | string;
@@ -1248,4 +1248,412 @@ export interface AutohealStatusDoc {
     success: boolean;
     message: string;
   } | null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 11A — the read-only file manager                              */
+/* ------------------------------------------------------------------ */
+//
+// These mirror the documents server/filesApi.js sends. Two things are deliberate:
+//
+//   • there is no mutation type. Nothing here can describe a delete, a rename or an upload,
+//     because no endpoint can perform one — the vocabulary stops at reading.
+//   • `permissions` in a response is always the *caller's* role map. A file's own mode bits are
+//     `modeText` (`-rw-r--r--`) and `octal` (`0644`), which is what the Properties panel shows.
+
+/** What an entry is, as the kernel reports it. */
+export type FileKind = 'dir' | 'file' | 'symlink' | 'socket' | 'fifo' | 'block' | 'character' | 'other';
+
+/** The path policy's verdict on a location. `protected` never appears in a listing at all. */
+export type FileClass = 'allowed' | 'sensitive' | 'protected';
+
+/** The sort keys a listing accepts. Anything else falls back to `name` server-side. */
+export type FileSort = 'name' | 'size' | 'type' | 'modified' | 'permissions' | 'owner';
+
+/** The preview detector's answer about what a file is. */
+export type PreviewKind = 'text' | 'image' | 'pdf' | 'media' | 'archive' | 'binary' | 'empty';
+
+/** The outcome of asking the privilege broker for access. */
+export type PrivilegeState = 'granted' | 'not_needed' | 'denied' | 'unavailable' | 'invalid';
+
+/** Whether OpusHub's own process can read a location, in the UI's words. */
+export type PermissionState =
+  | 'readable' | 'sensitive' | 'permission_required' | 'protected' | 'blocked'
+  | 'not_found' | 'unknown_root' | 'invalid';
+
+/** The operations the broker will even consider. A browser may pick one of these and nothing else. */
+export type PrivilegedOperation = 'list' | 'stat' | 'read';
+
+/** The read permissions a role holds for the file manager. */
+export interface FilesPermissions {
+  read: boolean;
+  search: boolean;
+  download: boolean;
+  readSensitive: boolean;
+}
+
+/** One exposed filesystem root. `path` is a host path the operator configured; `id` addresses it. */
+export interface FileRoot {
+  id: string;
+  label: string;
+  path: string;
+  source: 'configured' | 'discovered';
+  viaSymlink: boolean;
+  fs: string | null;
+  device: string | null;
+  total: number | null;
+  used: number | null;
+  free: number | null;
+  usedPct: number | null;
+  dataset: string | null;
+  sensitive: boolean;
+  readable: boolean;
+  reason: string | null;
+  nestedUnder: string | null;
+}
+
+/** A root candidate the policy refused, and why — published so a short root list is not a mystery. */
+export interface FileRootRefusal {
+  path: string | null;
+  source: 'configured' | 'discovered';
+  code: string;
+  reason: string;
+}
+
+/** One directory entry. */
+export interface FileEntry {
+  name: string;
+  /** root-relative path — what every request addresses the entry by */
+  path: string;
+  kind: FileKind;
+  typeLabel: string;
+  ext: string | null;
+  size: number | null;
+  mtimeMs: number | null;
+  ctimeMs: number | null;
+  mode: number | null;
+  modeText: string | null;
+  octal: string | null;
+  uid: number | null;
+  gid: number | null;
+  owner: string | null;
+  group: string | null;
+  nlink: number | null;
+  symlink: boolean;
+  /** a link's target, named only when it stays inside the root */
+  link: { target: string | null; inside: boolean } | null;
+  accessible: boolean;
+  statError: string | null;
+  sensitive: boolean;
+  classification: string | null;
+}
+
+export interface FileListDoc {
+  ok: true;
+  root: { id: string; label: string; sensitive: boolean };
+  path: string;
+  canonical: string;
+  kind: FileKind;
+  entries: FileEntry[];
+  sort: FileSort;
+  dir: 'asc' | 'desc';
+  /** 'all' when the whole directory was sorted, 'page' when it was too big and only the page was */
+  sortScope: 'all' | 'page';
+  count: number;
+  total: number;
+  /** entries withheld because the policy protects them */
+  hidden: number;
+  scanned: number;
+  offset: number;
+  truncated: boolean;
+  symlink: boolean;
+  limits: { maxDirectoryEntries: number; maxDirectoryScan: number };
+  permissions?: FilesPermissions;
+  privileged?: PrivilegedStatus;
+  at: number;
+}
+
+export interface FileTreeNode {
+  name: string;
+  path: string;
+  kind: FileKind;
+  truncated: boolean;
+  children: FileTreeNode[];
+}
+
+export interface FileTreeDoc {
+  ok: true;
+  root: { id: string; label: string };
+  path: string;
+  children: FileTreeNode[];
+  depth: number;
+  at: number;
+}
+
+export interface FileStatDoc {
+  ok: true;
+  root: { id: string; label: string; sensitive: boolean };
+  name: string;
+  path: string;
+  canonical: string;
+  kind: FileKind;
+  typeLabel: string;
+  isDirectory: boolean;
+  isFile: boolean;
+  symlink: boolean;
+  link: { target: string | null; inside: boolean } | null;
+  size: number | null;
+  mtimeMs: number | null;
+  atimeMs: number | null;
+  ctimeMs: number | null;
+  birthtimeMs: number | null;
+  mode: number | null;
+  modeText: string | null;
+  octal: string | null;
+  uid: number | null;
+  gid: number | null;
+  owner: string | null;
+  group: string | null;
+  nlink: number | null;
+  ext: string | null;
+  readable: boolean;
+  /** always false in this phase: nothing here can write */
+  writable: boolean;
+  classification: { level: FileClass; class: string | null } | null;
+  sensitive: boolean;
+  previewable: boolean;
+  limits: { maxPreviewBytes: number; maxPreviewFileSize: number };
+  context?: StorageContextDoc | null;
+  permissions?: FilesPermissions;
+  privileged?: PrivilegedStatus;
+  at: number;
+}
+
+export interface FilePreviewDoc {
+  ok: boolean;
+  root: { id: string; label: string };
+  name: string;
+  path: string;
+  kind: PreviewKind;
+  subtype: string | null;
+  label: string;
+  mime: string;
+  detectedBy: string;
+  /** HTML, SVG and XML: shown as escaped text, never rendered inside OpusHub */
+  activeContent: boolean;
+  size: number;
+  bytes: number;
+  truncated: boolean;
+  tail: boolean;
+  sensitive: boolean;
+  /** 'text' when the content is in `text`, 'image'/'pdf' when it arrives from `bytesHref` */
+  inline: 'text' | 'image' | 'pdf' | null;
+  text: string | null;
+  encoding?: string | null;
+  lossy?: boolean;
+  lines?: number;
+  note?: string | null;
+  /** a refusal's own explanation — "this is 900 MB, download it" is an answer, not an error */
+  reason?: string | null;
+  needsBytes?: boolean;
+  bytesHref?: string | null;
+  tokenExpiresAt?: number | null;
+  /** present on a refusal: too_large | unsupported_preview */
+  code?: string;
+  error?: string;
+  permissions?: FilesPermissions;
+}
+
+export interface FileSearchMatch {
+  name: string;
+  path: string;
+  depth: number;
+  kind: FileKind;
+  typeLabel: string;
+  size: number | null;
+  mtimeMs: number | null;
+  modeText: string | null;
+  sensitive: boolean;
+}
+
+export interface FileSearchDoc {
+  ok: true;
+  root: { id: string; label: string };
+  path: string;
+  query: string;
+  matches: FileSearchMatch[];
+  count: number;
+  visited: number;
+  directories: number;
+  depth: number;
+  /** why the walk stopped early: matches | nodes | timeout | cancelled | null when it finished */
+  stopped: 'matches' | 'nodes' | 'timeout' | 'cancelled' | null;
+  truncated: boolean;
+  elapsedMs: number;
+  followedSymlinks: false;
+  limits: { maxSearchMatches: number; maxSearchNodes: number; maxSearchDepth: number; searchTimeoutMs: number };
+  permissions?: FilesPermissions;
+  at: number;
+}
+
+export interface PermissionStatusDoc {
+  ok: true;
+  state: PermissionState;
+  code: string | null;
+  reason: string | null;
+  operation: string;
+  path: string | null;
+  root?: { id: string; label: string } | null;
+  kind?: FileKind;
+  sensitive?: boolean;
+  class?: string | null;
+  rule?: string | null;
+  permissions?: FilesPermissions;
+  privileged?: PrivilegedStatus;
+  /** whether "Request Access" could conceivably help here */
+  requestable?: boolean;
+  grants?: { rootId: string; path: string; operation: string; expiresAt: number; ttlMs: number }[];
+}
+
+/** The honest state of the privileged side of the broker. */
+export interface PrivilegedStatus {
+  available: boolean;
+  provider: { id: string; label: string; operations: PrivilegedOperation[] } | null;
+  operations: PrivilegedOperation[];
+  reason: string | null;
+  registeredAt: number | null;
+  grants: number;
+}
+
+/** Storage context: which mount, dataset and containers a path belongs to. */
+export interface StorageContextDoc {
+  ok?: true;
+  available?: false;
+  reason?: string;
+  at?: number;
+  path?: string | null;
+  canonical?: string;
+  mount: {
+    mountPoint: string;
+    source: string | null;
+    fsType: string | null;
+    readOnly: boolean;
+    bind: boolean;
+    fsRoot: string | null;
+    usage: { total: number; used: number; free: number; usedPct: number | null; device: string | null } | null;
+  } | null;
+  mountTable: { available: boolean; reason: string | null; count: number };
+  dataset: { available: boolean; reason: string | null; name?: string | null; mountpoint?: string | null; used?: number | null; free?: number | null; compression?: string | null };
+  containers: {
+    available: boolean;
+    reason: string | null;
+    scanned?: number;
+    truncated?: boolean;
+    matches: { container: string | null; id: string | null; state: string | null; source: string; target: string | null; rw: boolean; relation: 'bind' | 'served' }[];
+  };
+  volume: { available: boolean; reason: string | null; name?: string | null; driver?: string | null; mountpoint?: string | null; relation?: 'bind' | 'served' };
+}
+
+/** GET /api/files — what the page boots from. */
+export interface FilesSurface {
+  ok: true;
+  surface: 'files';
+  phase: string;
+  readOnly: true;
+  /** the mutations this phase does not have, named so the UI can say so */
+  notSupported: string[];
+  provider: { id: string; label: string; operations: string[] };
+  roots: FileRoot[];
+  refused: FileRootRefusal[];
+  source: 'configured' | 'discovered';
+  disabled: boolean;
+  configuredVia: string | null;
+  permissions: FilesPermissions;
+  privileged: PrivilegedStatus;
+  limits: {
+    maxDirectoryEntries: number; maxPreviewBytes: number; maxPreviewFileSize: number;
+    maxInlineImageBytes: number; maxSearchMatches: number; maxSearchNodes: number;
+    maxSearchDepth: number; maxSearchQuery: number; maxTreeDepth: number; maxPathDepth: number;
+    downloads: 'streamed' | 'capped'; grantTtlMs: number; downloadTokenTtlMs: number;
+  };
+  routes: { get: string[]; post: string[] };
+  at: number;
+}
+
+export interface FilesRootsDoc {
+  ok: true;
+  roots: FileRoot[];
+  refused: FileRootRefusal[];
+  source: 'configured' | 'discovered';
+  disabled: boolean;
+  configuredVia: string | null;
+  permissions: FilesPermissions;
+  privileged: PrivilegedStatus;
+  at: number;
+}
+
+/** The answer to "Request Access". `state` is what the panel renders. */
+export interface PrivilegeRequestResult {
+  ok?: boolean;
+  state: PrivilegeState;
+  code?: string;
+  error?: string;
+  reason?: string | null;
+  operation: PrivilegedOperation | null;
+  root: { id: string; label: string } | null;
+  path: string | null;
+  class?: string | null;
+  grantable?: boolean | null;
+  requestAccess?: boolean;
+  requested?: boolean;
+  provider?: { id: string; label: string } | null;
+  expiresAt?: number | null;
+  ttlMs?: number | null;
+  privileged: PrivilegedStatus;
+}
+
+/**
+ * What `GET /api/files/download-token` answers with. The Files page never holds one: a download is
+ * a plain `<a href>` that the server redirects to the reference it just minted, so a token lives in
+ * a redirect and in one byte request — never in React state, storage or a composed URL. This is the
+ * route's contract, kept here because the contract is the point.
+ */
+export interface DownloadTokenDoc {
+  ok: true;
+  token: string;
+  expiresAt: number;
+  ttlMs: number;
+  operation: 'download';
+  file: { name: string; path: string; size: number | null; mime: string; mtimeMs: number | null };
+  href: string;
+  root: { id: string; label: string };
+}
+
+/** A refusal every files route can answer with. `code` is what the UI switches on. */
+export interface FilesRefusal {
+  error: string;
+  code: string;
+  state?: PrivilegeState | PermissionState | null;
+  reason?: string | null;
+  operation?: string | null;
+  rule?: string | null;
+  class?: string | null;
+  /** a preview refusal still says what it detected: "900 MB video, download it" is an answer */
+  detectedBy?: string;
+  root?: { id: string; label: string } | null;
+  path?: string | null;
+  requestAccess?: boolean;
+  grantable?: boolean | null;
+  permission?: string;
+  privileged?: PrivilegedStatus;
+  kind?: PreviewKind;
+  subtype?: string | null;
+  label?: string;
+  activeContent?: boolean;
+  size?: number;
+  limit?: number;
+  routes?: string[];
+  allowed?: string[];
+  notSupported?: string[];
+  retry?: string | null;
 }

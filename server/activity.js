@@ -38,7 +38,12 @@ export const CATEGORIES = ['service', 'stack', 'docker', 'system', 'security', '
   'storage', 'network', 'power', 'provider',
   // Phase 10A — monitor state changes and incidents are their own area: they are not service
   // state (a monitor can be down while the service is fine, and vice versa) and not operations.
-  'monitoring'];
+  'monitoring',
+  // Phase 11A — the file manager's security-relevant rows only: an access request and its outcome,
+  // an explicit attempt at a protected location, and a read of a sensitive file. Ordinary browsing
+  // (listing a directory, opening a preview) is deliberately NOT recorded — a directory listing is
+  // not an event, and logging one per click would bury the rows that matter.
+  'files'];
 
 const CATEGORY_BY_TYPE = new Map(Object.entries({
   container: 'docker', provider: 'docker', stack: 'stack', service: 'service', alert: 'system',
@@ -53,6 +58,8 @@ const CATEGORY_BY_TYPE = new Map(Object.entries({
   autoheal: 'docker', update: 'service',
   network: 'network',
   ups: 'power', pdu: 'power', power: 'power',
+  // Phase 11A: file manager security events.
+  files: 'files',
 }));
 
 /** Classify an event for filtering and display. Pure — also applied to pre-7E log lines on read. */
@@ -78,6 +85,11 @@ export function classifyEvent({ source = null, type = null, meta = null } = {}) 
   // Phase 10A: a monitor that has gone down or degraded is worth noticing; a recovery is not.
   else if (t === 'monitor.down' || t === 'monitor.degraded' || t === 'incident.opened') severity = 'warning';
   else if (t === 'monitor.recovered' || t === 'monitor.recovering' || t === 'incident.resolved') severity = 'notice';
+  // Phase 11A: asking for access to a protected location, or being refused, is worth noticing;
+  // having asked at all is merely a record. A sensitive read is recorded without alarm.
+  else if (t === 'files.protected_path' || t === 'files.privilege.denied' || t === 'files.download.failed') severity = 'warning';
+  else if (t === 'files.privilege.requested' || t === 'files.privilege.granted' || t === 'files.privilege.unavailable') severity = 'notice';
+  else if (t === 'files.download.sensitive' || t === 'files.preview.sensitive') severity = 'notice';
   return { severity, category };
 }
 

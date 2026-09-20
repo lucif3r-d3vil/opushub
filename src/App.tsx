@@ -25,6 +25,7 @@ const ManagedStack = lazy(() => import('./pages/ManagedStack'));
 const Infrastructure = lazy(() => import('./pages/Infrastructure'));
 const Host = lazy(() => import('./pages/Host'));
 const SystemPage = lazy(() => import('./pages/System'));
+const FilesPage = lazy(() => import('./pages/Files'));
 const Activity = lazy(() => import('./pages/Activity'));
 const Settings = lazy(() => import('./pages/Settings'));
 const IconsPage = lazy(() => import('./pages/Icons'));
@@ -35,13 +36,18 @@ const Login = lazy(() => import('./pages/Login'));
 /**
  * The primary navigation — one entry per major concept, and nothing else:
  *
- *   Hub · Services / Containers · Stacks · Monitoring · System · Activity · Settings
+ *   Hub · Services / Containers · Stacks · Monitoring · System · Files · Activity · Settings
  *
  * Everything else lives *inside* one of those parents: the Docker engine, storage, networking,
  * power and the host itself are views of System; updates, Autoheal and lifecycle actions are
  * part of Services; imports, connections, backgrounds and custom code are Settings. Icons come
  * from one stroke family, and every glyph is unique (Monitoring keeps the pulse; Activity is a
  * history clock — they briefly shared an icon, which made the rail lie).
+ *
+ * Files (Phase 11A) earns its own rail slot rather than hiding under System: it is a destination
+ * an operator navigates to on purpose, and its glyph is a folder with pages in it — nothing else
+ * on the rail looks like that. It sits after System and before Activity, which keeps the machine
+ * views together and the record of what happened after them.
  */
 const NAV = [
   { to: '/', label: 'Hub', icon: 'M4 11.5 12 5l8 6.5V20h-5.5v-4.5h-5V20H4z' },
@@ -49,6 +55,7 @@ const NAV = [
   { to: '/stacks', label: 'Stacks', icon: 'm12 3 8.5 4.7L12 12.4 3.5 7.7zM3.5 12.5 12 17.2l8.5-4.7M3.5 17l8.5 4.7L20.5 17' },
   { to: '/monitoring', label: 'Monitoring', icon: 'M3 12h4l2.5-6 4 12 2.5-6H21' },
   { to: '/system', label: 'System', icon: 'M4 5.5h16v11H4zM8.5 20h7M12 16.5V20' },
+  { to: '/files', label: 'Files', icon: 'M3.5 6.6A1.6 1.6 0 0 1 5.1 5h3.8l1.7 2.1h8.3a1.6 1.6 0 0 1 1.6 1.6v8.7a1.6 1.6 0 0 1-1.6 1.6H5.1a1.6 1.6 0 0 1-1.6-1.6zM7 12.6h10M7 15.6h6' },
   { to: '/activity', label: 'Activity', icon: 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5M12 7v5l4 2' },
   { to: '/settings', label: 'Settings', icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7.4 7.4 0 0 0-.1-1.2l2-1.55-2-3.46-2.35.95a7.5 7.5 0 0 0-2.05-1.2L14.5 3h-5l-.4 2.54a7.5 7.5 0 0 0-2.05 1.2L4.7 5.79l-2 3.46 2 1.55a7.6 7.6 0 0 0 0 2.4l-2 1.55 2 3.46 2.35-.95a7.5 7.5 0 0 0 2.05 1.2L9.5 21h5l.4-2.54a7.5 7.5 0 0 0 2.05-1.2l2.35.95 2-3.46-2-1.55c.07-.4.1-.8.1-1.2Z' },
 ];
@@ -299,6 +306,9 @@ function ShellWithRoutes() {
                 bookmarks still carry these paths, and they keep arriving where they meant to. */}
             <Route path="host" element={<LegacyRedirect to="/system/host" />} />
             <Route path="infrastructure" element={<LegacyRedirect to="/system/infrastructure" />} />
+            {/* Phase 11A — the read-only file manager. Its own destination, one URL for where
+                the operator is: /files?root=<id>&path=<relative>&sel=<relative>&q=<query>. */}
+            <Route path="files" element={<FilesPage />} />
             <Route path="activity" element={<Activity />} />
             <Route path="settings" element={<Settings />} />
             <Route path="settings/:tab" element={<Settings />} />

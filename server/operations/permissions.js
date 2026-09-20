@@ -27,14 +27,29 @@ export const PERMISSIONS = Object.freeze({
   STACK_REMOVE: 'operations.stack.remove',
   STACK_MANAGE: 'operations.stack.manage',       // create/edit managed stack definitions
   REGISTRY_MANAGE: 'operations.registry.manage', // registries (credentials) — server-side config
+  // Phase 11A — the read-only file manager. These are *read* permissions, not operations: nothing
+  // in the vocabulary can create, change or delete a file, because no route can either.
+  //   files.read            list, stat, preview, resolve — browsing an exposed root
+  //   files.search          filename search inside one root
+  //   files.download        mint a download reference and stream the bytes
+  //   files.read_sensitive  roots and files the policy classifies as sensitive (dumps, keys, certs,
+  //                         /var/log, /home). Separate so "may browse" and "may read a database
+  //                         backup" are not the same decision.
+  // Protected locations are not in this vocabulary at all: no permission grants them, and
+  // files/broker.js refuses to grant one even when asked.
+  FILES_READ: 'files.read',
+  FILES_SEARCH: 'files.search',
+  FILES_DOWNLOAD: 'files.download',
+  FILES_READ_SENSITIVE: 'files.read_sensitive',
 });
 
 /**
  * Roles → permissions.
  *
- *   administrator  every approved operation (today: the only role in use)
+ *   administrator  every approved operation and every read permission (today: the only role in use)
  *   operator       lifecycle operations, but not the high-risk ones (reserved for Phase 9+)
- *   viewer         no operations at all — observation only
+ *   viewer         no permissions at all — held empty on purpose, and proved empty by
+ *                  server/phase8-operations.test.js
  *
  * The two future roles are declared here so the model is visible and testable now, while
  * `resolveRole()` still returns `administrator` for the single configured account. Nothing
@@ -50,8 +65,10 @@ export const ROLES = Object.freeze({
   operator: Object.freeze({
     id: 'operator',
     label: 'Operator',
-    description: 'Reserved: lifecycle operations without the high-risk ones.',
-    permissions: Object.freeze(['operations.container.start', 'operations.container.restart', 'operations.container.pause', 'operations.image.pull']),
+    description: 'Reserved: lifecycle operations without the high-risk ones, plus read-only file browsing.',
+    // Browsing and searching files is observation, so an operator may do it. Downloading host files
+    // and reading sensitive ones are not, so an operator may not: those stay with the administrator.
+    permissions: Object.freeze(['operations.container.start', 'operations.container.restart', 'operations.container.pause', 'operations.image.pull', 'files.read', 'files.search']),
   }),
   viewer: Object.freeze({
     id: 'viewer',

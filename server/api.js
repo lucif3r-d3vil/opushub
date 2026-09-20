@@ -58,6 +58,7 @@ import { handleContainersRoutes } from './containersApi.js';
 import { handleStacksRoutes } from './stacksApi.js';
 import { handleRegistriesRoutes } from './registriesApi.js';
 import { handleCatalogRoutes } from './catalogApi.js';
+import { handleFilesRoutes, retireFilesSession, retireAllFilesSessions } from './filesApi.js';
 
 /** Best-effort image facts, cached — the detail page asks once per view, never per poll. */
 const imageInfoCache = new Map();
@@ -308,6 +309,26 @@ export async function handleApi(req, res, url) {
     if (handled) return;
   }
 
+  // ---------- files (Phase 11A) ----------
+  // The read-only file manager surface: roots, listing, properties, preview, search and token-bound
+  // downloads, plus the single POST that asks the privilege broker a question. Every path a browser
+  // names is a root id plus a root-relative path, and every one of them is resolved server-side
+  // (realpath + containment + classification) before a byte is read — see server/files/policy.js.
+  // Two streaming routes need the raw response, so this handler receives `req`/`res` as well.
+  if (p === '/api/files' || p.startsWith('/api/files/') || p === '/api/v1/files' || p.startsWith('/api/v1/files/')) {
+    const handled = await handleFilesRoutes({
+      req, res, p, method,
+      send: (status, obj) => send(res, status, obj),
+      jsonBody,
+      query: url.searchParams,
+      actor: session?.username ?? null,
+      // the session *handle*, never the cookie token: enough to bind a download reference or a
+      // privileged grant to a session, useless as a credential
+      sessionId: activeToken ? auth.sessionHandle(activeToken) : null,
+    });
+    if (handled) return;
+  }
+
   // ---------- container updates (Phase 10C Diun / Update Now) ----------
   if (p.startsWith('/api/container-updates')) {
     const handled = await handleUpdatesRoutes({
@@ -420,6 +441,9 @@ export async function handleApi(req, res, url) {
   if (route === 'POST /api/auth/logout') {
     const token = auth.tokenFrom(req);
     if (token) auth.destroySession(token);
+    // A signed-out session must not leave a live download reference or a live privileged grant
+    // behind it (Phase 11A). Both are session-bound, so retiring them here is the whole mechanism.
+    if (activeToken) retireFilesSession(auth.sessionHandle(activeToken));
     if (session) logEvent({ source: 'system', type: 'auth.logout', subject: session.username, message: 'signed out' });
     res.setHeader('set-cookie', auth.clearedCookie());
     return send(res, 200, { ok: true, authenticated: false });
@@ -446,12 +470,15 @@ export async function handleApi(req, res, url) {
     if (scope === 'others') {
       if (!session) return send(res, 401, { error: 'Authentication required.', code: 'auth_required' });
       const revoked = auth.revokeSessions({ except: activeToken });
+      // every other session's file capabilities go with it; this one's stay (it is still signed in)
+      retireAllFilesSessions();
       logEvent({ source: 'system', type: 'auth.sessions_revoked', subject: session.username, message: `revoked ${revoked} other session(s)` });
       return send(res, 200, { ok: true, revoked, signedOut: false });
     }
     if (scope === 'all') {
       const username = session?.username ?? auth.getUser()?.username ?? 'admin';
       const revoked = auth.revokeSessions();
+      retireAllFilesSessions();
       res.setHeader('set-cookie', auth.clearedCookie());
       logEvent({ source: 'system', type: 'auth.sessions_revoked', subject: username, message: `signed out everywhere (${revoked} session(s))` });
       return send(res, 200, { ok: true, revoked, signedOut: true });
@@ -460,6 +487,7 @@ export async function handleApi(req, res, url) {
       const handle = String(body?.id || '');
       if (!handle) return send(res, 400, { error: 'A session id is required.', code: 'session_id' });
       const revoked = auth.revokeSessions({ handles: [handle] });
+      retireFilesSession(handle);
       // revoking your own session is a sign-out, and must clear the cookie with it
       const isCurrent = handle === auth.sessionHandle(activeToken);
       if (isCurrent) res.setHeader('set-cookie', auth.clearedCookie());
@@ -1835,6 +1863,11 @@ const V1_ROUTES = new Set([
   '/registries',
   // Phase 10D — service catalog
   '/catalog',
+  // Phase 11A — the read-only file manager. Listed explicitly, one entry per route: v1 may never
+  // expose a files path that was not deliberately versioned.
+  '/files', '/files/roots', '/files/list', '/files/tree', '/files/stat', '/files/context',
+  '/files/preview', '/files/search', '/files/permission-status', '/files/download-token',
+  '/files/download', '/files/raw', '/files/privilege/request',
 ]);
 
 export function rewriteV1(pathname) {

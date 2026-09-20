@@ -20,6 +20,10 @@ import ActivityPage from '../../src/pages/Activity';
 import InfrastructurePage from '../../src/pages/Infrastructure';
 import MonitoringPage from '../../src/pages/Monitoring';
 import MonitorDetailPage from '../../src/pages/MonitorDetail';
+import FilesPage from '../../src/pages/Files';
+// Phase 11A — the explorer's narrow-screen rules are CSS, and jsdom has no layout engine, so the
+// check reads the stylesheet rather than pretending to measure a phone.
+import pagesCss from '../../src/styles/pages.css?raw';
 import { Loading } from '../../src/components/ui';
 import { GREETINGS, greetingFor } from '../../src/components/hub/HubHeader';
 import type { LayoutDoc, Monitor, UptimeWindow, WidgetInstance } from '../../src/lib/types';
@@ -425,6 +429,8 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
     '/api/news': newsDoc,
     '/api/market': marketDoc,
     '/api/search': (_body, path) => searchResults(decodeURIComponent(path.split('q=')[1] || '')),
+    // Phase 11A — the read-only file manager
+    ...filesRoutes,
     // the same shape GET /api/templates returns (templates are composition only)
     '/api/templates': {
       templates: [
@@ -718,6 +724,278 @@ function monitoringRoutes(over: Record<string, unknown | ((body: unknown, path: 
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Phase 11A — files fixtures                                          */
+/* ------------------------------------------------------------------ */
+//
+// Two roots: a media pool and a sensitive log directory. Everything the explorer renders comes from
+// these documents, and every one of them is addressed the way the API is — a root id plus a path
+// relative to it. No fixture carries a host path into a request.
+
+const FILES_MEDIA = 'tank-media';
+const FILES_LOGS = 'var-log';
+
+const filesPerms = { read: true, search: true, download: true, readSensitive: false };
+
+/** The honest state of a default install: the broker exists, nothing privileged is registered. */
+const filesPrivileged = {
+  available: false, provider: null, operations: ['list', 'stat', 'read'],
+  reason: 'No privileged provider is registered on this host.', registeredAt: null, grants: 0,
+};
+
+const filesRoots = [
+  {
+    id: FILES_MEDIA, label: 'Media', path: '/tank/media', source: 'configured', viaSymlink: false,
+    fs: 'zfs', device: 'tank/media', total: 4_000_000_000_000, used: 1_200_000_000_000,
+    free: 2_800_000_000_000, usedPct: 30, dataset: 'tank/media', sensitive: false, readable: true,
+    reason: null, nestedUnder: null,
+  },
+  {
+    id: FILES_LOGS, label: 'Logs', path: '/var/log', source: 'configured', viaSymlink: false,
+    fs: 'ext4', device: 'nvme0n1p2', total: 60_000_000_000, used: 41_000_000_000,
+    free: 19_000_000_000, usedPct: 68, dataset: null, sensitive: true, readable: true,
+    reason: null, nestedUnder: null,
+  },
+];
+
+const filesRefused = [
+  { path: '/', source: 'configured', code: 'root_is_root', reason: 'The filesystem root is never a root OpusHub exposes.' },
+];
+
+// The same numbers server/files/limits.js enforces: a fixture that invented friendlier bounds would
+// let the page render a promise the server does not keep.
+const filesLimits = {
+  maxDirectoryEntries: 2000, maxPreviewBytes: 262_144, maxPreviewFileSize: 33_554_432,
+  maxInlineImageBytes: 8_388_608, maxSearchMatches: 500, maxSearchNodes: 20_000, maxSearchDepth: 8,
+  maxSearchQuery: 128, maxTreeDepth: 3, maxPathDepth: 64, downloads: 'streamed',
+  grantTtlMs: 900_000, downloadTokenTtlMs: 120_000,
+};
+
+const filesSurfaceDoc = {
+  ok: true, surface: 'files', phase: '11A', readOnly: true,
+  notSupported: ['delete', 'rename', 'move', 'copy', 'upload', 'mkdir', 'chmod', 'chown', 'write',
+    'truncate', 'execute', 'shell', 'terminal'],
+  provider: { id: 'local', label: 'Host filesystem (read-only)', operations: ['roots', 'list', 'tree', 'stat', 'read', 'preview', 'download', 'search', 'permission-status'] },
+  roots: filesRoots, refused: filesRefused, source: 'configured', disabled: false,
+  configuredVia: 'OPUSHUB_FILES_ROOTS', permissions: filesPerms, privileged: filesPrivileged,
+  limits: filesLimits,
+  routes: {
+    get: ['/api/files', '/api/files/roots', '/api/files/list', '/api/files/tree', '/api/files/stat',
+      '/api/files/context', '/api/files/preview', '/api/files/search', '/api/files/permission-status',
+      '/api/files/download-token', '/api/files/download', '/api/files/raw'],
+    post: ['/api/files/privilege/request'],
+  },
+  at: now,
+};
+
+/** One directory entry, with every field the API sends so the table cannot quietly lose a column. */
+function fentry(name: string, path: string, over: Record<string, unknown> = {}) {
+  return {
+    name, path, kind: 'file', typeLabel: 'File', ext: null, size: 1024,
+    mtimeMs: now - 3_600_000, ctimeMs: now - 7_200_000, mode: 0o644, modeText: '-rw-r--r--',
+    octal: '0644', uid: 1000, gid: 1000, owner: 'nora', group: 'media', nlink: 1, symlink: false,
+    link: null, accessible: true, statError: null, sensitive: false, classification: null, ...over,
+  };
+}
+
+const folder = (name: string, path: string) => fentry(name, path, {
+  kind: 'dir', typeLabel: 'Folder', size: null, mode: 0o755, modeText: 'drwxr-xr-x', octal: '0755', nlink: 4,
+});
+
+const filesRootEntries = [
+  folder('Movies', 'Movies'),
+  folder('Music', 'Music'),
+  fentry('compose.yml', 'compose.yml', { ext: 'yaml', typeLabel: 'YAML document', size: 812 }),
+  fentry('notes.md', 'notes.md', { ext: 'md', typeLabel: 'Markdown', size: 2048 }),
+  fentry('poster.png', 'poster.png', { ext: 'png', typeLabel: 'PNG image', size: 204_800 }),
+  fentry('big.mkv', 'big.mkv', { ext: 'mkv', typeLabel: 'Video', size: 900_000_000 }),
+  fentry('private', 'private', {
+    kind: 'symlink', typeLabel: 'Symbolic link', size: 41, symlink: true,
+    link: { target: null, inside: false }, accessible: false, statError: 'EACCES',
+  }),
+];
+
+/** A listing for one folder. `private` is the folder OpusHub cannot read. */
+function filesListingFor(path: string) {
+  const doc = (entries: unknown[], over: Record<string, unknown> = {}) => ({
+    ok: true, root: { id: FILES_MEDIA, label: 'Media', sensitive: false }, path, canonical: `/tank/media/${path}`.replace(/\/$/, ''),
+    kind: 'dir', entries, sort: 'name', dir: 'asc', sortScope: 'all', count: entries.length,
+    total: entries.length, hidden: 0, scanned: entries.length, offset: 0, truncated: false,
+    symlink: false, limits: { maxDirectoryEntries: 2000, maxDirectoryScan: 20_000 },
+    permissions: filesPerms, privileged: filesPrivileged, at: now, ...over,
+  });
+  if (path === 'private') return filesPermissionRequired;
+  if (path === 'Movies') return doc([fentry('wave.mkv', 'Movies/wave.mkv', { ext: 'mkv', typeLabel: 'Video', size: 1_400_000_000 })], { path: 'Movies' });
+  if (path === 'Music') return doc([], { path: 'Music' });
+  return doc(filesRootEntries, { path: '', canonical: '/tank/media', hidden: 1, scanned: 8 });
+}
+
+/** What the API answers when the operating system refused and nothing was elevated to find out more. */
+const filesPermissionRequired = {
+  $status: 403,
+  body: {
+    error: 'OpusHub cannot read this folder: the operating system refused (EACCES). Nothing was elevated to find out more.',
+    code: 'permission_required', operation: 'list', rule: null, class: null,
+    root: { id: FILES_MEDIA, label: 'Media' }, path: 'private', requestAccess: true,
+    privileged: filesPrivileged,
+  },
+};
+
+const filesTreeDoc = {
+  ok: true, root: { id: FILES_MEDIA, label: 'Media' }, path: '',
+  children: [
+    { name: 'Movies', path: 'Movies', kind: 'dir', truncated: false, children: [{ name: '2024', path: 'Movies/2024', kind: 'dir', truncated: false, children: [] }] },
+    { name: 'Music', path: 'Music', kind: 'dir', truncated: false, children: [] },
+    { name: 'private', path: 'private', kind: 'dir', truncated: false, children: [] },
+  ],
+  depth: 2, at: now,
+};
+
+function filesStatFor(path: string) {
+  const base = {
+    ok: true, root: { id: FILES_MEDIA, label: 'Media', sensitive: false },
+    name: path.split('/').pop() || 'Media', path, canonical: `/tank/media/${path}`,
+    kind: 'file', typeLabel: 'File', isDirectory: false, isFile: true, symlink: false, link: null,
+    size: 2048, mtimeMs: now - 3_600_000, atimeMs: now - 1_800_000, ctimeMs: now - 7_200_000,
+    birthtimeMs: now - 86_400_000, mode: 0o644, modeText: '-rw-r--r--', octal: '0644',
+    uid: 1000, gid: 1000, owner: 'nora', group: 'media', nlink: 1, ext: null, readable: true,
+    writable: false, classification: null, sensitive: false, previewable: true,
+    limits: { maxPreviewBytes: 262_144, maxPreviewFileSize: 33_554_432 }, context: null,
+    permissions: filesPerms, privileged: filesPrivileged, at: now,
+  };
+  if (path === 'private') return filesPermissionRequired;
+  if (path === 'notes.md') return { ...base, name: 'notes.md', ext: 'md', typeLabel: 'Markdown', size: 2048 };
+  if (path === 'poster.png') return { ...base, name: 'poster.png', ext: 'png', typeLabel: 'PNG image', size: 204_800 };
+  if (path === 'big.mkv') return { ...base, name: 'big.mkv', ext: 'mkv', typeLabel: 'Video', size: 900_000_000 };
+  if (path === 'compose.yml') {
+    return {
+      ...base, name: 'compose.yml', ext: 'yaml', typeLabel: 'YAML document', size: 812,
+      context: {
+        available: true, at: now, path, canonical: `/tank/media/${path}`,
+        mount: {
+          mountPoint: '/tank/media', source: 'tank/media', fsType: 'zfs', readOnly: false, bind: false,
+          fsRoot: '/', usage: { total: 4_000_000_000_000, used: 1_200_000_000_000, free: 2_800_000_000_000, usedPct: 30, device: 'tank/media' },
+        },
+        mountTable: { available: true, reason: null, count: 4 },
+        dataset: { available: true, reason: null, name: 'tank/media', mountpoint: '/tank/media', used: 1_200_000_000_000, free: 2_800_000_000_000, compression: 'lz4' },
+        containers: {
+          available: true, reason: null, scanned: 12, truncated: false,
+          matches: [{ container: 'wave', id: 'abc123def456', state: 'running', source: '/tank/media', target: '/media', rw: true, relation: 'bind' }],
+        },
+        volume: { available: false, reason: 'No volume serves this path.' },
+      },
+    };
+  }
+  return base;
+}
+
+function filesPreviewFor(path: string) {
+  const base = {
+    root: { id: FILES_MEDIA, label: 'Media' }, name: path.split('/').pop() || '', path,
+    detectedBy: 'content', activeContent: false, size: 2048, bytes: 2048, truncated: false,
+    tail: false, sensitive: false, permissions: filesPerms,
+  };
+  if (path === 'notes.md') {
+    return {
+      ...base, ok: true, kind: 'text', subtype: 'markdown', label: 'Markdown', mime: 'text/markdown',
+      inline: 'text', text: '# Notes\n\n<script>alert(1)</script>\n\nNothing above runs.\n',
+      encoding: 'utf-8', lossy: false, lines: 5, note: null, bytesHref: null, tokenExpiresAt: null,
+    };
+  }
+  if (path === 'compose.yml') {
+    return {
+      ...base, ok: true, kind: 'text', subtype: 'yaml', label: 'YAML', mime: 'application/yaml', size: 812, bytes: 812,
+      inline: 'text', text: 'services:\n  wave:\n    image: wave:latest\n', encoding: 'utf-8', lossy: false,
+      lines: 3, note: null, bytesHref: null, tokenExpiresAt: null,
+    };
+  }
+  if (path === 'poster.png') {
+    return {
+      ...base, ok: true, kind: 'image', subtype: 'png', label: 'PNG image', mime: 'image/png',
+      detectedBy: 'magic', size: 204_800, bytes: 204_800, inline: 'image', text: null, encoding: null,
+      bytesHref: '/api/files/raw?token=fixture-preview-reference', tokenExpiresAt: now + 300_000,
+    };
+  }
+  if (path === 'big.mkv') {
+    return {
+      $status: 415,
+      body: {
+        error: 'That file is 900 MB and its contents are not shown inline. Download it instead.',
+        code: 'unsupported_preview', root: base.root, name: 'big.mkv', path, kind: 'media',
+        subtype: 'matroska', label: 'Video', mime: 'video/x-matroska', size: 900_000_000,
+        detectedBy: 'extension', activeContent: false, inline: null, text: null, limits: filesLimits,
+      },
+    };
+  }
+  return {
+    $status: 415,
+    body: { error: 'That kind of file is not shown inline.', code: 'unsupported_preview', root: base.root, name: base.name, path, kind: 'binary', subtype: null, label: 'Binary file', mime: 'application/octet-stream', size: 1024, detectedBy: 'content', activeContent: false, inline: null, text: null, limits: filesLimits },
+  };
+}
+
+function filesSearchFor(query: string) {
+  const all = [
+    { name: 'compose.yml', path: 'compose.yml', depth: 1, kind: 'file', typeLabel: 'YAML document', size: 812, mtimeMs: now - 3_600_000, modeText: '-rw-r--r--', sensitive: false },
+    { name: 'compose.override.yml', path: 'Movies/compose.override.yml', depth: 2, kind: 'file', typeLabel: 'YAML document', size: 220, mtimeMs: now - 7_200_000, modeText: '-rw-r--r--', sensitive: false },
+    { name: 'Movies', path: 'Movies', depth: 1, kind: 'dir', typeLabel: 'Folder', size: null, mtimeMs: now - 86_400_000, modeText: 'drwxr-xr-x', sensitive: false },
+    { name: 'notes.md', path: 'notes.md', depth: 1, kind: 'file', typeLabel: 'Markdown', size: 2048, mtimeMs: now - 3_600_000, modeText: '-rw-r--r--', sensitive: false },
+  ];
+  const q = query.toLowerCase();
+  const matches = all.filter((m) => m.name.toLowerCase().includes(q));
+  return {
+    ok: true, root: { id: FILES_MEDIA, label: 'Media' }, path: '', query: q, matches,
+    count: matches.length, visited: 42, directories: 6, depth: 8, stopped: null, truncated: false,
+    elapsedMs: 12, followedSymlinks: false,
+    limits: { maxSearchMatches: 500, maxSearchNodes: 20_000, maxSearchDepth: 8, searchTimeoutMs: 8000 },
+    permissions: filesPerms, at: now,
+  };
+}
+
+function filesPermissionStatusFor(path: string) {
+  if (path === 'private') {
+    return {
+      ok: true, state: 'permission_required', code: 'permission_required',
+      reason: 'OpusHub does not currently have permission to read this location.', operation: 'list',
+      path, root: { id: FILES_MEDIA, label: 'Media' }, permissions: filesPerms,
+      privileged: filesPrivileged, requestable: true, grants: [],
+    };
+  }
+  return {
+    ok: true, state: 'readable', code: null, reason: null, operation: 'read', path,
+    root: { id: FILES_MEDIA, label: 'Media' }, kind: 'file', sensitive: false, permissions: filesPerms,
+    privileged: filesPrivileged, requestable: false, grants: [],
+  };
+}
+
+/** One query parameter out of a stubbed URL. */
+const paramOf = (url: string, key: string) => new URLSearchParams(url.split('?')[1] || '').get(key) || '';
+
+/** What the broker answers on a host with no privileged provider: honestly, and with a 501. */
+const filesPrivilegeUnavailable = {
+  $status: 501,
+  body: {
+    error: 'No privileged provider is registered on this host, so there is nothing to escalate to.',
+    code: 'no_privileged_provider', state: 'unavailable', operation: 'list',
+    root: { id: FILES_MEDIA, label: 'Media' }, path: 'private', class: null, rule: null,
+    grantable: false, requestAccess: true, requested: true, privileged: filesPrivileged,
+  },
+};
+
+const filesRoutes = {
+  '/api/files': filesSurfaceDoc,
+  '/api/files/roots': {
+    ok: true, roots: filesRoots, refused: filesRefused, source: 'configured', disabled: false,
+    configuredVia: 'OPUSHUB_FILES_ROOTS', permissions: filesPerms, privileged: filesPrivileged, at: now,
+  },
+  '/api/files/list': (_body: unknown, path: string) => filesListingFor(paramOf(path, 'path')),
+  '/api/files/tree': filesTreeDoc,
+  '/api/files/stat': (_body: unknown, path: string) => filesStatFor(paramOf(path, 'path')),
+  '/api/files/preview': (_body: unknown, path: string) => filesPreviewFor(paramOf(path, 'path')),
+  '/api/files/search': (_body: unknown, path: string) => filesSearchFor(paramOf(path, 'q')),
+  '/api/files/permission-status': (_body: unknown, path: string) => filesPermissionStatusFor(paramOf(path, 'path')),
+  '/api/files/privilege/request': () => filesPrivilegeUnavailable,
+};
+
 /** The Hub, inside the providers it actually runs with, plus routes to observe navigation. */
 function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: string }) {
   return (
@@ -736,6 +1014,7 @@ function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: strin
             <Route path="/activity" element={<div data-test="activity">activity</div>} />
             <Route path="/stacks/:name" element={<StackDetail />} />
             <Route path="/system" element={<SystemPage />} />
+            <Route path="/files" element={<FilesPage />} />
             <Route path="/system/infrastructure" element={<InfrastructurePage />} />
             <Route path="/system/host" element={<SystemPage />} />
             <Route path="/services/:group/:name" element={<ServiceDetail />} />
@@ -927,30 +1206,32 @@ export async function runWebTests(): Promise<WebResult> {
     trigger.remove();
   });
 
-  /* 4N — the shell's navigation contract: seven destinations above, global utilities below */
+  /* 4N — the shell's navigation contract: eight destinations above, global utilities below */
   const AUTH_ROUTES = {
     '/api/setup/status': { required: false, complete: true, hasAccount: true, version: '0.1.0' },
     '/api/auth/me': { authenticated: true, user: { username: 'admin' }, setupComplete: true },
   };
-  await test('nav: exactly seven primary items, in order, with utilities separated below', async (h) => {
+  await test('nav: exactly eight primary items, in order, with utilities separated below', async (h) => {
     h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
     await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
     await h.waitFor(() => !!q('.rail-nav'), 'the primary rail');
     const items = qa('.rail-nav .rail-item').map((el) => el.getAttribute('aria-label'));
-    expect(items.length === 7,
-      `the primary rail must hold exactly seven destinations, saw ${items.length}: ${items.join(', ')}`);
-    const expected = ['Hub', 'Services / Containers', 'Stacks', 'Monitoring', 'System', 'Activity', 'Settings'];
+    expect(items.length === 8,
+      `the primary rail must hold exactly eight destinations, saw ${items.length}: ${items.join(', ')}`);
+    // Phase 11A put Files between System and Activity: the machine's own views stay together, and
+    // the record of what happened to them comes after.
+    const expected = ['Hub', 'Services / Containers', 'Stacks', 'Monitoring', 'System', 'Files', 'Activity', 'Settings'];
     for (let i = 0; i < expected.length; i++) {
       expect(items[i] === expected[i], `primary slot ${i} must be "${expected[i]}", saw "${items[i]}"`);
     }
-    // seven destinations, seven distinct icons — phase 6 collapsed the rail because Monitoring and
+    // eight destinations, eight distinct icons — phase 6 collapsed the rail because Monitoring and
     // Activity briefly drew the same glyph
     const paths = qa('.rail-nav .rail-item svg path').map((el) => el.getAttribute('d'));
     expect(new Set(paths).size === paths.length && paths.every(Boolean), 'two primary destinations share an icon');
-    // every primary href is one of the seven roots — no Infrastructure/Updates/Autoheal squatters
+    // every primary href is one of the eight roots — no Infrastructure/Updates/Autoheal squatters
     const hrefs = qa('.rail-nav .rail-item').map((el) => el.getAttribute('href'));
     for (const href of hrefs) {
-      expect(['/', '/services', '/stacks', '/monitoring', '/system', '/activity', '/settings'].includes(href || ''),
+      expect(['/', '/services', '/stacks', '/monitoring', '/system', '/files', '/activity', '/settings'].includes(href || ''),
         `an unexpected primary destination slipped into the rail: ${href}`);
     }
     // the global actions sit in the rail foot, after the primary nav — one of each
@@ -966,11 +1247,11 @@ export async function runWebTests(): Promise<WebResult> {
     expect((nav.compareDocumentPosition(foot) & 4) !== 0, 'the rail foot must sit below the primary nav, not above or inside');
     expect(qa('.rail-nav .rail-notifications').length === 0 && !q('.rail-nav [aria-label="Open search"]'),
       'a global action leaked into the primary nav');
-    // the mobile bar mirrors the seven destinations (plus the bell and search that cannot fit the rail)
+    // the mobile bar mirrors the eight destinations (plus the bell and search that cannot fit the rail)
     const mbar = q('.mobile-bar')!;
     expect(!!mbar, 'the mobile bar is missing');
-    expect(qa('.mobile-bar a.rail-item').length === 7,
-      `the mobile bar must mirror the seven destinations, saw ${qa('.mobile-bar a.rail-item').length}`);
+    expect(qa('.mobile-bar a.rail-item').length === 8,
+      `the mobile bar must mirror the eight destinations, saw ${qa('.mobile-bar a.rail-item').length}`);
     const mhrefs = qa('.mobile-bar a.rail-item').map((el) => el.getAttribute('href'));
     for (let i = 0; i < expected.length; i++) {
       expect(mhrefs[i] === hrefs[i], `mobile slot ${i} ("${mhrefs[i]}") does not match rail slot ${i} ("${hrefs[i]}")`);
@@ -2890,6 +3171,376 @@ export async function runWebTests(): Promise<WebResult> {
     click(qa('button', seg).find((b) => text(b) === 'Critical')!);
     await h.waitFor(() => h.writes('PUT', '/api/notifications/policy').length >= 1, 'the policy write');
     expect((h.lastCall('PUT', '/api/notifications/policy')!.body as { telegram: { minSeverity: string } }).telegram.minSeverity === 'critical', 'the telegram floor did not commit');
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Phase 11A — Files: the read-only explorer                         */
+  /* ---------------------------------------------------------------- */
+
+  await test('files: the rail item lands on an explorer with roots, breadcrumbs and a listing', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    // the real shell, so the rail item and its active state are checked where they actually live
+    await h.mount(<MemoryRouter initialEntries={['/files']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('.fm-table'), 'the listing');
+
+    // the destination is its own rail slot, directly after System, and it is the active one
+    const items = qa('.rail-nav .rail-item').map((el) => el.getAttribute('aria-label'));
+    expect(items.indexOf('Files') === items.indexOf('System') + 1 && items.indexOf('Files') > -1,
+      `Files must sit directly after System on the rail: ${items.join(', ')}`);
+    const filesItem = qa('.rail-nav .rail-item').find((el) => el.getAttribute('aria-label') === 'Files')!;
+    expect(filesItem.classList.contains('active'), 'the Files rail item is not active on /files');
+    expect(filesItem.getAttribute('href') === '/files', `the Files rail item points at ${filesItem.getAttribute('href')}`);
+    const mobile = qa('.mobile-bar a.rail-item').find((el) => el.getAttribute('href') === '/files');
+    expect(!!mobile, 'the mobile bar has no Files destination');
+
+    // the read-only promise is on the page, not implied by an absence of buttons
+    expect(text().includes('Read-only'), 'the page does not say it is read-only');
+    expect(text().includes('cannot create, rename, move, copy, delete'), 'the page does not name what it cannot do');
+    const cannot = q('.fm-cannot')!;
+    expect(!!cannot, 'the sidebar does not list what OpusHub cannot do here');
+    click(q('summary', cannot)!);
+    expect(text(cannot).includes('chmod') && text(cannot).includes('shell'), 'the unsupported vocabulary is not published');
+
+    // both roots are offered, and the sensitive one says so
+    expect(qa('.fm-root').length === 2, `both exposed roots should be listed, saw ${qa('.fm-root').length}`);
+    expect(text(q('.fm-roots')!).includes('sensitive'), 'a sensitive root is not marked as one');
+    expect(text(q('.fm-roots')!).includes('OPUSHUB_FILES_ROOTS'), 'the sidebar does not say where roots come from');
+    expect(text(q('.fm-refused')!).includes('The filesystem root is never'), 'a refused root candidate is not reported');
+
+    // breadcrumbs name the root, never a path on the host
+    const crumbs = text(q('.fm-crumbs')!);
+    expect(crumbs.includes('Media'), `the trail should start at the root label, saw "${crumbs}"`);
+    expect(!crumbs.includes('/tank'), 'a host path leaked into the breadcrumbs');
+
+    // the listing is what an explorer shows: name, size, type, modified, mode, owner
+    const names = qa('.fm-open').map((el) => text(el).trim());
+    for (const n of ['Movies', 'Music', 'compose.yml', 'notes.md', 'poster.png', 'big.mkv']) {
+      expect(names.includes(n), `"${n}" is missing from the listing`);
+    }
+    const row = text(q('.fm-table tbody tr[data-kind="file"]')!);
+    expect(row.includes('-rw-r--r--'), 'the symbolic mode is not shown');
+    expect(row.includes('nora'), 'the owner is not shown');
+    expect(text().includes('1 entry is not shown'), 'a withheld protected entry is not accounted for');
+    expect(text().includes('Folders'), 'the folder tree is missing from the sidebar');
+    expect(qa('.fm-tree-node').length === 4,
+      `the folder tree should hold the three folders and the one nested inside, saw ${qa('.fm-tree-node').length}`);
+    expect(qa('.fm-tree .fm-tree .fm-tree-node').length === 1, 'a nested folder is not shown as a second level');
+
+    // every call to the files API was a read, addressed by root id + relative path
+    const filesCalls = h.calls.filter((c) => c.path.startsWith('/api/files'));
+    expect(filesCalls.length > 0, 'the page never reached the files API');
+    for (const c of filesCalls) {
+      expect(c.method === 'GET', `browsing called the files API with ${c.method} ${c.path}`);
+      expect(!c.path.includes('/tank'), `a host path was sent to the API: ${c.path}`);
+      expect(!c.path.includes('..'), `a traversal was sent to the API: ${c.path}`);
+    }
+    const listing = new URLSearchParams(filesCalls.find((c) => c.path.startsWith('/api/files/list'))!.path.split('?')[1] || '');
+    expect(listing.get('root') === FILES_MEDIA, `a listing must be addressed by root id, saw ${listing.get('root')}`);
+
+    // a download is a link into the API, and it asks the browser to save
+    const dl = q<HTMLAnchorElement>('a.fm-dl')!;
+    expect(!!dl, 'no download link was rendered for a file');
+    const href = dl.getAttribute('href')!;
+    expect(href.startsWith('/api/files/download?root='), `a download does not go through the files API: ${href}`);
+    expect(href.includes('path=') && !href.includes('/tank') && !href.includes('token='),
+      `a download link should carry a relative path and no host path or token of its own: ${href}`);
+    expect(dl.hasAttribute('download'), 'a download link does not ask the browser to save the file');
+    expect(qa('.fm-table tr[data-kind="dir"] a.fm-dl').length === 0, 'a folder was offered as a download');
+  });
+
+  await test('files: opening a folder moves the listing, the breadcrumbs and the address', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<TestApp entry="/files"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-table'), 'the first listing');
+
+    click(qa('.fm-open').find((el) => text(el).trim() === 'Movies')!);
+    await h.waitFor(() => text().includes('wave.mkv'), 'the contents of the folder');
+    expect(qa('.fm-crumb').some((el) => text(el).trim() === 'Movies'), 'the breadcrumb trail did not follow into the folder');
+    expect(q('.fm-crumb.is-active')!.textContent!.trim() === 'Movies', 'the folder you are in is not the active crumb');
+    const listCalls = h.calls.filter((c) => c.path.startsWith('/api/files/list'));
+    const last = new URLSearchParams(listCalls[listCalls.length - 1].path.split('?')[1] || '');
+    expect(last.get('path') === 'Movies' && last.get('root') === FILES_MEDIA,
+      `the folder was not addressed by root + relative path: ${listCalls[listCalls.length - 1].path}`);
+
+    // the sidebar tree gets there the same way
+    click(qa('.fm-tree-node').find((el) => text(el).includes('Movies'))!);
+    await h.waitFor(() => text().includes('wave.mkv'), 'the tree navigation');
+    expect(q('.fm-tree-node.is-active')!.textContent!.includes('Movies'), 'the tree does not mark where you are');
+
+    // up one folder returns to the root, and the top of a root cannot go further
+    click(q('[aria-label="Up one folder"]')!);
+    await h.waitFor(() => text().includes('compose.yml'), 'the root listing again');
+    expect(q<HTMLButtonElement>('[aria-label="Up one folder"]')!.disabled, 'the up button is enabled at the top of a root');
+
+    // a breadcrumb goes straight back to the root
+    click(qa('.fm-crumb')[0]);
+    await h.waitFor(() => text().includes('poster.png'), 'the root listing from the breadcrumb');
+    expect(qa('.fm-crumb').length === 1, 'the trail did not collapse back to the root');
+  });
+
+  await test('files: a folder OpusHub cannot read explains itself and asks for nothing but a read', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<TestApp entry="/files"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-table'), 'the first listing');
+
+    click(qa('.fm-tree-node').find((el) => text(el).includes('private'))!);
+    await h.waitFor(() => !!q('.fm-access'), 'the permission panel');
+    const panel = q('.fm-access')!;
+    expect(text(panel).includes('Permission required'), 'the panel does not name the problem');
+    expect(text(panel).includes('EACCES'), 'the panel hides why the operating system refused');
+    expect(text(panel).includes('none registered'), 'the panel does not say whether a privileged provider exists');
+    expect(!q('.fm-table'), 'a refusal was rendered as an empty folder');
+
+    // the request names a root, a relative path and one operation from the fixed vocabulary — nothing else
+    const ask = qa('button', panel).find((b) => text(b).trim() === 'Request Access')!;
+    expect(!!ask, 'Request Access is missing from a real permission gap');
+    click(ask);
+    await h.waitFor(() => h.writes('POST', '/api/files/privilege/request').length === 1, 'the access request');
+    const body = h.lastCall('POST', '/api/files/privilege/request')!.body as Record<string, unknown>;
+    expect(body.root === FILES_MEDIA && body.path === 'private' && body.operation === 'list',
+      `the request must name a root id, a relative path and one fixed operation: ${JSON.stringify(body)}`);
+    for (const forbidden of ['command', 'cmd', 'argv', 'args', 'shell', 'sudo', 'user', 'uid', 'script', 'exec', 'binary', 'env', 'program', 'password']) {
+      expect(!(forbidden in body), `the access request offered a "${forbidden}" field to the host`);
+    }
+
+    // and the answer is the honest one: nothing is registered, nothing was elevated
+    await h.waitFor(() => !!q('.fm-access-result'), 'the broker answer');
+    const result = text(q('.fm-access-result')!);
+    expect(result.includes('no privileged provider'), `the answer should be that there is nothing to escalate to, saw "${result}"`);
+    expect(result.includes('will not run sudo'), 'the panel does not say plainly that OpusHub does not escalate by running commands');
+    expect(!result.includes('granted'), 'a host with no privileged provider reported a grant');
+    expect(qa('button', q('.fm-access')!).some((b) => text(b).trim() === 'Request Access'),
+      'the request should still be offered after an unavailable answer — a provider can be registered later');
+  });
+
+  await test('files: a granted access request re-reads the folder', async (h) => {
+    const routes: Record<string, unknown | ((body: unknown, path: string) => unknown)> = { ...stubRoutes(), ...AUTH_ROUTES };
+    let granted = false;
+    routes['/api/files/privilege/request'] = () => {
+      granted = true;
+      return {
+        ok: true, state: 'granted', operation: 'list', root: { id: FILES_MEDIA, label: 'Media' },
+        path: 'private', reason: null, provider: { id: 'fixture-broker', label: 'Fixture broker' },
+        expiresAt: now + 300_000, ttlMs: 300_000,
+        privileged: {
+          available: true, provider: { id: 'fixture-broker', label: 'Fixture broker', operations: ['list', 'stat', 'read'] },
+          operations: ['list', 'stat', 'read'], reason: null, registeredAt: now, grants: 1,
+        },
+      };
+    };
+    routes['/api/files/list'] = (_body: unknown, path: string) => {
+      const p = paramOf(path, 'path');
+      if (p === 'private' && granted) {
+        return { ...filesListingFor('Music'), path: 'private', entries: [fentry('authorized_keys', 'private/authorized_keys', { size: 340 })], count: 1, total: 1 };
+      }
+      return filesListingFor(p);
+    };
+    h.setRoutes(routes);
+    await h.mount(<TestApp entry="/files"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-table'), 'the first listing');
+
+    click(qa('.fm-tree-node').find((el) => text(el).includes('private'))!);
+    await h.waitFor(() => !!q('.fm-access'), 'the permission panel');
+    click(qa('button', q('.fm-access')!).find((b) => text(b).trim() === 'Request Access')!);
+    await h.waitFor(() => text().includes('authorized_keys'), 'the folder to be read after the grant');
+    expect(!q('.fm-access'), 'the permission panel stayed after access was granted');
+
+    // the re-read happened *because* of the grant, not before it
+    const order = h.calls.map((c) => `${c.method} ${c.path.split('?')[0]}`);
+    const posted = order.indexOf('POST /api/files/privilege/request');
+    expect(posted > -1 && order.lastIndexOf('GET /api/files/list') > posted, 'the folder was not read again after the grant');
+  });
+
+  await test('files: a text preview shows markup as text, and the properties tell the truth', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<TestApp entry="/files"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-table'), 'the listing');
+
+    click(qa('.fm-open').find((el) => text(el).trim() === 'notes.md')!);
+    await h.waitFor(() => !!q('.fm-detail'), 'the detail panel');
+    await h.waitFor(() => !!q('.fm-code'), 'the preview');
+
+    // a script tag inside a file is characters here, never an element in this origin
+    expect(text(q('.fm-code')!).includes('<script>alert(1)</script>'), 'the preview did not show the markup as text');
+    expect(qa('.fm-detail script, .fm-preview script, .fm-code *').length === 0,
+      'a preview put an element from the file into the page');
+    expect(!q('.fm-preview')!.innerHTML.includes('<script>alert'), 'the preview HTML contains the file markup unescaped');
+
+    const props = text(q('.fm-props')!);
+    expect(props.includes('-rw-r--r--') && props.includes('0644'), 'the mode is not shown symbolically and in octal');
+    expect(props.includes('nora'), 'the owner is missing from the properties');
+    expect(props.includes('Markdown'), 'the detected type is missing from the properties');
+    expect(props.includes('Read-only'), 'the panel does not say the file cannot be changed');
+    expect(text(q('.fm-preview-meta')!).includes('detected by content'), 'the preview does not say how the type was detected');
+    const dl = q<HTMLAnchorElement>('.fm-props-foot a[download]')!;
+    expect(!!dl && dl.getAttribute('href')!.startsWith('/api/files/download?root='), 'the properties panel does not offer a download through the API');
+    expect(!props.toLowerCase().includes('writable: true'), 'the panel claimed a file is writable');
+
+    // an image arrives as bytes from a reference the server minted
+    click(qa('.fm-open').find((el) => text(el).trim() === 'poster.png')!);
+    await h.waitFor(() => !!q('.fm-image'), 'the image preview');
+    const src = q<HTMLImageElement>('.fm-image')!.getAttribute('src')!;
+    expect(src.startsWith('/api/files/raw?token='), `an image preview should come from a minted reference, saw ${src}`);
+    expect(!src.includes('/tank'), 'an image preview names a host path');
+  });
+
+  await test('files: a file too big to preview says so and offers the download', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<TestApp entry="/files"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-table'), 'the listing');
+
+    click(qa('.fm-open').find((el) => text(el).trim() === 'big.mkv')!);
+    await h.waitFor(() => !!q('.fm-preview--refused'), 'the preview refusal');
+    const t = text(q('.fm-preview--refused')!);
+    expect(t.includes('900 MB'), 'the refusal does not say how big the file is');
+    expect(t.includes('Video'), 'the refusal does not say what the file was detected as');
+    expect(!q('.fm-code'), 'a file that cannot be previewed rendered an empty text box');
+    const dl = q<HTMLAnchorElement>('.fm-preview--refused a[download]')!;
+    expect(!!dl && dl.getAttribute('href')!.startsWith('/api/files/download?root='),
+      'the refusal does not offer the download through the files API');
+    // the properties still rendered: a refusal to preview is not a failure to stat
+    expect(text(q('.fm-props')!).includes('Video'), 'the properties panel gave up when the preview did');
+  });
+
+  await test('files: search asks for names, reports the walk and opens what it finds', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<TestApp entry="/files"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-table'), 'the listing');
+
+    const field = q<HTMLInputElement>('.fm-search-input')!;
+    expect(!!field, 'the search field is missing');
+    type(field, 'compose');
+    expect(h.calls.filter((c) => c.path.startsWith('/api/files/search')).length === 0,
+      'search fetched on every keystroke instead of on submit');
+    click(qa('button', q('.fm-search')!).find((b) => b.getAttribute('type') === 'submit')!);
+    await h.waitFor(() => !!q('.fm-result-list'), 'the results');
+
+    expect(qa('.fm-result').length === 2, `two names contain "compose", saw ${qa('.fm-result').length}`);
+    const call = h.calls.find((c) => c.path.startsWith('/api/files/search'))!;
+    const p = new URLSearchParams(call.path.split('?')[1] || '');
+    expect(p.get('q') === 'compose' && p.get('root') === FILES_MEDIA, `the search was not addressed the way the API expects: ${call.path}`);
+    const note = text(q('.fm-note')!);
+    expect(note.includes('Searched 42 entries'), `the walk is not accounted for: "${note}"`);
+    expect(text().includes('never followed'), 'the results do not say that folder symlinks are not followed');
+
+    // a result opens the folder the file lives in and selects the file
+    click(qa('.fm-result').find((el) => text(el).includes('compose.override.yml'))!);
+    await h.waitFor(() => !!q('.fm-detail'), 'the detail panel for the result');
+    expect(text(q('.fm-crumbs')!).includes('Movies'), 'the folder a result lives in was not opened');
+    expect(text(q('.fm-detail-name')!).includes('compose.override.yml'), 'the result was not selected');
+
+    // opening a result left the search behind: the folder is listed and the file is selected
+    await h.waitFor(() => qa('.fm-open').some((el) => text(el).trim() === 'wave.mkv'),
+      'the listing of the folder the result lives in');
+    expect(!q('.fm-result-list'), 'the search results are still on screen after a result was opened');
+    click(qa('.fm-open').find((el) => text(el).trim() === 'wave.mkv')!);
+    await h.waitFor(() => text(q('.fm-detail-name')!).includes('wave.mkv'), 'the detail panel for that file');
+  });
+
+  await test('files: sorting is a request, and the table says which column it used', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<TestApp entry="/files"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-table'), 'the listing');
+
+    const sizeHead = qa('.fm-th').find((el) => text(el).includes('Size'))!;
+    click(sizeHead);
+    await h.waitFor(() => q('.fm-table')!.getAttribute('data-sort') === 'size', 'the sort to be requested');
+    expect(q('th[aria-sort="ascending"] .fm-th')!.textContent!.includes('Size'), 'the sorted column is not announced to a screen reader');
+    const call = h.calls.filter((c) => c.path.startsWith('/api/files/list')).pop()!;
+    const p = new URLSearchParams(call.path.split('?')[1] || '');
+    expect(p.get('sort') === 'size' && p.get('dir') === 'asc', `the sort was not sent to the API: ${call.path}`);
+    // the same column again reverses it
+    click(qa('.fm-th').find((el) => text(el).includes('Size'))!);
+    await h.waitFor(() => q('.fm-table')!.getAttribute('data-dir') === 'desc', 'the direction to reverse');
+    const select = q<HTMLSelectElement>('.fm-sort-select')!;
+    expect(qa('option', select).length === 6, `the sort menu should offer the six keys the API accepts, saw ${qa('option', select).length}`);
+  });
+
+  await test('files: a root labelled with a path is shown by its last segment, with the path under it', async (h) => {
+    const routes: Record<string, unknown | ((body: unknown, path: string) => unknown)> = { ...stubRoutes(), ...AUTH_ROUTES };
+    // what the server really sends: the label is the path the operator configured
+    routes['/api/files'] = { ...filesSurfaceDoc, roots: [{ ...filesRoots[0], label: '/tank/media', path: '/tank/media' }] };
+    h.setRoutes(routes);
+    await h.mount(<TestApp entry="/files"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-root'), 'the root');
+    expect(q('.fm-root-label')!.textContent!.trim() === 'media',
+      `a path label should be shortened to its last segment, saw "${q('.fm-root-label')!.textContent}"`);
+    expect(q('.fm-root-meta')!.textContent!.trim() === '/tank/media', 'the full path is not shown underneath the short name');
+    expect(text(q('.fm-crumbs')!).includes('media'), 'the breadcrumb trail does not use the short name');
+    expect(q('.fm-crumb')!.getAttribute('title') === '/tank/media', 'the breadcrumb does not carry the full path as its title');
+  });
+
+  await test('files: a host with no exposed root explains how to configure one', async (h) => {
+    const routes: Record<string, unknown | ((body: unknown, path: string) => unknown)> = { ...stubRoutes(), ...AUTH_ROUTES };
+    routes['/api/files'] = { ...filesSurfaceDoc, roots: [], refused: filesRefused };
+    h.setRoutes(routes);
+    await h.mount(<TestApp entry="/files"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-empty'), 'the empty state');
+    const t = text(q('.fm-empty')!);
+    expect(t.includes('OPUSHUB_FILES_ROOTS'), 'the empty state does not name the setting that fixes it');
+    expect(t.includes('The filesystem root is never'), 'the reason a candidate was refused is not shown');
+    expect(!q('.fm-table'), 'a listing was rendered for a host with no roots');
+    expect(!q('.fm-access'), 'a missing root was offered as something Request Access could fix');
+  });
+
+  await test('files: a role that may not read files gets the reason and fetches nothing', async (h) => {
+    const routes: Record<string, unknown | ((body: unknown, path: string) => unknown)> = { ...stubRoutes(), ...AUTH_ROUTES };
+    routes['/api/files'] = {
+      $status: 403,
+      body: {
+        error: 'Your role may not read the filesystem. This is a role permission, not a filesystem permission — nothing was elevated and nothing can be requested for it.',
+        code: 'not_permitted', permission: 'files.read',
+      },
+    };
+    h.setRoutes(routes);
+    await h.mount(<TestApp entry="/files"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-empty--blocked'), 'the role panel');
+    expect(text().includes('role permission'), 'the difference between a role permission and a file permission was not explained');
+    expect(!text().includes('Request Access'), 'a role refusal offered Request Access — no broker can grant a role');
+    const filesCalls = h.calls.filter((c) => c.path.startsWith('/api/files/'));
+    expect(filesCalls.length === 0,
+      `a page with no read permission still fetched the filesystem: ${filesCalls.map((c) => c.path).join(', ')}`);
+  });
+
+  await test('files: an address naming a root this host does not expose is refused, not guessed', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<TestApp entry="/files?root=%2Fetc"><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-empty'), 'the refusal');
+    expect(text().includes('not exposed'), 'a stale root address was silently redirected somewhere else');
+    expect(qa('.fm-root-picks button').length === 2, 'the real roots are not offered instead');
+    expect(h.calls.filter((c) => c.path.startsWith('/api/files/list')).length === 0,
+      'a listing was fetched for a root that does not exist');
+    // and picking a real root from the refusal gets you there
+    click(qa('.fm-root-picks button')[0]);
+    await h.waitFor(() => !!q('.fm-table'), 'the listing of the root that was offered');
+  });
+
+  await test('files: a traversal in the address never reaches the API', async (h) => {
+    h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
+    await h.mount(<TestApp entry={`/files?root=${FILES_MEDIA}&path=Movies%2F..%2F..%2Fetc`}><Hub /></TestApp>);
+    await h.waitFor(() => !!q('.fm-table'), 'the listing of the folder the address resolves to');
+    expect(text().includes('will not send'), 'the rewritten address was not explained');
+    for (const c of h.calls.filter((c) => c.path.startsWith('/api/files/'))) {
+      expect(!c.path.includes('..') && !decodeURIComponent(c.path).includes('..'),
+        `a traversal reached the API: ${c.path}`);
+      expect(!c.path.includes('%2e') && !c.path.includes('%2E'), `an encoded traversal reached the API: ${c.path}`);
+      expect(!c.path.includes('/etc'), `a protected location was requested: ${c.path}`);
+    }
+    expect(text().includes('compose.yml'), 'the page did not fall back to the top of the root');
+  });
+
+  await test('files: the explorer collapses to one column, listing first, on a narrow screen', async () => {
+    // jsdom has no layout engine, so this reads the stylesheet the page ships with
+    const filesCss = pagesCss.slice(pagesCss.indexOf('/* ---- files:'));
+    expect(filesCss.length > 1000, 'the files section of the stylesheet was not found');
+    const narrow = filesCss.slice(filesCss.indexOf('@media (max-width: 860px)'));
+    const block = narrow.slice(0, narrow.indexOf('\n}') + 2);
+    expect(block.includes('.fm-shell, .fm-shell--detail { grid-template-columns: minmax(0, 1fr); }'),
+      'the explorer does not collapse to a single column on a phone');
+    expect(/\.fm-main\s*\{[^}]*order:\s*1/.test(block), 'the listing does not come first on a narrow screen');
+    expect(/\.fm-side\s*\{[^}]*order:\s*2/.test(block), 'the roots and folders do not move below the listing');
+    expect(/\.fm-table-wrap\s*\{[^}]*overflow-x: auto/.test(filesCss), 'a wide listing has no way to scroll sideways');
+    expect(/\.fm-detail\s*\{[^}]*grid-column: 1 \/ -1/.test(filesCss), 'the detail panel does not span the collapsed grid');
   });
 
   for (const r of results) {

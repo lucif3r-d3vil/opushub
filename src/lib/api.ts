@@ -44,6 +44,20 @@ export const post = <T,>(path: string, body?: unknown) => api<T>(path, { method:
 export interface QueryState<T> {
   data: T | null;
   error: string | null;
+  /**
+   * The `code` from a structured refusal, when the endpoint sent one. Phase 11A needs it: the files
+   * API refuses for a dozen distinct reasons (`permission_required`, `protected_path`, `too_large`,
+   * `symlink_escape` …) that each deserve a different panel, and the sentence in `error` is prose
+   * the server may reword. Nothing else in the app reads it, and it is null for a plain failure.
+   */
+  errorCode?: string | null;
+  /**
+   * The whole refusal body, when the endpoint sent one. A files refusal is an answer in its own
+   * right — `too_large` arrives with the size and the detected type, `permission_required` with the
+   * operation and whether access can even be requested — and a page cannot render that from a
+   * sentence alone.
+   */
+  errorBody?: unknown;
   loading: boolean;
   fetchedAt: number | null;
   refresh: () => void;
@@ -56,6 +70,8 @@ export interface QueryState<T> {
 interface Entry {
   data: unknown;
   error: string | null;
+  errorCode: string | null;
+  errorBody: unknown;
   fetchedAt: number | null;
   loading: boolean;
   inflight: boolean;
@@ -71,13 +87,20 @@ let subId = 0;
 function entryFor(path: string): Entry {
   let e = store.get(path);
   if (!e) {
-    e = { data: null, error: null, fetchedAt: null, loading: false, inflight: false, subs: new Map(), timer: null, listeners: new Set() };
+    e = { data: null, error: null, errorCode: null, errorBody: null, fetchedAt: null, loading: false, inflight: false, subs: new Map(), timer: null, listeners: new Set() };
     store.set(path, e);
   }
   return e;
 }
 
 function emit(e: Entry) { for (const l of e.listeners) l(); }
+
+/** The `code` field of a structured refusal body, or null for anything else. */
+function codeOf(err: unknown): string | null {
+  if (!(err instanceof ApiError) || !err.body || typeof err.body !== 'object') return null;
+  const code = (err.body as { code?: unknown }).code;
+  return typeof code === 'string' ? code : null;
+}
 
 async function load(path: string, e: Entry, { silent = false } = {}) {
   if (e.inflight) return;
@@ -87,8 +110,12 @@ async function load(path: string, e: Entry, { silent = false } = {}) {
     const json = await api<unknown>(path);
     if (json != null) { e.data = json; e.fetchedAt = Date.now(); }
     e.error = null;
+    e.errorCode = null;
+    e.errorBody = null;
   } catch (err) {
     e.error = err instanceof Error ? err.message : String(err);
+    e.errorCode = codeOf(err);
+    e.errorBody = err instanceof ApiError ? err.body : null;
   } finally {
     e.inflight = false;
     e.loading = false;
@@ -192,6 +219,8 @@ export function useSharedQuery<T>(path: string | null, intervalMs = 30_000): Que
   return {
     data: (e?.data as T) ?? null,
     error: e?.error ?? null,
+    errorCode: e?.errorCode ?? null,
+    errorBody: e?.errorBody ?? null,
     loading: e ? e.loading && e.data == null : !!path,
     fetchedAt: e?.fetchedAt ?? null,
     refresh,
