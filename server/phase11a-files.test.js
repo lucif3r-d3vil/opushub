@@ -99,6 +99,9 @@ function buildFixtures() {
   fs.symlinkSync('/etc', path.join(ROOT_A, 'escape-etc'));
   fs.symlinkSync('/', path.join(ROOT_A, 'escape-root'));
   fs.symlinkSync(ROOT_B, path.join(ROOT_A, 'escape-other-root'));
+  // a loop: `lstat` succeeds on it, `realpath` cannot — the refusal has to say which happened
+  fs.symlinkSync('loop-b', path.join(ROOT_A, 'stacks', 'loop-a'));
+  fs.symlinkSync('loop-a', path.join(ROOT_A, 'stacks', 'loop-b'));
 
   // --- protected and sensitive material ---
   write('secrets/.ssh/id_rsa', '-----BEGIN OPENSSH PRIVATE KEY-----\nhunter2-secret-value\n');
@@ -692,6 +695,14 @@ test('a reference is bound to its session, its operation and its lifetime', asyn
   assert.match(late.json.error, /expired/i);
   assert.equal(late.json.retry, 'request a fresh link', 'and the UI is told what to do about it');
 
+  // a reference cannot exist without a session: minting refuses, so "session-bound" is a property
+  // of the module and not merely of the routes that call it
+  const sessionless = tokens.issue({ rootId: A, path: 'stacks/notes.log', operation: 'download', name: 'notes.log' });
+  assert.equal(sessionless.ok, false, 'a reference with no session is not minted');
+  assert.equal(sessionless.code, 'bad_request');
+  assert.equal(sessionless.token, undefined, 'and no token string comes back with the refusal');
+  assert.equal(tokens.verify({ token: 'x'.repeat(43), sessionId: null, operation: 'download' }).code, 'token_invalid');
+
   // a reference is stored as a hash: the module never holds the string it issued
   assert.equal(tokens._internals.hash(good.json.token).length, 43, 'a base64url sha256 digest');
   assert.notEqual(tokens._internals.hash(good.json.token), good.json.token, 'the reference is not stored in the clear');
@@ -791,6 +802,29 @@ test('a symlink that leaves the root is refused, and one that stays inside is re
   const alias = await get(`/api/files/preview?root=${A}&path=stacks/alias.yml`);
   assert.equal(alias.status, 200);
   assert.equal(alias.json.subtype, 'yaml');
+
+  // A loop is refused as a loop — never as "nothing is at that path", and never by following it.
+  for (const p of ['stacks/loop-a', 'stacks/loop-b', 'stacks/loop-a/deeper']) {
+    const r = await get(`/api/files/stat?root=${A}&path=${encodeURIComponent(p)}`);
+    assert.equal(r.status, 403, `${p} → ${r.status} ${r.json.code}`);
+    assert.equal(r.json.code, 'symlink_escape', `${p} → ${r.json.code}`);
+    assert.match(r.json.error, /loop|outside its filesystem root/i, `${p} → ${r.json.error}`);
+  }
+  // a ".." through a loop is caught by the shape rule first: no ".." segment is ever normalized,
+  // in-root or not, so the cheaper and stricter answer arrives before the filesystem is touched
+  const dotted = await get(`/api/files/stat?root=${A}&path=${encodeURIComponent('stacks/loop-a/../notes.log')}`);
+  assert.equal(dotted.status, 400);
+  assert.equal(dotted.json.code, 'bad_path');
+  assert.equal(dotted.json.rule, 'traversal');
+  const loopList = await get(`/api/files/list?root=${A}&path=stacks/loop-a`);
+  assert.equal(loopList.status, 403, 'a loop cannot be listed either');
+  assert.equal(loopList.json.code, 'symlink_escape');
+  // and it is still an entry in its parent's listing: a symlink is reported as the symlink it is
+  const parent = await get(`/api/files/list?root=${A}&path=stacks`);
+  const loopEntry = parent.json.entries.find((e) => e.name === 'loop-a');
+  assert.ok(loopEntry, 'the loop is visible as an entry (it is the operator’s own broken link)');
+  assert.equal(loopEntry.kind, 'symlink');
+  assert.equal(loopEntry.link.inside, true, 'its target is inside the root, so it is named');
 });
 
 /* ==================================================================== */
@@ -881,6 +915,103 @@ test('the Docker socket and kernel interfaces are refused even when a root is ai
   assert.equal(classifyPath(`${DATA_DIR}/activity.jsonl`, { opushubDirs: dirs }).level, CLASS.PROTECTED);
   assert.equal(classifyPath(`${CONFIG_DIR}/settings.yaml`).level, CLASS.ALLOWED, 'and only because the policy was told — the classification is not guesswork');
   assert.equal((await get(`/api/files/list?root=${A}&path=`)).status, 200, 'the restored table still serves the real root');
+});
+
+test('a denied mount inside a root is refused, unlisted, and never enumerated by tree or search', async () => {
+  // The precondition is narrow, and operator-made: a mount the policy denies — a bind of a
+  // protected tree, a pseudo filesystem, a socket — sitting *inside* an exposed root. Its
+  // mountpoint looks innocent by name (`mounts/etcview`), so only the mount table says otherwise.
+  // That table is host state, so this test injects one through the same seam resolve() reads.
+  const { __setMountReader, __resetMountReader, getDeniedMounts } = await import('./files/policy.js');
+  const { rootTable } = await import('./files/roots.js');
+  const real = fs.realpathSync(ROOT_A);
+  const line = (rel, fsRoot, fsType, source) =>
+    `40 25 0:41 ${fsRoot} ${real}/${rel} rw,relatime shared:12 - ${fsType} ${source} rw`;
+
+  // names chosen so the *lexical* classification allows every one of them: if these are skipped,
+  // it is the mount rule doing it, not the protected-name lists
+  write('mounts/etcview/motd-copy.txt', 'a bind of a protected tree, mounted where a name looks fine\n');
+  write('mounts/procview/uptime-copy.txt', 'a pseudo filesystem inside an exposed volume\n');
+  write('mounts/normal/ok.txt', 'an ordinary file the walk must still find\n');
+  fs.writeFileSync(path.join(ROOT_A, 'mounts', 'agent.sock'), '');
+
+  const mountinfo = [
+    line('mounts/etcview', '/etc', 'ext4', '/dev/nvme0n1p2'),   // fsRoot is protected → denied
+    line('mounts/procview', '/', 'proc', 'proc'),                // pseudo filesystem → denied
+    line('mounts/agent.sock', '/', 'tmpfs', 'tmpfs'),            // a socket → denied
+  ].join('\n');
+
+  try {
+    __setMountReader(async () => mountinfo);
+    const denied = await getDeniedMounts();
+    assert.equal(denied.length, 3, 'the injected table yields exactly three denied mounts');
+    assert.deepEqual(denied.map((d) => d.class).sort(), ['container_runtime', 'protected_mount', 'protected_mount']);
+
+    // naming one is refused — 403 mount_escape, never a 404 that would act as an existence oracle
+    for (const rel of ['mounts/etcview', 'mounts/procview', 'mounts/etcview/motd-copy.txt']) {
+      const r = await get(`/api/files/list?root=${A}&path=${encodeURIComponent(rel)}`);
+      assert.equal(r.status, 403, `${rel} → ${r.status}`);
+      assert.equal(r.json.code, 'mount_escape', `${rel} → ${r.json.code}`);
+    }
+    const preview = await get(`/api/files/preview?root=${A}&path=mounts/etcview/motd-copy.txt`);
+    assert.equal(preview.status, 403);
+    assert.equal(preview.json.code, 'mount_escape');
+    const token = await get(`/api/files/download-token?root=${A}&path=mounts/etcview/motd-copy.txt`);
+    assert.equal(token.status, 403, 'no reference is minted for a path inside a denied mount');
+    assert.equal(token.json.code, 'mount_escape');
+
+    // the parent listing hides them, and says how many it hid rather than leaving a mystery
+    const parent = await get(`/api/files/list?root=${A}&path=mounts`);
+    assert.equal(parent.status, 200);
+    assert.deepEqual(parent.json.entries.map((e) => e.name), ['normal'], 'only the ordinary sibling is listed');
+    assert.equal(parent.json.hidden, 3, 'the three denied mounts are counted as hidden');
+
+    // the tree neither shows nor descends into them
+    const tree = await get(`/api/files/tree?root=${A}&path=&depth=3`);
+    assert.equal(tree.status, 200);
+    const flat = JSON.stringify(tree.json);
+    for (const name of ['etcview', 'procview', 'agent.sock', 'motd-copy', 'uptime-copy']) {
+      assert.ok(!flat.includes(name), `the tree does not name ${name}`);
+    }
+    assert.ok(flat.includes('"normal"'), 'and the tree still walks the rest of the root');
+
+    // a search never matches, names or descends into what the policy refuses to read
+    const inside = await get(`/api/files/search?root=${A}&path=&q=copy`);
+    assert.equal(inside.status, 200);
+    assert.equal(inside.json.count, 0, 'nothing inside a denied mount is matched');
+    const mountName = await get(`/api/files/search?root=${A}&path=&q=etcview`);
+    assert.equal(mountName.json.count, 0, 'the mountpoint itself is not named by a search either');
+    const control = await get(`/api/files/search?root=${A}&path=&q=ok.txt`);
+    assert.equal(control.json.count, 1, 'the walk still searches the rest of the root');
+    assert.equal(control.json.matches[0].path, 'mounts/normal/ok.txt');
+
+    // "Request Access" is not offered for a location the policy denies outright
+    const ask = await post('/api/files/privilege/request', { root: A, path: 'mounts/etcview', operation: 'list' });
+    assert.equal(ask.json.state, 'denied');
+    assert.equal(ask.json.grantable, false);
+    assert.equal(ask.json.code, 'mount_escape');
+
+    // nor can such a mount be exposed as a root of its own
+    const t = await rootTable({ refresh: true, env: { OPUSHUB_FILES_ROOTS: `${ROOT_A}/mounts/etcview:${ROOT_A}` } });
+    const byPath = Object.fromEntries((t.refused || []).map((x) => [x.path, x]));
+    assert.ok(byPath[`${ROOT_A}/mounts/etcview`], 'a denied mount is refused as a root');
+    assert.equal(byPath[`${ROOT_A}/mounts/etcview`].code, 'mount_escape');
+    assert.equal(byPath[`${ROOT_A}/mounts/etcview`].class, 'protected_mount');
+    assert.equal(t.roots.length, 1, 'the legitimate candidate is unaffected');
+    assert.equal(t.roots[0].path, real);
+  } finally {
+    __resetMountReader();
+    await rootTable({ refresh: true, env: process.env });
+  }
+
+  // with the real table back, the fixture is an ordinary directory again — the injection was the
+  // only thing refusing it, which is what makes the assertions above about the mount rule
+  const after = await get(`/api/files/list?root=${A}&path=mounts/etcview`);
+  assert.equal(after.status, 200);
+  const siblings = await get(`/api/files/list?root=${A}&path=mounts`);
+  // `agent.sock` stays hidden — but now because of its *name*, which is the other rule at work
+  assert.deepEqual(siblings.json.entries.map((e) => e.name).sort(), ['etcview', 'normal', 'procview']);
+  assert.equal(siblings.json.hidden, 1);
 });
 
 /* ==================================================================== */

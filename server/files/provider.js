@@ -29,7 +29,7 @@
 import fs from 'node:fs';
 import nodePath from 'node:path';
 import { LIMITS } from './limits.js';
-import { CLASS, classifyPath, resolve as resolvePath } from './policy.js';
+import { CLASS, classifyPath, deniedMountAt, getDeniedMounts, resolve as resolvePath } from './policy.js';
 import { getRoot, opushubDirs, rootTable } from './roots.js';
 import { namesFor } from './identity.js';
 import { decodeText, detect, inlineMode, previewRefusal } from './preview.js';
@@ -272,11 +272,16 @@ export function createFilesystemProvider({ dirs = null } = {}) {
       const overScan = scanned > LIMITS.maxDirectoryScan;
       const pool = overScan ? dirents.slice(0, LIMITS.maxDirectoryScan) : dirents;
 
-      // protected entries never reach a response — they are counted, so a short listing is not a mystery
+      // Protected entries never reach a response, and neither does an entry that *is* a denied
+      // mount or sits inside one (a bind of a protected tree, a pseudo filesystem, a socket). Both
+      // are counted, so a short listing is not a mystery — and the walk below cannot be used to
+      // name what `resolve()` would refuse to open.
+      const denied = await getDeniedMounts();
       let hidden = 0;
       const visible = [];
       for (const d of pool) {
-        if (classifyPath(`${resolved.canonical}/${d.name}`, { opushubDirs: opushub() }).level === CLASS.PROTECTED) { hidden += 1; continue; }
+        const abs = `${resolved.canonical}/${d.name}`;
+        if (classifyPath(abs, { opushubDirs: opushub() }).level === CLASS.PROTECTED || deniedMountAt(abs, denied)) { hidden += 1; continue; }
         visible.push(d);
       }
 
@@ -328,6 +333,9 @@ export function createFilesystemProvider({ dirs = null } = {}) {
       const { root, resolved } = loc;
       if (!resolved.stat?.isDirectory()) return refuse('not_a_directory', 'That path is not a directory.', { status: 400, operation: 'list' });
 
+      // one fetch for the whole walk: the table is cached, and a tree can visit thousands of paths
+      const denied = await getDeniedMounts();
+
       const walk = async (abs, rel, level) => {
         if (level > levels || signal?.aborted) return [];
         let dirents;
@@ -335,6 +343,9 @@ export function createFilesystemProvider({ dirs = null } = {}) {
         const dirs = dirents
           .filter((d) => d.isDirectory())
           .filter((d) => classifyPath(`${abs}/${d.name}`, { opushubDirs: opushub() }).level !== CLASS.PROTECTED)
+          // a denied mount inside the root is not a directory the tree may show, still less descend
+          // into: its names would be enumerated by a walk that `resolve()` refuses to open
+          .filter((d) => !deniedMountAt(`${abs}/${d.name}`, denied))
           .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
           .slice(0, LIMITS.maxTreeEntriesPerLevel);
         const out = [];
@@ -446,7 +457,8 @@ export function createFilesystemProvider({ dirs = null } = {}) {
       let handle = null;
       try {
         // 'r' only: no create, no write, no truncate. There is no flag combination in this module
-        // that can modify a file.
+        // that can modify a file. `resolved.canonical` was vouched for a moment ago by policy.js —
+        // see the check-then-use note at the end of resolve() for what that does and does not mean.
         handle = await fs.promises.open(resolved.canonical, 'r');
         bytesRead = (await handle.read(buf, 0, want, offset)).bytesRead;
       } catch (err) { return fsRefusal(err, { operation: 'read', what: 'this file' }); }
@@ -535,7 +547,10 @@ export function createFilesystemProvider({ dirs = null } = {}) {
           classification: resolved.classification?.level === CLASS.ALLOWED ? null : resolved.classification.class || resolved.classification.level,
         },
         range: range || null,
-        // a factory, not an open stream: the API decides when to open it, and an unused one leaks nothing
+        // A factory, not an open stream: the API decides when to open it, and an unused one leaks
+        // nothing. It opens the path this call resolved ('r' only); the API re-resolved it through
+        // the whole policy when the reference was redeemed, which is what makes the gap between the
+        // two as short as it can be without openat()/O_NOFOLLOW — see the note in policy.js#resolve.
         createStream: () => fs.createReadStream(resolved.canonical, { flags: 'r', ...(range ? { start: range.start, end: range.end } : {}) }),
       };
     }, { ms: LIMITS.statTimeoutMs, signal, what: 'The download' });
@@ -566,6 +581,7 @@ export function createFilesystemProvider({ dirs = null } = {}) {
       let directories = 0;
       let stopped = null;
       const stack = [{ abs: resolved.canonical, rel: resolved.relative, depth: 0 }];
+      const denied = await getDeniedMounts();
 
       while (stack.length) {
         if (signal?.aborted) { stopped = 'cancelled'; break; }
@@ -590,6 +606,9 @@ export function createFilesystemProvider({ dirs = null } = {}) {
           const rel = node.rel ? `${node.rel}/${d.name}` : d.name;
           const cls = classifyPath(abs, { opushubDirs: opushub() });
           if (cls.level === CLASS.PROTECTED) continue;
+          // the same rule the tree walk applies: a search never names, matches or descends into a
+          // mount the policy denies, however innocent its mountpoint looks by name
+          if (deniedMountAt(abs, denied)) continue;
           const isDir = d.isDirectory();
           const isLink = d.isSymbolicLink();
           if (d.name.toLowerCase().includes(needle)) {

@@ -47,12 +47,16 @@ export function issue({ sessionId = null, actor = null, rootId = null, path = nu
     return { ok: false, code: 'bad_operation', reason: 'That is not an operation a file reference can authorize.' };
   }
   if (!rootId || typeof path !== 'string') return { ok: false, code: 'bad_request', reason: 'A file reference needs a root and a path.' };
+  // A reference without a session would be a capability anybody could spend, so there is no such
+  // thing: minting refuses. Every route that mints one sits behind the session gate, so this is the
+  // belt to that brace — it makes "session-bound" a property of the module, not of its callers.
+  if (!sessionId) return { ok: false, code: 'bad_request', reason: 'A file reference is bound to the session that asked for it; it cannot be minted without one.' };
   sweep(at);
   const ttl = Number.isFinite(ttlMs) && ttlMs != null ? Math.max(0, Math.min(ttlMs, LIMITS.previewTokenTtlMs)) : TTL_BY_OPERATION[operation];
   const token = crypto.randomBytes(32).toString('base64url');
   const expiresAt = at + ttl;
   tokens.set(hash(token), {
-    sessionId: sessionId ? String(sessionId) : null,
+    sessionId: String(sessionId),
     actor: actor ? String(actor) : null,
     rootId: String(rootId),
     path: String(path),
@@ -83,7 +87,9 @@ export function verify({ token = null, sessionId = null, operation = null, at = 
     tokens.delete(hash(token));
     return { ok: false, code: 'token_expired', reason: 'That file reference expired — ask for the file again.', status: 403 };
   }
-  if (rec.sessionId && String(sessionId || '') !== rec.sessionId) {
+  // Always compared, never skipped: a record with no session cannot exist (issue() refuses to make
+  // one), and this is where that invariant is enforced rather than assumed.
+  if (String(sessionId || '') !== String(rec.sessionId || '')) {
     return { ok: false, code: 'token_session', reason: 'That file reference belongs to a different session.', status: 403 };
   }
   if (operation && rec.operation !== operation) {

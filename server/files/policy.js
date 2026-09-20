@@ -410,6 +410,22 @@ export async function getDeniedMounts(at = Date.now()) {
   return mountCache.denied;
 }
 
+/**
+ * Which denied mount an absolute path sits at or inside, or `null`. Pure: the caller passes the
+ * table it already fetched, so a walk can ask about thousands of paths without re-reading mounts.
+ *
+ * `resolve()` refuses a denied mount when a browser *names* it. The directory walks (tree, search)
+ * and a listing's own entry filter use this so they never enumerate what the policy refuses to
+ * read: a denied mount inside an exposed root is not descended into, not matched and not named.
+ */
+export function deniedMountAt(absolute, mounts = null) {
+  if (typeof absolute !== 'string' || !absolute.startsWith('/')) return null;
+  for (const m of mounts || []) {
+    if (m && typeof m.mountPoint === 'string' && under(absolute, m.mountPoint)) return m;
+  }
+  return null;
+}
+
 /* ------------------------------------------------------------------ */
 /* 2 + 4 + 5 + 6 — resolution                                           */
 /* ------------------------------------------------------------------ */
@@ -473,6 +489,11 @@ export async function resolve({ root, path = '', operation = 'read', opushubDirs
     if (err?.code === 'EACCES' || err?.code === 'EPERM') {
       return refuse('permission_required', 'OpusHub does not currently have permission to read this location.', { operation });
     }
+    // `lstat` above succeeds on a loop (it does not follow the final link), so the loop surfaces
+    // here. Naming it honestly matters: "nothing is at that path" sends somebody hunting for a
+    // deleted file, when the real answer is that this link cannot be resolved at all.
+    if (err?.code === 'ELOOP') return refuse('symlink_escape', 'That path is a symlink loop.', { operation, class: 'symlink_escape' });
+    if (err?.code === 'ENAMETOOLONG') return refuse('bad_path', 'That path is too long for the filesystem.', { rule: 'name_too_long' });
     return refuse('not_found', 'Nothing is at that path.', { status: 404, operation });
   }
   if (!under(canonical, root.path)) {
@@ -525,6 +546,23 @@ export async function resolve({ root, path = '', operation = 'read', opushubDirs
     } catch { symlinkTarget = null; }
   }
 
+  // What this result is — and the one thing it is not.
+  //
+  // `canonical` is a path this policy vouched for *at this instant*: inside the root, not
+  // protected, not a denied mount, with the facts below read from it. A caller then opens it, and
+  // between the two there is a window — the classic check-then-use (TOCTOU) race: somebody who can
+  // already write inside an exposed root could replace that file with a symlink in the meantime.
+  // Closing it properly means resolving component by component with `openat()` + `O_NOFOLLOW` and
+  // holding the descriptor, which Node's `fs` does not expose; so the window is documented here
+  // rather than papered over, and nothing about the boundary is relaxed to make it smaller.
+  //
+  // What bounds it in practice:
+  //   • the attacker needs local write access *inside a root the operator exposed* — a browser
+  //     cannot create, rename or replace anything, because this whole feature is read-only;
+  //   • every byte route re-resolves through this function when its reference is redeemed, so a
+  //     stale answer is never reused as authority (see filesApi.js#streamBytes);
+  //   • the open itself is read-only ('r'), so the worst case is reading a file that the same
+  //     local user could have opened directly, without OpusHub involved at all.
   return {
     ok: true,
     root: { id: root.id, path: root.path },

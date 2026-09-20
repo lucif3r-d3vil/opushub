@@ -27,7 +27,7 @@ import { CONFIG_DIR, DATA_DIR } from '../configStore.js';
 import { registerInfrastructureProviders } from '../infrastructure/providers.js';
 import { checkProvider } from '../infrastructure/registry.js';
 import { LIMITS } from './limits.js';
-import { CLASS, PROTECTED_PREFIXES, SENSITIVE_PREFIXES, classifyPath } from './policy.js';
+import { CLASS, PROTECTED_PREFIXES, SENSITIVE_PREFIXES, classifyPath, getDeniedMounts } from './policy.js';
 
 const under = (p, root) => p === root || p.startsWith(`${root}/`);
 
@@ -130,6 +130,19 @@ export async function validateRoot(candidate, { source = 'configured', mount = n
   let lst2;
   try { lst2 = await fs.promises.lstat(real); } catch { lst2 = null; }
   if (!lst2?.isDirectory()) return { ok: false, path: normalized, code: 'not_a_directory', reason: 'That path does not resolve to a directory.' };
+
+  // A denied mount is never a root, even when its mountpoint looks innocuous by name: a bind of a
+  // protected tree at `/tank/etcview`, or a pseudo filesystem mounted inside an exposed volume,
+  // classifies as ALLOWED lexically while `resolve()` refuses every path under it. Refusing the
+  // root keeps the table honest instead of advertising a location the policy will never serve.
+  for (const m of await getDeniedMounts()) {
+    if (under(real, m.mountPoint)) {
+      return {
+        ok: false, path: normalized, code: 'mount_escape', class: m.class || 'protected_mount',
+        reason: m.reason || 'That location is a mount this policy does not expose.',
+      };
+    }
+  }
   if (taken.has(real)) return { ok: false, path: normalized, code: 'duplicate', reason: 'That location is already exposed as another root.' };
 
   let usage = null;

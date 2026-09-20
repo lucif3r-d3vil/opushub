@@ -413,7 +413,7 @@ the Part 1 plan, §2.14 says so and why.
 | `server/files/context.js` | 203 | Storage context for the Properties panel: which mount, which ZFS dataset, which containers bind or serve the path, which volume. Reuses the Phase 9 storage providers and the Docker provider's `inspectContainer` mounts — bounded to 32 inspects per request. |
 | `server/files/broker.js` | 430 | The privilege broker: a frozen operation vocabulary (`list · stat · read`), a registration guard that refuses a provider spec containing execution words, independent path re-validation, session-bound grants with a hard TTL cap, and the five honest states. **No provider is registered in 11A**, so the answer is `unavailable` (501) — never a fake elevation. |
 | `server/filesApi.js` | 630 | The HTTP layer: session + CSRF gate, permission gates, sensitive-root gate, the 12 GET routes and the 1 POST, refusal shaping, event logging, token minting, the 302 download redirect and the streamed byte routes (with CSP for inline content). |
-| `server/phase11a-files.test.js` | 1292 | 38 tests over a real fixture tree in a temp dir, driven through `handleApi` (no server process, no mocks of the filesystem). |
+| `server/phase11a-files.test.js` | 1423 | 39 tests over a real fixture tree in a temp dir, driven through `handleApi` (no server process, no mocks of the filesystem). |
 | `src/lib/files.ts` | 298 | The browser's data layer: URL builders (`root` + relative `path` only), one hook per read with polling **off**, the refusal helper, the one POST, and presentation helpers. |
 | `src/pages/Files.tsx` | 1174 | The explorer: roots sidebar, folder tree, breadcrumbs, sortable listing, search, Properties, Preview, the permission panel. |
 | `src/lib/types.ts` | +~330 | The documents, typed. There is no mutation type to write. |
@@ -698,7 +698,7 @@ own code). The UI switches on `code` and prints `error` — never the other way 
 
 | Command | Result |
 |---|---|
-| `npm test` | **960/960 pass** (922 baseline + 38 new in `server/phase11a-files.test.js`), ~131 s |
+| `npm test` | **961/961 pass** (922 baseline + 39 new in `server/phase11a-files.test.js`), ~134 s |
 | `npm run test:web` | **95/95 pass** (82 baseline + 13 new Files checks) |
 | `npm run verify` | **97/97 checks pass** (68 baseline + 29 new end-to-end files checks against a real spawned server and a real fixture directory) |
 | `npm run typecheck` | clean |
@@ -851,6 +851,20 @@ Each line is a property that a test asserts, not an intention.
 10. **Windows/macOS hosts are not the target.** The mount-escape rule, `mode`/`owner` reporting and
     socket classification assume a POSIX host; the shape rules (backslash, drive letter) are refused
     rather than interpreted.
+11. **A check-then-use window remains, and is documented rather than closed.** `resolve()` vouches for
+    a canonical path; the provider opens it a moment later. Somebody who can already *write* inside an
+    exposed root could swap that file for a symlink in between. Closing it needs per-component
+    `openat()` + `O_NOFOLLOW` and a held descriptor, which Node's `fs` does not expose. What bounds
+    it: a browser cannot create or replace anything (the feature is read-only, and no route can), the
+    byte routes re-resolve through the whole policy when a reference is redeemed, and the open is
+    `'r'`-only — so the worst case is a local user reading a file they could have opened directly.
+    The note lives where the next reader will hit it: the end of `policy.js#resolve` and both open
+    sites in `provider.js`. Nothing in the boundary was relaxed to make the window smaller.
+12. **The mount rule depends on a readable `/proc/self/mountinfo`.** Where it is absent (a hardened
+    container, a non-Linux host) the mount table is empty and the *lexical* classification is what
+    stands between a browser and a protected tree. That is the same dependency the storage-context
+    panel already has, and it fails toward the shape rules and `realpath` containment, not toward
+    exposure.
 
 ### 3.4 The 11B boundary
 
@@ -875,11 +889,110 @@ server/files/policy.js          the path policy and the classification vocabular
 server/files/provider.js        the only code that touches the host filesystem
 server/files/broker.js          the privilege broker and its registration guard
 server/filesApi.js              routes, gates, refusals, tokens, streaming
-server/phase11a-files.test.js   38 tests over a real fixture tree
+server/phase11a-files.test.js   39 tests over a real fixture tree
 src/pages/Files.tsx             the explorer
 src/lib/files.ts                the browser's data layer (no mutation function exists)
 test/verify.mjs §11             29 end-to-end checks against a real spawned server
-test/web/tests.tsx              the nav contract (eight items) + 12 Files checks
+test/web/tests.tsx              the nav contract (eight items) + 13 Files checks
 ```
+
+Not merged: this branch is `arena/01a0ba9f-opushub`, and it stays there until it is reviewed.
+
+### 3.6 Adversarial pre-merge review (a second pass over the finished feature)
+
+Method: a line-by-line re-read of the policy, provider, roots, preview, tokens, broker and HTTP
+layer; three independent throwaway source scans with patterns the feature's own test does *not* use
+(execution primitives, write primitives, browser sinks, token sinks, host-path strings); and 159
+live HTTP probes against a running server with a real fixture tree (two roots, one of them under a
+sensitive host prefix), covering the gate, root addressing, 26 traversal spellings, symlinks,
+protected paths and the existence oracle, previews and mime sniffing, reference binding, limits and
+cancellation, the broker, root isolation, sensitive material, and log hygiene. Every probe passed.
+
+Three findings came out of it. All three are fixed, and each fix is **mutation-proven**: the new
+assertion was run against a deliberately reverted source tree and fails there, so it is a regression
+test rather than a decoration.
+
+| # | Severity | Finding | Fix | Proof |
+|---|----------|---------|-----|-------|
+| F1 | medium | `tree()`, `search()` and a listing's entry filter applied only the *lexical* classification per entry. A mount the policy denies — a bind of a protected tree at an innocent-looking mountpoint, a pseudo filesystem, a socket — sitting **inside** an exposed root could therefore have its directory and file *names* enumerated by a walk, even though `list`/`stat`/`preview`/`download` on the same path were (and are) refused with `403 mount_escape`. Separately, such a mount could be *configured* as a root of its own: it would appear in the root table and then refuse every request. | `policy.js` exports a pure `deniedMountAt(absolute, mounts)`; `provider.js` fetches the cached denied-mount table once per `list`/`tree`/`search` and skips those paths — no descend, no match, no name (counted in `hidden` for a listing); `roots.js#validateRoot` refuses a candidate at or under a denied mount with `mount_escape`. | new test *a denied mount inside a root is refused, unlisted, and never enumerated by tree or search* — injected `/proc/self/mountinfo` through the existing `__setMountReader` seam. Reverting any one of the three edits fails it, on the listing, the tree and the root-table assertion respectively. |
+| F2 | low | A symlink **loop** was reported as `404 not_found`. `lstat` succeeds on a loop (it does not follow the final link), so `ELOOP` surfaced in the `realpath` catch, which mapped everything but `EACCES`/`EPERM` to "nothing is at that path". Fail-closed — no bytes, no traversal — but it sent somebody hunting for a deleted file. | The `realpath` catch now maps `ELOOP → 403 symlink_escape` ("That path is a symlink loop.") and `ENAMETOOLONG → 400 bad_path/name_too_long`. | loop fixtures (`stacks/loop-a ↔ loop-b`) plus four assertions in the symlink test; reverting the mapping fails with `404 not_found`. |
+| F3 | low (defence in depth) | `tokens.issue()` accepted a null `sessionId`, and `verify()` skipped the session comparison for such a record. No route can produce one today (every minting route sits behind the session gate), so this was a latent invariant, not a live hole — but "session-bound" was a property of the *callers*. | `issue()` refuses without a session; `verify()` always compares; the record stores a non-null session. | new assertions in the reference-binding test; removing the guard fails them. |
+
+Also cleaned up while reading: `src/lib/files.ts` exported a `downloadToken()` helper that nothing
+called — a second, unused way to mint a reference from the browser. It is gone; a download is
+`downloadHref()` (a link the server redirects to a freshly minted reference), and `DownloadTokenDoc`
+now says in terms why the page never holds one.
+
+Probed and found sound (evidence in the probe table, not by inspection):
+
+* **Gate order.** Unauthenticated → 401 on every route; a cross-site `POST` → `403 csrf` before any
+  files logic; `POST/PUT/DELETE/PATCH` on a read route → 405; an unknown files route → 404 inside the
+  surface; `/api/v1/files/*` aliases exactly the 13 listed paths and nothing else; `HEAD` on a JSON
+  route returns no body.
+* **No `?path=` byte route.** `/api/files/download?path=/etc/passwd` → `404 unknown_root`; a root id
+  that is a host path, `../`, empty, `<id>/etc`, or carries a NUL → `404 unknown_root`.
+* **Traversal, 26 spellings.** Every one is a 4xx naming the rule that caught it (`traversal`,
+  `encoded`, `separator`, `absolute`, `dot_segment`, `empty_segment`, `null_byte`,
+  `control_character`, `too_long`, `name_too_long`, `home`), and no response anywhere in the whole
+  battery contained `/etc/passwd` content, a shadow hash, a host socket path or OpusHub's own state
+  directory. A surviving `%XX` after the one decode `URLSearchParams` performs is itself refused,
+  which is what kills double-encoding.
+* **The protected-path rule is not an existence oracle.** `nonexistent-dir/.env`,
+  `deeply/missing/path/.ssh/id_rsa`, `missing/shadow`, `missing/sudoers` and
+  `a/b/c/.gnupg/private-keys-v1.d/x` all answer `403 protected_path`, identically whether or not
+  anything is there; the classification is lexical and runs before any existence check.
+* **Symlinks.** Out of the root → 403 with no target named; into a *sibling root* → 403 (isolation is
+  by realpath, not by name); a dangling link → 404; a loop → 403 as a loop; in-root links are
+  followed and their target is named only when it stays inside; a listing withholds an outside target
+  (`{target:null, inside:false}`) and names an inside one (`{target:'stacks', inside:true}`); a search
+  never follows a directory symlink and survives a loop without hanging.
+* **Previews cannot execute.** An SVG and an HTML file are `activeContent:true`, `inline:'text'`, and
+  get **no** byte URL; SVG content wearing a `.png` name is judged by content and also gets no byte
+  URL; genuine image bytes come from a reference with `nosniff`, `Cross-Origin-Resource-Policy:
+  same-origin`, `cache-control: private, no-store` and
+  `Content-Security-Policy: default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline';
+  sandbox`; the mime comes from the sniff; the raw route re-sniffs at redemption and refuses
+  anything that is not an image or a PDF with `415` (proved by a *valid, same-session* preview
+  reference for an HTML file). A 40 MB file is `413 too_large`, never read.
+* **References are capabilities.** 120 s download / 300 s preview TTL, operation-bound
+  (`token_mismatch` across routes *and* against an `&operation=` query parameter, which is ignored),
+  session-bound (401 with no cookie, `token_session` for another session), tamper-evident
+  (`token_invalid`), retired on sign-out, unspendable after "sign out everywhere", never minted for a
+  protected path or through an escaping symlink, and never present in the activity log or in any
+  `/api/activity` response. Extra `root=`/`path=` noise on a byte URL cannot retarget it.
+* **Limits.** 2 500 entries → a 2 000-entry page with `truncated:true` and the remainder at
+  `offset=2000`; `limit=999999`/`offset=-5` clamped; tree depth clamped to 3; empty, 400-character
+  and control-character queries → 400 without walking; a node budget stops the walk and says so;
+  depth 0 does not descend; a 40 MB download streams (a megabyte arrives before the client aborts
+  mid-body) and the server answers normally afterwards; twelve concurrent 2 000-entry listings all
+  answer.
+* **The broker.** `EACCES` → `permission_required` with `requestAccess:true`, no errno in the
+  message, `privileged.available:false`; asking → `501 no_privileged_provider`; a body smuggling
+  `command`, `cmd`, `argv`, `args`, `shell`, `exec`, `executable`, `spawn`, `sudo`, `user`, `uid`,
+  `gid`, `env`, `script`, `stdin`, `elevate`, `privilege` and a second `path2:'/etc/shadow'` changes
+  nothing and is not echoed; `exec` and `write` are not operations; a protected path and an escaping
+  symlink are `denied`/`grantable:false`; fifteen mutation names under POST, DELETE and PUT are all
+  404.
+* **Roots, isolation and sensitivity.** Two configured roots are addressed by slug
+  (`tmp-opushub-demo-files-root`, `home-user-cache-review-root`); the one under `/home` is flagged
+  `sensitive` and is readable only by a role holding `files.read_sensitive`; a traversal from one
+  root toward the other is refused, the other root's file is `not_found` in the first, no reference is
+  minted for it, a symlink from A into B is `403 symlink_escape` and serves no bytes, a search and a
+  tree in A never name B's content, and `/` is never a root.
+* **Logs.** Zero rows for 30+ ordinary reads; `files.protected_path` for an explicit attempt (once,
+  deduplicated, with the class of material and not the material); `files.preview.sensitive` /
+  `files.download.sensitive` for sensitive reads; `files.privilege.requested` +
+  `files.privilege.unavailable` for asking; no token, no session handle, no secret value and no
+  smuggled field in any row, and none in the `/api/activity` payload either.
+
+Two blind spots are stated rather than hidden:
+
+* **Real mounts cannot be created in this sandbox** (no `CAP_SYS_ADMIN`), so F1 is proved against an
+  injected `/proc/self/mountinfo` through the policy's own test seam — the same table `resolve()`
+  reads. `verify.mjs` cannot cover it at all: it spawns a real server, and an HTTP seam for injecting
+  a mount table would be a worse hole than the one being tested.
+* **A viewer session cannot be minted over HTTP** on a single-account host, so the role refusal is
+  proved by `phase11a-files.test.js` (every files route 403s with `permission:'files.read'` named,
+  and no permission in the vocabulary can mutate a file) rather than by a live probe.
 
 Not merged: this branch is `arena/01a0ba9f-opushub`, and it stays there until it is reviewed.

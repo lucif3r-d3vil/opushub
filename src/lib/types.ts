@@ -1612,6 +1612,12 @@ export interface PrivilegeRequestResult {
   privileged: PrivilegedStatus;
 }
 
+/**
+ * What `GET /api/files/download-token` answers with. The Files page never holds one: a download is
+ * a plain `<a href>` that the server redirects to the reference it just minted, so a token lives in
+ * a redirect and in one byte request — never in React state, storage or a composed URL. This is the
+ * route's contract, kept here because the contract is the point.
+ */
 export interface DownloadTokenDoc {
   ok: true;
   token: string;

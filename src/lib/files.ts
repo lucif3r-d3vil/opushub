@@ -14,9 +14,9 @@
 // navigates to it and when they ask for a refresh. A file manager that re-read the host every few
 // seconds would be a load generator, not a UI.
 import { useMemo } from 'react';
-import { ApiError, api as get, post, usePolled } from './api';
+import { ApiError, post, usePolled } from './api';
 import type {
-  DownloadTokenDoc, FileListDoc, FilePreviewDoc, FileSearchDoc, FileStatDoc, FileTreeDoc,
+  FileListDoc, FilePreviewDoc, FileSearchDoc, FileStatDoc, FileTreeDoc,
   FilesRefusal, FilesRootsDoc, FilesSurface, PermissionStatusDoc, PrivilegeRequestResult,
   PrivilegedOperation,
 } from './types';
@@ -216,10 +216,11 @@ export function useFilesRoots({ refresh = false } = {}) {
   return usePolled<FilesRootsDoc>(url, 0);
 }
 
-/** A short-lived reference for one file, when the page needs the URL rather than a plain link. */
-export async function downloadToken(root: string, path: string): Promise<DownloadTokenDoc> {
-  return get<DownloadTokenDoc>(filesUrl('download-token', { root, path }));
-}
+/* There is deliberately no client-side `downloadToken()`. A download is `downloadHref()` — a plain
+ * link the server 302-redirects to a reference it minted for this session, this path and this
+ * operation — so the page never holds a token to leak into state, storage, history or a log. The
+ * `/api/files/download-token` route still exists (and is tested server-side) for a caller that
+ * needs the JSON document itself. */
 
 /* ------------------------------------------------------------------ */
 /* the one POST                                                        */
