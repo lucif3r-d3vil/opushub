@@ -9,8 +9,12 @@
 # ./data (runtime state: the administrator account, sessions, backups). Deleting the container and
 # recreating it changes nothing in the app; deleting ./data means running setup again.
 #
-# The Docker socket is mounted read-only. OpusHub discovers and displays; it never starts, stops,
-# restarts, execs into or deploys anything.
+# OpusHub discovers and displays, and can also run confirmation-gated, audited container and stack
+# operations (start/stop/restart, recreate, update, deploy, ...). The `:ro` on the socket mount
+# below does NOT make the socket read-only: it only stops the socket file being replaced. Docker
+# API writes still go through. What bounds OpusHub is its own enumerated write surface (see
+# SECURITY.md); for enforcement outside OpusHub, point OPUSHUB_OPERATIONS_SOCKET at a filtering
+# socket proxy.
 services:
   opushub:
     # the published image — or replace with `build: .` to run from source
@@ -26,7 +30,7 @@ services:
     volumes:
       - ./config:/app/config
       - ./data:/app/data
-      # read-only, and the only reason OpusHub knows anything about your host
+      # the only reason OpusHub knows anything about your host (:ro does not restrict API writes)
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
     # The socket is root-owned (usually group `docker`). Running as the unprivileged `node` user

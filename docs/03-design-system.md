@@ -3,7 +3,7 @@
 ## V1.2 decisions (Phase 2 real-data review, 2026-09-12)
 
 Validated against live Engine-shaped data (via the mock-engine harness — no real Engine exists in
-this sandbox; see `01-audit.md`) and real `/proc` host metrics. No redesign; only problems caused
+this sandbox; see `archive/01-audit.md`) and real `/proc` host metrics. No redesign; only problems caused
 by real data were fixed:
 
 - **Socket paths never reach the browser — not even under Details.** This supersedes the V1.1
