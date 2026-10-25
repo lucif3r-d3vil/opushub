@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en" data-bg="graphite">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpusHub — Home (design mockup)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  /* ── page: greeting ── */
+  .hero { padding: 54px 0 26px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .hero h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(36px, 5.2vw, 56px); line-height: 1.03; letter-spacing: -0.024em; text-shadow: 0 2px 28px rgba(0, 0, 0, 0.4); }
+  .hero h1 em { font-style: italic; color: var(--accent-ink); }
+  .hero .sub { margin-top: 12px; font-size: 16px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .hero .sub span { display: inline-flex; align-items: center; gap: 8px; }
+  .clock { text-align: right; line-height: 1.1; }
+  .clock b { display: block; font-weight: 300; font-size: 44px; letter-spacing: -0.03em; }
+  .clock span { color: var(--ink-2); font-size: 13.5px; }
+
+  /* ── host vitals: one line ── */
+  .host { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); padding: 6px 0; margin-bottom: 18px; }
+  .host .h { padding: 12px 20px 10px; position: relative; min-width: 0; }
+  .host .h + .h::before { content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 1px; background: var(--hair); }
+  .host .lab { display: flex; justify-content: space-between; align-items: baseline; }
+  .host .val { font-size: 22px; font-weight: 560; letter-spacing: -0.02em; margin: 2px 0 4px; white-space: nowrap; }
+  .host .val small { font-size: 12.5px; font-weight: 450; color: var(--ink-2); letter-spacing: 0; }
+  .host svg.sp { width: 100%; height: 30px; }
+  .host .plain { font-size: 12.5px; color: var(--ink-3); height: 30px; display: flex; align-items: center; }
+
+  /* ── needs attention: the only band that is empty when all is well ── */
+  .attn { padding: 16px 18px 16px; margin-bottom: 30px; border-color: color-mix(in srgb, var(--warn) 34%, var(--hair)); }
+  .attn header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .attn h2 { font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .attn header { flex-wrap: wrap; }
+  .attn .items { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+  .ai { display: grid; grid-template-columns: 10px 1fr auto; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--hair); transition: background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
+  .ai:hover { background: rgba(255, 255, 255, 0.07); transform: translateY(-1px); }
+  .ai b { font-weight: 580; display: block; }
+  .ai small { color: var(--ink-2); font-size: 12.5px; display: block; }
+  .ai .go { font-size: 13px; color: var(--accent-ink); font-weight: 560; white-space: nowrap; }
+
+  /* ── two columns: launch tiles + rail ── */
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 36px; align-items: start; padding-bottom: 110px; }
+  .stack { margin-bottom: 34px; }
+  .stack-h { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; text-shadow: 0 1px 14px rgba(0, 0, 0, 0.55); margin-left: -12px; padding: 6px 12px; border-radius: 12px; background: linear-gradient(90deg, rgba(8, 9, 12, 0.46), rgba(8, 9, 12, 0)); }
+  .stack-h h2 { font-size: 17px; font-weight: 640; letter-spacing: -0.012em; }
+  .stack-h .line { flex: 1; height: 1px; background: linear-gradient(90deg, var(--hair-strong), transparent); align-self: center; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 14px; }
+
+  .tile { position: relative; isolation: isolate; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; gap: 20px; min-height: 128px; padding: 16px; border-radius: 18px; background: var(--tile); backdrop-filter: blur(var(--blur)) saturate(1.25); -webkit-backdrop-filter: blur(var(--blur)) saturate(1.25); border: 1px solid var(--hair); box-shadow: var(--shadow-tile); transition: transform 220ms var(--ease), border-color 200ms var(--ease), background 200ms var(--ease), box-shadow 220ms var(--ease); }
+  .tile::before { content: ''; position: absolute; inset: 0; z-index: -1; opacity: 0; transition: opacity 240ms var(--ease); background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 0%), hsl(var(--h) 60% 60% / 0.24), transparent 70%); }
+  .tile:hover { transform: translateY(-3px); background: var(--tile-hover); border-color: var(--hair-strong); box-shadow: 0 26px 44px -24px rgba(0, 0, 0, 0.9), 0 0 0 1px hsl(var(--h) 50% 60% / 0.14); }
+  .tile:hover::before { opacity: 1; }
+  .tile:active { transform: translateY(-1px) scale(0.988); }
+  .tile .top { display: flex; align-items: flex-start; justify-content: space-between; }
+  .ico { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; color: hsl(var(--h) 66% 80%); background: hsl(var(--h) 42% 52% / 0.17); border: 1px solid hsl(var(--h) 45% 72% / 0.20); transition: transform 260ms var(--ease-out); }
+  .tile:hover .ico { transform: scale(1.07) rotate(-3deg); }
+  .st { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 560; padding-top: 2px; }
+  .st.warn { color: var(--warn); } .st.fail { color: var(--fail); }
+  .tname { font-weight: 620; font-size: 15.5px; letter-spacing: -0.012em; line-height: 1.25; }
+  .tsub { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--ink-2); font-size: 12.5px; margin-top: 2px; min-height: 22px; }
+  .upd { display: inline-flex; align-items: center; gap: 4px; padding: 1px 9px 1px 6px; border-radius: 999px; font-size: 11.5px; font-weight: 640; color: var(--accent-ink); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .tile[data-s='fail'] { border-color: color-mix(in srgb, var(--fail) 45%, var(--hair)); }
+  .tile[data-s='warn'] { border-color: color-mix(in srgb, var(--warn) 40%, var(--hair)); }
+  .tile[data-s='fail'] .ico { filter: saturate(0.4); opacity: 0.8; }
+
+  /* ── rail widgets ── */
+  aside { display: grid; gap: 18px; position: sticky; top: 78px; }
+  .w { padding: 18px 18px 14px; }
+  .w header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .w h2 { font-size: 15px; font-weight: 620; }
+  .w .more { font-size: 12.5px; color: var(--accent-ink); }
+  .w .more:hover { text-decoration: underline; }
+  .u { display: grid; grid-template-columns: 32px 1fr auto; gap: 12px; align-items: center; padding: 9px 0; border-top: 1px solid var(--hair); }
+  .u:first-of-type { border-top: 0; }
+  .u .mini { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: hsl(var(--h) 66% 80%); background: hsl(var(--h) 42% 52% / 0.17); }
+  .u b { font-weight: 560; display: block; font-size: 13.5px; line-height: 1.3; }
+  .u small { color: var(--ink-2); font-size: 12.5px; font-family: var(--font-mono); font-size: 11.5px; }
+  .u a { font-size: 12.5px; color: var(--accent-ink); font-weight: 560; }
+  .foot { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--hair); color: var(--ink-3); font-size: 12px; }
+  .bignum { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 12px; }
+  .bignum b { font-size: 40px; font-weight: 300; letter-spacing: -0.035em; }
+  .bignum span { color: var(--ink-2); font-size: 12.5px; }
+  .mrow { display: grid; grid-template-columns: 82px 1fr; gap: 10px; align-items: center; padding: 5px 0; }
+  .mrow span { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mrow svg.rib { width: 100%; height: 22px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 999px; border: 1px solid var(--hair); background: rgba(255, 255, 255, 0.04); font-size: 13px; color: var(--ink-2); transition: all var(--t-fast) var(--ease); }
+  .chip:hover { color: var(--ink); border-color: var(--hair-strong); background: rgba(255, 255, 255, 0.08); transform: translateY(-1px); }
+
+  @media (max-width: 1100px) {
+    .cols { grid-template-columns: 1fr; } aside { position: static; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .host { grid-template-columns: repeat(3, 1fr); } .host .h:nth-child(4)::before { display: none; }
+  }
+  @media (max-width: 600px) {
+    .hero { padding-top: 30px; } .clock b { font-size: 34px; }
+    .host { grid-template-columns: repeat(2, 1fr); } .host .h:nth-child(odd)::before { display: none; } .host .h:nth-child(4)::before { display: block; }
+    .tiles { grid-template-columns: repeat(2, 1fr); gap: 10px; } .tile { min-height: 116px; padding: 13px; } .ico { width: 40px; height: 40px; }
+  }
+</style>
+</head>
+<body>
+
+<main class="wrap">
+  <section class="hero rise" style="--i:0">
+    <div>
+      <h1 id="greet">Good afternoon, <em>Nora</em>.</h1>
+      <p class="sub" id="sub"></p>
+    </div>
+    <div class="clock" aria-label="Local time"><b id="clk">14:35</b><span id="dt"></span></div>
+  </section>
+
+  <section class="host glass rise" style="--i:1" aria-label="Host vitals" id="host"></section>
+
+  <section class="attn glass rise" style="--i:2" aria-labelledby="attn-h" id="attn"></section>
+
+  <div class="cols">
+    <div id="stacks"></div>
+    <aside id="rail"></aside>
+  </div>
+</main>
+
+<script src="mock.js"></script>
+<script>
+(function () {
+  const O = window.OPUS, $ = (s) => document.querySelector(s);
+  O.mountChrome('home');
+
+  /* greeting + clock (live) */
+  const now = new Date(), hr = now.getHours();
+  $('#greet').innerHTML = (hr < 5 ? 'Still up' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening') + ', <em>Nora</em>.';
+  function tick() {
+    const d = new Date(); $('#clk').textContent = O.clock(d);
+    $('#dt').textContent = d.toLocaleDateString('en', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+  tick(); setInterval(tick, 10000);
+
+  /* world state */
+  const S = O.SERVICES.map((s) => Object.assign({}, s, { state: O.currentState(s) }));
+  const bad = S.filter((s) => s.state !== 'ok'), upd = S.filter((s) => s.update);
+  const up = S.filter((s) => s.state === 'ok').length;
+  $('#sub').innerHTML =
+    '<span><i class="dot ok"></i>' + up + ' of ' + S.length + ' monitors up</span>' +
+    '<span><i class="dot warn"></i>' + bad.length + ' need attention</span>' +
+    '<span style="color:var(--accent-ink)">' + O.icon('up', 15) + upd.length + ' updates available</span>';
+
+  /* host vitals — one sampler feeds all of these in the product */
+  const H = [
+    { k: 'CPU', unit: '%', min: 0, max: 48, mean: 17, amp: 17, fmt: (v) => Math.round(v) + '<small>%</small>' },
+    { k: 'Memory', unit: '%', min: 38, max: 46, mean: 41.5, amp: 2.4, fmt: (v) => Math.round(v) + '<small>% of 32 GB</small>' },
+    { k: 'Network', unit: '', min: 0, max: 36, mean: 9, amp: 16, fmt: (v) => '↓ ' + v.toFixed(1) + '<small> MB/s</small>' },
+    { k: 'Disk /', unit: '%', min: 61.5, max: 62.5, mean: 62, amp: 0.16, fmt: (v) => v.toFixed(0) + '<small>% of 1.8 TB</small>' },
+  ];
+  $('#host').innerHTML = H.map((h, i) => '<div class="h"><div class="lab"><span class="micro">' + h.k + '</span></div><div class="val" id="hv' + i + '"></div><svg class="sp" id="hs' + i + '" role="img" aria-label="' + h.k + ' over the last few minutes"></svg></div>').join('') +
+    '<div class="h"><div class="lab"><span class="micro">Temp</span></div><div class="val">41<small>°C</small></div><div class="plain">CPU package · fine</div></div>' +
+    '<div class="h"><div class="lab"><span class="micro">Uptime</span></div><div class="val">18<small> days</small></div><div class="plain">since the kernel update</div></div>';
+  H.forEach((h, i) => O.spark($('#hs' + i), { n: 44, w: 160, h: 30, min: h.min, max: h.max, mean: h.mean, amp: h.amp, start: h.mean, seed: 'host' + i, tick: 1600, onValue: (v) => { $('#hv' + i).innerHTML = h.fmt(v); } }));
+
+  /* needs attention */
+  if (bad.length) {
+    $('#attn').innerHTML = '<header><i class="dot warn"></i><h2 id="attn-h">Needs attention · ' + bad.length + '</h2><span class="meta">auto-heal is on for 2 containers</span></header><div class="items">' +
+      bad.map((s) => '<a class="ai" href="#"><i class="dot ' + (s.state === 'down' ? 'fail' : 'warn') + '"></i><div><b>' + s.name + '</b><small>' + (s.note || '') + '</small></div><span class="go">' + (s.state === 'down' ? 'Restart' : 'Open') + ' →</span></a>').join('') + '</div>';
+  } else { $('#attn').remove(); }
+
+  /* launch tiles, grouped by Compose stack */
+  const STATE = { ok: ['ok', ''], degraded: ['warn', 'Unhealthy'], down: ['fail', 'Down'] };
+  $('#stacks').innerHTML = O.STACKS.map((name, si) => {
+    const items = S.filter((s) => s.stack === name), allOk = items.every((s) => s.state === 'ok');
+    return '<section class="stack rise" style="--i:' + (3 + si) + ';--h:' + O.stackHue(name) + '" aria-labelledby="st' + si + '"><div class="stack-h"><h2 id="st' + si + '">' + name + '</h2><span class="meta">' + items.length + ' containers · ' + (allOk ? 'all running' : items.filter((s) => s.state !== 'ok').length + ' need attention') + '</span><span class="line"></span></div><div class="tiles">' +
+      items.map((s) => {
+        const st = STATE[s.state];
+        return '<a class="tile" href="#" data-s="' + st[0] + '" style="--h:' + O.stackHue(name) + '" aria-label="Open ' + s.name + (st[1] ? ', ' + st[1].toLowerCase() : '') + '"><div class="top"><span class="ico">' + O.icon(s.icon, 24) + '</span><span class="st ' + st[0] + '"><i class="dot ' + st[0] + '"></i>' + st[1] + '</span></div><div><div class="tname">' + s.name + '</div><div class="tsub"><span>:' + s.port + '</span>' + (s.update ? '<span class="upd" title="Update available: ' + s.update[0] + ' → ' + s.update[1] + '">' + O.icon('up', 12) + s.update[1] + '</span>' : '') + '</div></div></a>';
+      }).join('') + '</div></section>';
+  }).join('');
+  document.querySelectorAll('.tile').forEach((t) => t.addEventListener('pointermove', (e) => { const r = t.getBoundingClientRect(); t.style.setProperty('--mx', (e.clientX - r.left) + 'px'); t.style.setProperty('--my', (e.clientY - r.top) + 'px'); }));
+
+  /* rail: updates, uptime summary, bookmarks */
+  const st7 = S.map((s) => O.stats(s, '7d')), avg7 = st7.reduce((a, b) => a + b.uptime, 0) / st7.length;
+  const worst = S.map((s, i) => ({ s, st: O.stats(s, '24h') })).filter((x) => x.s.state !== 'ok' || x.s.id === 'jellyfin').slice(0, 4);
+  $('#rail').innerHTML =
+    '<section class="w glass rise" style="--i:4"><header><h2>Updates available</h2><span class="meta">' + upd.length + '</span></header>' +
+      upd.map((s) => '<div class="u" style="--h:' + O.stackHue(s.stack) + '"><span class="mini">' + O.icon(s.icon, 17) + '</span><div><b>' + s.name + '</b><small>' + s.update[0] + ' → ' + s.update[1] + '</small></div><a href="#">Review</a></div>').join('') +
+      '<div class="foot">Checked 2 h ago · daily · nothing is applied automatically</div></section>' +
+    '<section class="w glass rise" style="--i:5"><header><h2>Uptime</h2><a class="more" href="uptime.html">Open →</a></header>' +
+      '<div class="bignum"><b>' + avg7.toFixed(2) + '<span style="font-size:20px">%</span></b><span>last 7 days<br>' + up + ' of ' + S.length + ' up now</span></div>' +
+      worst.map((x) => '<div class="mrow"><span>' + x.s.name + '</span>' + O.ribbon(x.st.series.slice(-144), { h: 22, base: x.s.base, minH: 2.2, label: x.s.name + ', last 12 hours' }) + '</div>').join('') +
+      '<div class="foot">Last 12 hours · thickness is response time</div></section>' +
+    '<section class="w glass rise" style="--i:6"><header><h2>Bookmarks</h2></header><div class="chips">' +
+      ['Router', 'Synology', 'Proxmox', 'Docs', 'Restic'].map((b) => '<a class="chip" href="#">' + O.icon('link', 14) + b + '</a>').join('') + '</div></section>';
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en" data-bg="graphite">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpusHub — Uptime (design mockup)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  .head { padding: 48px 0 22px; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  .head h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(34px, 4.6vw, 48px); line-height: 1.05; letter-spacing: -0.022em; text-shadow: 0 2px 26px rgba(0, 0, 0, 0.4); }
+  .head p { color: var(--ink-2); margin-top: 8px; text-shadow: 0 1px 14px rgba(0, 0, 0, 0.5); }
+  .ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; position: relative; }
+
+  /* summary */
+  .sum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 18px; }
+  .sum > div { padding: 18px 22px 16px; position: relative; }
+  .sum > div + div::before { content: ''; position: absolute; left: 0; top: 18px; bottom: 18px; width: 1px; background: var(--hair); }
+  .sum b { display: block; font-size: clamp(28px, 3.4vw, 38px); font-weight: 300; letter-spacing: -0.035em; line-height: 1.1; margin: 4px 0 2px; }
+  .sum b small { font-size: 0.5em; font-weight: 400; color: var(--ink-2); letter-spacing: 0; }
+  .sum span.meta { display: block; }
+
+  /* board: identical grid rows, so the ribbon column lines up across every service */
+  .board { position: relative; }
+  .row, .axisrow { display: grid; grid-template-columns: 224px minmax(0, 1fr) 136px; column-gap: 20px; align-items: center; padding: 11px 20px; }
+  .row { border-top: 1px solid var(--hair); transition: background var(--t-fast) var(--ease); }
+  .row:first-child { border-top: 0; }
+  .row.hot { background: rgba(255, 255, 255, 0.035); }
+  .c1 { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .c3 { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; }
+  .who { width: 34px; height: 34px; border-radius: 11px; flex: none; display: grid; place-items: center; color: hsl(var(--h) 66% 80%); background: hsl(var(--h) 42% 52% / 0.17); border: 1px solid hsl(var(--h) 45% 72% / 0.18); }
+  .nm { min-width: 0; line-height: 1.3; }
+  .nm b { display: block; font-weight: 600; font-size: 14px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nm small { color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+  .nm small i { font-style: normal; color: var(--ink-3); }
+  .now { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 580; letter-spacing: -0.01em; }
+  .now small { font-weight: 450; color: var(--ink-2); font-size: 12.5px; }
+  .c3 .meta { font-size: 12px; }
+
+  .rb { position: relative; width: 100%; height: 46px; border-radius: 10px; cursor: crosshair; touch-action: pan-y; }
+  .rb svg.rib { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .rb svg.glow { filter: blur(8px); opacity: 0.30; }
+  .rb svg.main { clip-path: inset(0 100% 0 0); animation: draw 1000ms var(--ease-out) forwards; animation-delay: calc(var(--i, 0) * 55ms + 120ms); }
+  .rb svg.glow { clip-path: inset(0 100% 0 0); animation: draw 1000ms var(--ease-out) forwards; animation-delay: calc(var(--i, 0) * 55ms + 120ms); }
+  @keyframes draw { to { clip-path: inset(0 0 0 0); } }
+  html.static .rb svg { clip-path: none; animation: none; }
+  .notch { position: absolute; top: -5px; width: 14px; height: 14px; margin-left: -7px; display: grid; place-items: center; z-index: 2; }
+  .notch::before { content: ''; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 8px solid var(--nc); filter: drop-shadow(0 0 4px var(--nc)); transition: transform var(--t-fast) var(--ease); }
+  .notch:hover::before, .notch:focus-visible::before { transform: scale(1.35); }
+  .notch.down { --nc: var(--fail); } .notch.degraded { --nc: var(--warn); }
+  .notch.on::after { content: ''; position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--nc); animation: ring 2.2s var(--ease) infinite; top: -1px; }
+  @keyframes ring { from { transform: scale(0.5); opacity: 0.9; } to { transform: scale(1.7); opacity: 0; } }
+
+  .ov { position: absolute; pointer-events: none; z-index: 3; }
+  .tk { position: absolute; top: 0; bottom: 0; width: 1px; background: linear-gradient(180deg, transparent, var(--hair) 12%, var(--hair) 88%, transparent); }
+  .guide { position: absolute; top: -2px; bottom: -2px; width: 1.5px; margin-left: -0.75px; background: var(--ink); opacity: 0; box-shadow: 0 0 12px rgba(255, 255, 255, 0.5); transition: opacity var(--t-fast) var(--ease); }
+  .guide.on { opacity: 0.85; }
+  .axisrow { padding-top: 2px; padding-bottom: 0; }
+  .axis { grid-column: 2; position: relative; height: 24px; }
+  .axis span { position: absolute; top: 0; transform: translateX(-50%); font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+  .axis span.edge-r { transform: translateX(-100%); } .axis span.edge-l { transform: none; }
+  .axis .bub { top: 0; color: var(--ink); background: #2b2f36; border: 1px solid var(--hair-strong); border-radius: 999px; padding: 1px 10px; opacity: 0; transition: opacity var(--t-fast) var(--ease); font-weight: 560; }
+  .axis .bub.on { opacity: 1; }
+  .tip { position: fixed; z-index: 60; pointer-events: none; padding: 8px 12px; border-radius: 12px; background: rgba(14, 15, 18, 0.92); border: 1px solid var(--hair-strong); backdrop-filter: blur(14px); box-shadow: var(--shadow-pop); font-size: 12.5px; line-height: 1.45; opacity: 0; transform: translateY(4px); transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); white-space: nowrap; }
+  .tip.on { opacity: 1; transform: none; }
+  .tip b { display: block; font-weight: 600; font-size: 13px; }
+  .tip em { font-style: normal; color: var(--ink-2); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 26px; padding: 4px 26px 6px; color: var(--ink-2); font-size: 12.5px; align-items: center; }
+  .legend .k { display: inline-flex; align-items: center; gap: 8px; }
+  .legend .sw { width: 22px; height: 8px; border-radius: 4px; background: var(--c); }
+  .legend .thin { width: 26px; height: 3px; border-radius: 2px; background: var(--ok); } .legend .thick { width: 26px; height: 11px; border-radius: 6px; background: var(--ok); }
+  .legend .tri { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 8px solid var(--fail); }
+
+  /* incidents */
+  .inc { padding: 6px 0 0; }
+  .inc h2 { font-size: 17px; font-weight: 640; padding: 6px 12px; margin: 0 0 12px -12px; border-radius: 12px; display: inline-block; background: linear-gradient(90deg, rgba(8, 9, 12, 0.46), rgba(8, 9, 12, 0)); text-shadow: 0 1px 14px rgba(0, 0, 0, 0.55); }
+  .il { padding: 4px 22px; margin-bottom: 120px; }
+  .ir { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 13px 0; border-top: 1px solid var(--hair); }
+  .ir:first-child { border-top: 0; }
+  .ir b { font-weight: 600; } .ir small { display: block; color: var(--ink-2); font-size: 12.5px; }
+  .ir .len { text-align: right; font-weight: 560; } .ir .len small { color: var(--ink-3); }
+  .ongoing { color: var(--warn); }
+
+  /* compact monitoring defaults (a popover here, the single Monitoring section in Settings) */
+  .pop { position: absolute; top: 46px; right: 0; z-index: 25; width: min(380px, calc(100vw - 28px)); padding: 16px 18px 16px; border-radius: var(--r-xl); background: rgba(16, 18, 22, 0.96); backdrop-filter: blur(22px); border: 1px solid var(--hair-strong); box-shadow: var(--shadow-pop); opacity: 0; visibility: hidden; transform: translateY(-6px) scale(0.97); transform-origin: 90% 0; transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease), visibility 0s linear var(--t-med); }
+  .pop.open { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+  .pop h3 { font-size: 15px; font-weight: 620; } .pop p.meta { margin: 2px 0 10px; }
+  .f { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--hair); font-size: 13.5px; }
+  .f label { color: var(--ink); } .f label small { display: block; color: var(--ink-3); font-size: 12px; }
+  .f input[type=text] { width: 76px; text-align: right; height: 32px; border-radius: 9px; border: 1px solid var(--hair-strong); background: rgba(255, 255, 255, 0.05); color: var(--ink); padding: 0 10px; font: inherit; }
+  .tg2 { width: 40px; height: 24px; border-radius: 999px; background: rgba(255, 255, 255, 0.14); position: relative; transition: background var(--t-fast) var(--ease); }
+  .tg2::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform var(--t-med) var(--ease); }
+  .tg2[aria-checked='true'] { background: color-mix(in srgb, var(--accent) 70%, #000); } .tg2[aria-checked='true']::after { transform: translateX(16px); }
+  .adv { border-top: 1px solid var(--hair); padding-top: 10px; margin-top: 4px; color: var(--ink-2); font-size: 13px; display: flex; justify-content: space-between; }
+  .pop .row2 { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+
+  @media (max-width: 900px) {
+    .row, .axisrow { grid-template-columns: minmax(0, 1fr) 110px; row-gap: 6px; padding: 12px 14px; }
+    .row .c2 { grid-column: 1 / -1; grid-row: 2; } .axisrow .axis { grid-column: 1 / -1; }
+    .sum { grid-template-columns: repeat(2, 1fr); } .sum > div:nth-child(3)::before { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<main class="wrap">
+  <section class="head rise" style="--i:0">
+    <div>
+      <h1>Uptime</h1>
+      <p>12 monitors · checked every minute · alerts go to the bell and Telegram</p>
+    </div>
+    <div class="ctl">
+      <div class="seg" role="group" aria-label="Time range"><button type="button" data-range="24h" aria-pressed="true">24 hours</button><button type="button" data-range="7d" aria-pressed="false">7 days</button></div>
+      <button class="btn" id="defbtn" type="button" aria-expanded="false" aria-controls="defaults"></button>
+      <button class="btn primary" type="button">+ Add monitor</button>
+      <section class="pop" id="defaults" aria-label="Monitoring defaults">
+        <h3>Monitoring defaults</h3><p class="meta">Applied to new monitors. Existing ones keep their own values.</p>
+        <div class="f"><label for="d1">Check every<small>seconds</small></label><input id="d1" type="text" value="60"></div>
+        <div class="f"><label for="d2">Timeout<small>seconds</small></label><input id="d2" type="text" value="10"></div>
+        <div class="f"><label for="d3">Mark down after<small>failed checks in a row</small></label><input id="d3" type="text" value="3"></div>
+        <div class="f"><label for="d4">Mark up after<small>successful checks in a row</small></label><input id="d4" type="text" value="2"></div>
+        <div class="f"><label for="d5">Keep history<small>days</small></label><input id="d5" type="text" value="30"></div>
+        <div class="f"><label id="l6">Allow internal targets<small>addresses on your own network</small></label><button class="tg2" role="switch" aria-checked="true" aria-labelledby="l6"></button></div>
+        <div class="f"><label id="l7">Create monitors from discovered containers<small>only ones that expose a web address</small></label><button class="tg2" role="switch" aria-checked="false" aria-labelledby="l7"></button></div>
+        <div class="adv"><span>Advanced: concurrency, jitter, caps</span><span>›</span></div>
+        <div class="row2"><button class="btn" type="button">Reset</button><button class="btn primary" type="button">Save</button></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="sum glass rise" style="--i:1" id="sum" aria-label="Summary"></section>
+
+  <section class="board-wrap glass rise" style="--i:2" aria-label="Pulse ribbons">
+    <div class="board" id="board"></div>
+    <div class="legend" aria-label="How to read the ribbons">
+      <span class="k"><i class="sw" style="--c:var(--ok)"></i>Up</span>
+      <span class="k"><i class="sw" style="--c:var(--warn)"></i>Slow or unhealthy</span>
+      <span class="k"><i class="sw" style="--c:var(--fail)"></i>Down</span>
+      <span class="k"><i class="thin"></i><i class="thick"></i>Thicker = slower response</span>
+      <span class="k"><i class="tri"></i>Incident began</span>
+      <span class="k meta">Hover or use ← → to scrub</span>
+    </div>
+  </section>
+
+  <section class="inc rise" style="--i:3" aria-labelledby="inch">
+    <h2 id="inch">Incidents</h2>
+    <div class="il glass" id="inc"></div>
+  </section>
+</main>
+
+<div class="tip" id="tip" role="presentation"></div>
+
+<script src="mock.js"></script>
+<script>
+(function () {
+  const O = window.OPUS, $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  O.mountChrome('uptime');
+  $('#defbtn').innerHTML = O.icon('sliders', 16) + 'Defaults';
+
+  let range = '24h', rows = [], idxNow = -1, active = null;
+  const RANK = { down: 0, degraded: 1, ok: 2 };
+  const WORD = { ok: 'Up', degraded: 'Slow', down: 'Down' };
+  const DOT = { ok: 'ok', degraded: 'warn', down: 'fail' };
+  const board = $('#board'), tip = $('#tip');
+
+  function build() {
+    const R = O.RANGES[range], total = (R.n - 1) * R.step;
+    rows = O.SERVICES.map((s) => ({ s, st: O.stats(s, range), state: O.currentState(s) }))
+      .sort((a, b) => RANK[a.state] - RANK[b.state] || a.s.name.localeCompare(b.s.name));
+    const inc = O.incidents(range);
+
+    /* summary */
+    const mean = (f) => rows.reduce((a, r) => a + f(r), 0) / rows.length;
+    const down = rows.reduce((a, r) => a + O.downMinutes(r.s, R.n * R.step), 0);
+    $('#sum').innerHTML =
+      '<div><span class="micro">Uptime · ' + (range === '24h' ? '24 h' : '7 days') + '</span><b>' + mean((r) => r.st.uptime).toFixed(2) + '<small>%</small></b><span class="meta">across all monitors</span></div>' +
+      '<div><span class="micro">Up right now</span><b>' + rows.filter((r) => r.state === 'ok').length + '<small> / ' + rows.length + '</small></b><span class="meta">' + rows.filter((r) => r.state === 'degraded').length + ' slow · ' + rows.filter((r) => r.state === 'down').length + ' down</span></div>' +
+      '<div><span class="micro">Incidents</span><b>' + inc.length + '</b><span class="meta">' + O.dur(down) + ' of downtime in total</span></div>' +
+      '<div><span class="micro">Response time</span><b>' + Math.round(mean((r) => r.st.avg)) + '<small> ms</small></b><span class="meta">average, all monitors</span></div>';
+
+    /* ribbons */
+    board.innerHTML = rows.map((r, ri) => {
+      const s = r.s, hue = O.stackHue(s.stack), label = s.name + ', ' + R.label.toLowerCase() + ': ' + r.st.uptime.toFixed(2) + '% up';
+      return '<div class="row" data-r="' + ri + '"><div class="c1" style="--h:' + hue + '"><span class="who">' + O.icon(s.icon, 18) + '</span><div class="nm"><b>' + s.name + '</b><small>' + r.st.uptime.toFixed(2) + '% <i>·</i> p95 ' + r.st.p95 + ' ms</small></div></div>' +
+        '<div class="c2"><div class="rb" tabindex="0" role="img" aria-label="' + label + '. Use left and right arrow keys to scrub through time." data-r="' + ri + '" style="--i:' + ri + '"></div></div>' +
+        '<div class="c3"><span class="now" id="now' + ri + '"></span><span class="meta" id="nw' + ri + '"></span></div></div>';
+    }).join('');
+    // fill each ribbon cell: a blurred glow copy, the ribbon itself, then the incident notches
+    $$('.rb', board).forEach((el, ri) => {
+      const r = rows[ri], rib = O.ribbon(r.st.series, { h: 46, base: r.s.base });
+      el.innerHTML = rib.replace('class="rib"', 'class="rib glow" aria-hidden="true"') + rib.replace('class="rib"', 'class="rib main"') + (inc.filter((e) => e.svc === r.s).map((e) => {
+        const f = (total - e.startAgo) / total; if (f < 0 || f > 1) return '';
+        const d = new Date(e.at);
+        return '<button class="notch ' + e.kind + (e.ongoing ? ' on' : '') + '" style="left:' + (f * 100).toFixed(2) + '%" data-tip="' + (e.kind === 'down' ? 'Down' : 'Slow') + ' · ' + (e.ongoing ? 'ongoing, ' : '') + O.dur(e.dur) + '|' + O.dayClock(d) + '" aria-label="' + (e.kind === 'down' ? 'Down' : 'Slow') + ' for ' + O.dur(e.dur) + ' from ' + O.dayClock(d) + '"></button>';
+      }).join(''));
+    });
+
+    /* overlay (ticks + guide) and axis, positioned over the shared ribbon column */
+    const first = $('.rb', board);
+    board.insertAdjacentHTML('beforeend', '<div class="ov" id="ov"></div><div class="axisrow"><div></div><div class="axis" id="axis"></div><div></div></div>');
+    const axis = $('#axis'), t0 = rows[0].st.series[0].t, t1 = rows[0].st.series[R.n - 1].t, span = t1 - t0;
+    let ticks = '', labs = '';
+    if (range === '24h') {
+      const d = new Date(t0); d.setMinutes(0, 0, 0); if (d.getTime() < t0) d.setHours(d.getHours() + 1);
+      for (; d.getTime() <= t1; d.setHours(d.getHours() + 1)) {
+        if (d.getHours() % 4) continue; const f = (d.getTime() - t0) / span; if (f > 0.93) continue;
+        ticks += '<i class="tk" style="left:' + (f * 100) + '%"></i>'; labs += '<span style="left:' + (f * 100) + '%">' + O.clock(d) + '</span>';
+      }
+    } else {
+      const d = new Date(t0); d.setHours(24, 0, 0, 0);
+      for (; d.getTime() <= t1; d.setDate(d.getDate() + 1)) {
+        const f = (d.getTime() - t0) / span; if (f > 0.97) continue;
+        ticks += '<i class="tk" style="left:' + (f * 100) + '%"></i>'; labs += '<span style="left:' + (f * 100) + '%">' + ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()] + '</span>';
+      }
+    }
+    $('#ov').innerHTML = ticks + '<i class="guide" id="guide"></i>';
+    axis.innerHTML = labs + '<span class="edge-r" style="left:100%">now</span><span class="bub" id="bub"></span>';
+    place(); paintNow(-1);
+    $$('.rb', board).forEach((el) => attach(el));
+    buildIncidents(inc);
+  }
+
+  function place() {
+    const rbs = $$('.rb', board), ov = $('#ov'); if (!rbs.length || !ov) return;
+    const b = board.getBoundingClientRect(), a = rbs[0].getBoundingClientRect(), z = rbs[rbs.length - 1].getBoundingClientRect();
+    Object.assign(ov.style, { left: (a.left - b.left) + 'px', width: a.width + 'px', top: (a.top - b.top - 8) + 'px', height: (z.bottom - a.top + 16) + 'px' });
+  }
+
+  function paintNow(idx) {
+    rows.forEach((r, ri) => {
+      const p = idx < 0 ? r.st.series[r.st.series.length - 1] : r.st.series[idx];
+      const st = idx < 0 ? r.state : p.state;
+      $('#now' + ri).innerHTML = '<i class="dot ' + DOT[st] + '"></i>' + (p.lat == null ? '—' : p.lat + '<small> ms</small>');
+      $('#nw' + ri).textContent = idx < 0 ? WORD[st] + ' now' : WORD[st];
+    });
+  }
+
+  function when(range, p) {
+    const R = O.RANGES[range], end = new Date(p.t), start = new Date(p.t - R.step * 60000);
+    return R.step <= 5 ? O.dayClock(end) : O.dayClock(start) + '–' + O.clock(end);
+  }
+
+  function showTip(x, y, html) {
+    tip.innerHTML = html; tip.classList.add('on');
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, x - w / 2)) + 'px';
+    tip.style.top = Math.max(8, y - h - 16) + 'px';
+  }
+
+  function scrub(el, idx, x, y, notch) {
+    const ri = +el.dataset.r, R = O.RANGES[range], n = R.n, p = rows[ri].st.series[idx], f = idx / (n - 1);
+    const ov = $('#ov'), g = $('#guide'), bub = $('#bub');
+    g.style.left = (f * ov.offsetWidth) + 'px'; g.classList.add('on');
+    bub.textContent = when(range, p); bub.style.left = (f * 100) + '%'; bub.classList.add('on');
+    paintNow(idx);
+    $$('.row', board).forEach((c) => c.classList.toggle('hot', +c.dataset.r === ri));
+    if (notch) { const [a, b] = notch.dataset.tip.split('|'); showTip(x, y, '<b>' + rows[ri].s.name + ': ' + a + '</b><em>started ' + b + '</em>'); }
+    else showTip(x, y, '<b>' + rows[ri].s.name + ' · ' + WORD[p.state] + '</b><em>' + when(range, p) + (p.lat == null ? ' · no response' : ' · ' + p.lat + ' ms') + '</em>');
+  }
+  function clear() {
+    $('#guide').classList.remove('on'); $('#bub').classList.remove('on'); tip.classList.remove('on');
+    paintNow(-1); $$('.row', board).forEach((c) => c.classList.remove('hot')); idxNow = -1;
+  }
+  function attach(el) {
+    const n = O.RANGES[range].n;
+    el.addEventListener('pointermove', (e) => {
+      const r = el.getBoundingClientRect(), f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      idxNow = Math.round(f * (n - 1)); scrub(el, idxNow, e.clientX, r.top, e.target.closest('.notch'));
+    });
+    el.addEventListener('pointerleave', clear);
+    el.addEventListener('blur', clear);
+    el.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 12 : 1;
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Escape'].includes(e.key)) return;
+      e.preventDefault();
+      if (e.key === 'Escape') return clear();
+      if (idxNow < 0) idxNow = n - 1;
+      idxNow = e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : Math.min(n - 1, Math.max(0, idxNow + (e.key === 'ArrowLeft' ? -step : step)));
+      const r = el.getBoundingClientRect(); scrub(el, idxNow, r.left + (idxNow / (n - 1)) * r.width, r.top, null);
+    });
+  }
+
+  const CAUSE = { down: ['Connection refused', 'Timed out after 10 s', 'HTTP 502 from the proxy'], degraded: ['Answered in 2.4 s (limit 1 s)', 'Healthcheck failing, still serving', 'Slow responses under load'] };
+  function buildIncidents(inc) {
+    const list = inc.slice().sort((a, b) => a.startAgo - b.startAgo).slice(0, 6);
+    $('#inc').innerHTML = list.map((e, i) => {
+      const d = new Date(e.at), cause = CAUSE[e.kind][(O.hash(e.svc.id) + i) % 3];
+      return '<div class="ir"><i class="dot ' + (e.kind === 'down' ? 'fail' : 'warn') + '"></i><div><b>' + e.svc.name + ' <span style="font-weight:450;color:var(--ink-2)">· ' + (e.kind === 'down' ? 'down' : 'slow') + '</span></b><small>' + cause + ' · started ' + O.dayClock(d) + (e.svc.id === 'qbittorrent' ? ' · auto-heal tried 3 times, then paused' : '') + '</small></div><div class="len ' + (e.ongoing ? 'ongoing' : '') + '">' + O.dur(e.dur) + '<small>' + (e.ongoing ? 'ongoing' : 'resolved') + '</small></div></div>';
+    }).join('') || '<div class="ir"><i class="dot ok"></i><div><b>No incidents</b><small>Nothing went wrong in this range.</small></div></div>';
+  }
+
+  /* controls */
+  $$('.seg button').forEach((b) => b.addEventListener('click', () => {
+    range = b.dataset.range; $$('.seg button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    clear(); build();
+  }));
+  const pop = $('#defaults'), btn = $('#defbtn');
+  btn.addEventListener('click', (e) => { e.stopPropagation(); const o = !pop.classList.contains('open'); pop.classList.toggle('open', o); btn.setAttribute('aria-expanded', String(o)); });
+  document.addEventListener('click', (e) => { if (!pop.contains(e.target) && e.target !== btn) { pop.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); } });
+  $$('.tg2').forEach((t) => t.addEventListener('click', () => t.setAttribute('aria-checked', String(t.getAttribute('aria-checked') !== 'true'))));
+  addEventListener('resize', place);
+  if (window.ResizeObserver) new ResizeObserver(place).observe(board);
+
+  const Q = new URLSearchParams(location.search);
+  if (Q.get('range') === '7d') { range = '7d'; $$('.seg button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.range === '7d'))); }
+  build();
+  // fonts and the glass blur shift layout by a pixel or two after first paint
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    place();
+    if (Q.get('pop')) { pop.classList.add('open'); btn.setAttribute('aria-expanded', 'true'); }
+    if (Q.get('scrub')) {   // ?scrub=0.62&row=2 shows the hover state without a pointer
+      const f = +Q.get('scrub'), el = $$('.rb', board)[+(Q.get('row') || 0)], r = el.getBoundingClientRect(), n = O.RANGES[range].n;
+      idxNow = Math.round(f * (n - 1)); scrub(el, idxNow, r.left + f * r.width, r.top, null);
+    }
+  }));
+})();
+</script>
+</body>
+</html>

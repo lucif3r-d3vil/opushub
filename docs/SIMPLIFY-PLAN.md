@@ -85,19 +85,19 @@ All safe to remove, with the dependencies that have to be handled in the same co
 | 3 | Weather, news, markets (server, widgets, Integrations tab, settings keys) | 1,000 | Low; edit `model.js` |
 | 4 | Background and custom CSS/JS (`providers/background.js`, `BackgroundImage`, Background tab, `/api/custom`, `/user/*.css|js`) | 800 | Low; reduces attack surface |
 | 5 | Icons page | 180 | Very low |
-| 6 | Container charts (history sampler only) | 450 | Low; keep live stats |
+| 6 | Container charts (per-container history only; keep the host sampler and add a disk field to it) | 450 | Low; keep live stats |
 | 7 | Orphan routes: `/api/volumes`, `/images`, `/docker`, `/resources`, `resources.js`, `errors.js`, v1 alias layer | 450 | Low; confirm no external caller |
-| 8 | Config export, import, scope and History UI | 1,900 | Low to medium; keep on-disk backups |
+| 8 | Config export, import, scope, the whole History UI and the Import & migration wizard (with `homepageImport.js`, `configImport.js`) | 3,300 | Medium; keep on-disk backups; see decision 7 |
 | 9 | Catalog (plus operations plumbing) | 1,800 | Medium (touches `operations/engine.js`, `policy.js`) |
 | 10 | Bell panel: add recent-activity list and alert ack (**additive**, builds first) | +150 | Low |
-| 11 | Activity page removal | 380 | Low after 10 |
+| 11 | Activity page removal (content now in the bell panel) | 380 | Low after 10 |
 | 12 | Home page (stack grouping, host strip) built; then remove hub composition, templates, widgets, Setup template step | 2,300 net | Medium: touches first-run flow and `layout.json` |
 | 13 | Containers page (merge Services, ServiceDetail, Stacks, StackDetail, ManagedStack); remove System and Host pages | 700 net | Medium |
 | 14 | Settings reshaped to five sections (Services overlay editor moves to Containers; Groups and Bookmarks removed) | 1,500 net | Medium |
 | 15 | One Docker client and one pipeline (merge adapters, planners, the two update paths) | 1,500 net | **High: Docker socket writes.** Disposable host first; keep the proof tests. |
-| 16 | `homepageImport.js` and the import wizard, after you have migrated | 1,100 | Low; do last |
+| 16 | Leftovers: unused import/export helpers, dead settings keys, `config/` sample cleanup | 300 | Low; do last |
 
-Total: roughly **14,000 lines** out of about 60,000.
+Total: roughly **14,500 lines** out of about 60,000.
 
 ### Decisions
 
@@ -109,9 +109,21 @@ Made:
 4. **Config History restore button is dropped**; backups stay on disk (commit 8).
 5. **`probe.js` and `monitoring/checks/http.js` merge only if tests prove identical behavior**, including the private-address checks. Otherwise both stay.
 
+### UI overhaul decisions
+
+Made with the design brief (`docs/design/DESIGN.md`, mockups `docs/design/home.html` and `docs/design/uptime.html`):
+
+6. **The Activity page goes.** Its content lives in the bell panel: notifications on top, a recent-activity list (including the audit record) below. The bell therefore has to exist before the page is removed (commit 10 before 11, as planned).
+7. **Import / Migration, History, Export and the whole "Configuration" section of Settings go.** This widens commit 8: it now removes the History **UI** entirely (not just the restore button), and the Import & migration wizard. Backups still land on disk through the atomic-write path, so a copy of `config/` remains the backup story. Consequence: `homepageImport.js` (1,019 lines), `configImport.js` and the Setup wizard's import step go in the same commit, instead of commit 16 "after you have migrated". Flagged: if you have not finished moving off Homepage, do that first or keep commit 16 where it was.
+8. **Monitoring settings become one small compact panel** (a popover on the Uptime page and the single "Monitoring" section of Settings): check interval, timeout, failures before down, successes before up, history kept, allow internal targets, auto-create from discovery. The rest (concurrency, jitter, caps, retention detail) collapse behind one "Advanced" disclosure. The monitoring engine itself is untouched.
+9. **Keep one host history sampler** (CPU, memory, network, disk) for the Home sparklines; drop only per-container history (commit 6 as written, `statsHistory.js` charts). Gap found: today's sampler (`History` in `server/providers/system.js`) records CPU, memory, load, network, temperature and process count but **not disk**. A small additive change (one `diskUsedPct` field per sample, root or primary mount) goes into commit 6 or the Home build. No new sampler.
+10. **Backgrounds: 4 to 6 built-in ones replace the removed background support**: gradients and noise, plus a couple of bundled photos. No uploads, no URLs, no custom CSS. Stored as one setting, `appearance.background` = one of a fixed id list; unknown ids fall back to the default. This reuses the key that commit 4 made "ignored on read", so old files that still carry the earlier object-shaped value must be read tolerantly (anything that is not a known id is treated as unset). Bundled photos need a licence we can redistribute (CC0 or your own); the mockups use generated stand-ins.
+
+Order change: none to the commit numbers; commit 8 grows to about 3,300 lines (adds `homepageImport.js` and the import wizard, minus the part of commit 16 that moves), commit 16 shrinks to the leftovers.
+
 ### Still uncertain
 
-1. **Alert ack** (commit 10): today it lives on the Activity page. Does the bell need it?
-2. **First-run wizard** (commit 12): it currently offers templates and an import step; its replacement flow needs a decision.
+1. **Alert ack** (commit 10): today it lives on the Activity page. With the page gone it has to live in the bell panel or disappear. DESIGN.md specifies a one-click "Acknowledge" on alert rows; say if you would rather drop it.
+2. **First-run wizard** (commit 12): with templates and import both gone it shrinks to account, Docker connection, optional Telegram and a background choice. Needs your confirmation.
 3. **Group order**: groups are Compose stacks, alphabetical, unless you want custom order kept in `layout.json`.
 4. **Custom group names and `opushub.*` labels** stay valid (Docker labels are source of truth); only the Settings UI for them goes.
