@@ -174,16 +174,6 @@
   padding: 8px 16px; border-radius: var(--r-pill); font-size: var(--fs-meta); z-index: 99; box-shadow: var(--shadow-2);
   display: flex; gap: 8px; align-items: center; animation: modalIn var(--t-med) var(--ease) both;
 }
-.bg-tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
-.bg-tile { position: relative; border: 1px solid var(--hair); border-radius: var(--r-md); overflow: hidden; aspect-ratio: 16/10; background-size: cover; background-position: center; background-color: var(--bg-2, rgba(128, 128, 128, 0.08)); transition: border-color var(--t-fast), transform var(--t-fast); }
-.bg-tile:hover { border-color: var(--hair-strong); transform: translateY(-1px); }
-.bg-tile.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.bg-tile .none { display: grid; place-items: center; height: 100%; color: var(--ink-3); font-size: var(--fs-meta); }
-/* the current URL background gets its own tile, so a pasted link is visible — not "None" */
-.bg-tile--url .bg-tile-tag { position: absolute; right: 6px; bottom: 6px; padding: 2px 7px; border-radius: 999px; background: rgba(8, 9, 11, 0.62); color: #fff; font-size: 10.5px; letter-spacing: 0.04em; backdrop-filter: blur(6px); }
-.bg-url-state { display: inline-block; margin-top: 6px; }
-.bg-url-state--ok { color: var(--ok); }
-.bg-url-state--err { color: var(--fail); }
 
 /* widget drag handles (frame styling lives in styles/hub.css) */
 .widget-title .drag-handle { width: 16px; height: 16px; flex: none; }
@@ -639,11 +629,6 @@
 
 /* ---------- group icon button ---------- */
 .group-icon-btn { width: 32px; height: 32px; flex: none; }
-
-/* ---------- custom code editor ---------- */
-.cfg-code { width: 100%; font-size: 12px; line-height: 1.6; resize: vertical; tab-size: 2; }
-.cfg-code-actions { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; margin-top: var(--sp-2); }
-.cfg-code-actions .stale-note { flex: 1; min-width: 220px; }
 .topo-edge { fill: none; stroke: var(--hair); stroke-width: 1.4; }
 .topo-edge.hot { stroke: var(--accent); stroke-width: 2; }
 .topo-edge.dim, .topo-node.dim { opacity: 0.28; }
@@ -1072,3 +1057,8 @@
 .catalog-title { display: inline-flex; align-items: center; gap: var(--sp-3); }
 .catalog-form { display: grid; gap: var(--sp-5); }
 .catalog-form .field:last-child { margin-bottom: 0; }
+
+/* inline validation message used by the monitoring forms */
+.bg-url-state { display: inline-block; margin-top: 6px; }
+.bg-url-state--ok { color: var(--ok); }
+.bg-url-state--err { color: var(--fail); }

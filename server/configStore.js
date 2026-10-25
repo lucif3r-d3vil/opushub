@@ -9,7 +9,6 @@ import { writeFileAtomic } from './lib/atomicFile.js';
 const { dir: CONFIG_DIR, created } = resolveConfigDir();
 const DATA_DIR = resolveDataDir();
 if (created) fs.mkdirSync(path.join(CONFIG_DIR, 'icons'), { recursive: true });
-fs.mkdirSync(path.join(CONFIG_DIR, 'backgrounds'), { recursive: true });
 
 export { CONFIG_DIR, DATA_DIR, APP_ROOT };
 

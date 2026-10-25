@@ -166,7 +166,6 @@ test('there is one address classifier, and monitoring does not re-implement it',
   }
   // and the monitoring surface is one of its consumers
   assert.equal(classifiers.includes('server/monitoring/net.js'), true);
-  assert.equal(classifiers.includes('server/providers/background.js'), true);
 });
 
 test('internal targets are a bounded capability, not an SSRF primitive', async () => {

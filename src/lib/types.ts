@@ -257,10 +257,6 @@ export interface SettingsDoc {
     density: 'comfortable' | 'compact';
     transparency: boolean;
     fontScale: number;
-    background: {
-      mode: 'quiet' | 'horizon' | 'photo'; photo: string | null; blur: number; scrim: number;
-      position: 'center' | 'top' | 'bottom' | 'left' | 'right'; fit: 'cover' | 'contain';
-    };
   };
   hub: { greetingName: string | null; clock24h: boolean; showSeconds: boolean };
   behavior: { logLaunches: boolean; refresh: { system: number; services: number } };
@@ -269,7 +265,6 @@ export interface SettingsDoc {
     entrypointPorts: Record<string, string>;
     /** Phase 9 — non-secret connection settings only. Credentials are never stored here. */
   };
-  advanced: { customCss: boolean; customJs: boolean };
   _raw?: unknown;
   _text?: string;
 }
@@ -591,14 +586,6 @@ export interface GroupsDoc {
   hiddenGroups: string[];
   empty: string[];
   note: string;
-}
-
-/** Settings → Advanced: the custom-code editor's read. */
-export interface CustomDoc {
-  cssEnabled: boolean; jsEnabled: boolean;
-  css: string; js: string;
-  cssModified: string | null; jsModified: string | null;
-  jsPresent: boolean;
 }
 
 /* Phase 7 — host, infrastructure, resources, unified health ------------------ */

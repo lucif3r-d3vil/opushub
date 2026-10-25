@@ -3,9 +3,8 @@
 // OpusHub has two places that must decide "may we talk to this address?", and they need *different*
 // answers:
 //
-//   · the remote asset fetcher (providers/background.js) may only reach the public internet —
-//     it is fetching a wallpaper, so loopback, LAN space and the cloud-metadata address must all
-//     be refused;
+//   · a remote asset fetcher (none ships today; the wallpaper fetcher was removed) would be limited
+//     to the public internet — loopback, LAN space and the cloud-metadata address all refused;
 //   · the monitoring engine (Phase 10A) monitors the operator's OWN services, which legitimately
 //     live on RFC1918 space and ULA IPv6. It must still refuse the addresses that can never be a
 //     service and are the classic SSRF pivots: loopback, link-local (169.254.169.254 lives there),
@@ -38,8 +37,8 @@ export const ADDRESS_CLASSES = Object.freeze([
 ]);
 
 /**
- * Classes the *remote asset fetcher* refuses. This is exactly the set the shipped background
- * checker has always refused — it is stated as data so that a change here is a visible change
+ * Classes a *remote asset fetcher* refuses. This is exactly the set the removed background
+ * checker refused — it is stated as data so that a change here is a visible change
  * to a security boundary rather than a rewrite of it.
  */
 export const BLOCKED_FOR_REMOTE_FETCH = Object.freeze(new Set([

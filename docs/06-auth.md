@@ -160,9 +160,8 @@ Everything else — services, stacks, system, activity, Docker status, logs, set
 bookmarks, custom assets, icons, discovery, providers — requires a session, unknown `/api/*` paths
 included (a 401, not a 404, so routes cannot be enumerated anonymously).
 
-Custom assets (`/user/theme.css`, `/user/app.js`, `/user/icons/*`, `/user/backgrounds/*`) are gated
-too: they are user content served from the config volume, and a background or a stylesheet is as much
-"the state of this host" as the service list. A signed-out browser cannot fetch them.
+User assets (`/user/icons/*`) are gated too: they are user content served from the config volume,
+and as much "the state of this host" as the service list. A signed-out browser cannot fetch them.
 
 ## Review notes (Phase 4)
 
@@ -180,14 +179,13 @@ Checked, with the tests that pin each one:
 | Setup endpoint abuse | Cannot run twice; count-only summary pre-auth; no names pre-auth |
 | CSRF / Origin | Four layers (see above); cross-origin writes refused and logged |
 | API auth | One gate, complete route list, 401 for unknown API paths |
-| Static user assets | Session-gated (`/user/*`), including theme/app.js/icons/backgrounds |
-| Custom JS | Opt-in only (`advanced.customJs`); served same-origin from the config volume — as privileged as the app itself, by design |
+| Static user assets | Session-gated (`/user/*`), icons only |
 | Log access | Session-gated; log lines are rendered as text by React, never as markup |
 | Docker socket | Mounted `:ro`, used read-only, no exec/restart/create/delete anywhere (pinned by `server/api-boundary.test.js`) |
 | Path traversal | `/user/*` goes through `safeJoin`; config file names are an allowlist |
-| SSRF | The server fetches a fixed set of hosts: Open-Meteo, Yahoo Finance, Unsplash (photo-page → image resolution) and `api.iconify.design`. The one exception is the **admin-configured** RSS feed list in `settings.yaml` — those URLs are fetched as given (following redirects, 9s timeout). Anyone who can write your config can already reach your network, but that is the boundary to know about. The **background URL** field is the opposite: it accepts a user-supplied URL, so it is validated in `server/providers/background.js` before storage — https only, host must resolve to a globally routable IP (loopback / link-local / RFC1918 / CGNAT / multicast refused, re-checked after redirects), the probe reads ≤64 KB and returns a verdict, never the body |
+| SSRF | The server fetches a fixed set of hosts: `api.iconify.design` (icon search), and your own registries and monitor targets. A monitor target is validated by the monitoring engine's address policy (`server/monitoring/net.js`, `server/lib/ipPolicy.js`): loopback, link-local, multicast and the other never-a-service classes are always refused, and private ranges are allowed only when the "internal targets" setting is on |
 | XSS / CSP | React escaping throughout, and the only `dangerouslySetInnerHTML` in the app is the icon SVG, which is `sanitizeSvg`-filtered server-side (script/foreignObject/`on*`/`javascript:` stripped) for bundled, remote and user files alike. CSP in `server/index.js`: `default-src 'self'`, `script-src 'self' 'sha256-…'` (the one pre-hydration theme script), `object-src 'none'`, `base-uri 'self'`, `form-action 'none'`, `connect-src 'self'`, plus `x-frame-options: DENY` |
-| Uploaded/user assets | `config/icons/*` and `config/backgrounds/*` are served from the config volume behind a session, through `safeJoin` (no `..` traversal, no path outside the two directories), with `x-content-type-options: nosniff` |
+| Uploaded/user assets | `config/icons/*` is served from the config volume behind a session, through `safeJoin` (no `..` traversal, no path outside the directory), with `x-content-type-options: nosniff` |
 | Secret leakage | `.env` values stay server-side; container env is stripped; `/api/health` reports key names only |
 | Session handles (Phase 5) | Tokens are never serialized: the session API exposes SHA-256-derived handles, revocation accepts nothing else, and a raw token passed as a handle revokes zero sessions |
 | Password change (Phase 5) | Requires the current password; rotating the session and revoking the rest; plaintext never written or logged; a failed attempt never signs the admin out |

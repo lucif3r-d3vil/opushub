@@ -8,9 +8,8 @@ const routes = [
   // Host lives under System (legacy /host and /infrastructure redirect and render an empty shell
   // under SSR, so smoke the canonical mount, not the shims).
   '/system/host',
-  '/settings/appearance', '/settings/background', '/settings/hub', '/settings/widgets', '/settings/templates',
+  '/settings/appearance', '/settings/hub', '/settings/widgets', '/settings/templates',
   '/settings/general', '/settings/services', '/settings/groups', '/settings/bookmarks', '/settings/integrations', '/settings/authentication', '/settings/environment',
-  '/settings/advanced',
   '/icons', '/nope',
 ];
 let failed = 0;

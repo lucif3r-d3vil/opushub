@@ -71,7 +71,10 @@ test('aggregate history sums buckets, counts reporters and never invents a point
   // Two containers sampled "together" by pushing through the sampler's public surface is not
   // possible without a Docker engine, so build the buffers through the module's documented hook.
   const { buffers } = _internals;
-  const now = Date.now();
+  // Placed on the 2 s bucket grid so that every sample sits mid-bucket (500 ms or 1500 ms into it):
+  // the two containers' samples are 50 ms apart and must land in one bucket on every run, not only
+  // when the wall clock happens to be far from a rounding boundary.
+  const now = Math.floor(Date.now() / 2_000) * 2_000 + 1_500;
   buffers.clear();
   buffers.set('a', {
     lastAt: now, readAt: now,

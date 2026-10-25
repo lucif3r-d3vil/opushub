@@ -8,7 +8,7 @@ import {
   useNotificationPolicy, useTelegramConfig,
 } from '../lib/notifications';
 import type {
-  AlertsDoc, CustomDoc, DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
+  AlertsDoc, DiscoveryDoc, HealthDoc, LayoutDoc, ProvidersDoc, Service, ServicesDoc, SettingsDoc, StacksDoc, TemplateEntry,
   TemplatesDoc, WidgetCatalogueEntry, WidgetDoc, WidgetInstance, WidgetZone,
 } from '../lib/types';
 import { Icon } from '../components/Icon';
@@ -49,7 +49,6 @@ import {
 const TABS = [
   { id: 'general', label: 'General', section: 'Home' },
   { id: 'appearance', label: 'Appearance', section: 'Home' },
-  { id: 'background', label: 'Background', section: 'Home' },
   { id: 'hub', label: 'Hub layout', section: 'Hub' },
   { id: 'widgets', label: 'Widgets', section: 'Hub' },
   { id: 'templates', label: 'Templates', section: 'Hub' },
@@ -66,14 +65,13 @@ const TABS = [
   // Phase 10A — the monitoring defaults, their server-side bounds, and the monitors that exist
   { id: 'monitoring', label: 'Monitoring', section: 'This install' },
   { id: 'authentication', label: 'Account & sessions', section: 'This install' },
-  { id: 'advanced', label: 'Advanced', section: 'This install' },
 ];
 
 /** Old route → current route. Nothing that worked before may 404 now. */
 const TAB_ALIAS: Record<string, string> = { system: 'environment' };
 
 /** Tabs where seeing the result is the point. */
-const PREVIEW_TABS = new Set(['appearance', 'background', 'hub', 'widgets', 'templates']);
+const PREVIEW_TABS = new Set(['appearance', 'hub', 'widgets', 'templates']);
 
 const SECTIONS = [...new Set(TABS.map((t) => t.section))];
 
@@ -121,7 +119,6 @@ export default function SettingsPage() {
           )}
           {tab === 'general' && <GeneralTab />}
           {tab === 'appearance' && <AppearanceTab />}
-          {tab === 'background' && <BackgroundTab />}
           {tab === 'hub' && <HubTab />}
           {tab === 'widgets' && <WidgetsTab />}
           {tab === 'templates' && <TemplatesTab onPreview={setPreviewTemplate} />}
@@ -133,7 +130,6 @@ export default function SettingsPage() {
           {tab === 'authentication' && <AuthenticationTab />}
           {tab === 'environment' && <EnvironmentTab />}
           {tab === 'monitoring' && <MonitoringSettingsTab />}
-          {tab === 'advanced' && <AdvancedTab />}
           {tab === 'import' && <ImportTab />}
           {tab === 'history' && <HistoryTab />}
           {tab === 'export' && <ExportTab />}
@@ -509,149 +505,6 @@ function AppearanceTab() {
         </Row>
       </Block>
       <p className="stale-note">Rendering as <b>{resolvedTheme}</b> right now.</p>
-    </>
-  );
-}
-
-/* ============ Background ============ */
-interface BgCheckResult { ok: boolean; url?: string | null; error?: string; kind?: string }
-
-/**
- * The Background URL field, with a server-side verdict before anything is stored.
- *
- * What the user may paste:
- *   · a direct image URL (https://…/photo.jpg) — the server probes it and refuses anything
- *     that is not an image (a pasted web page is the old way this field silently "broke")
- *   · an Unsplash photo page (https://unsplash.com/photos/…) — resolved server-side to the
- *     photo's direct image URL, which is what gets stored
- *   · a local file as /user/backgrounds/<name> (config/backgrounds/ on disk)
- *
- * The input is uncontrolled and keyed on the saved value: a failed check leaves the user's
- * text in place with the reason beside it, a successful one remounts the field with the
- * canonical (possibly resolved) URL.
- */
-function BackgroundTab() {
-  const { settings, update } = useSettings();
-  const { data: bgs } = usePolled<{ files: { name: string; url: string }[] }>('/api/backgrounds', 0);
-  const a = settings?.appearance;
-  const set = (patch: DeepPartial<SettingsDoc>) => update(patch);
-  const photo = a?.background.photo ?? null;
-  const [checking, setChecking] = useState(false);
-  const [verdict, setVerdict] = useState<{ ok: boolean; text: string } | null>(null);
-  // a ref (not state): Enter blurs the field, and the blur commit must see the attempt that
-  // the Enter commit just recorded — state would not have flushed yet
-  const lastAttemptRef = useRef<string | null>(null);
-  if (!settings || !a) return <Loading what="service settings" />;
-
-  const check = async (value: string) => {
-    const v = value.trim();
-    if (v === (photo || '') || v === lastAttemptRef.current) return; // nothing new to verify
-    lastAttemptRef.current = v;
-    setChecking(true);
-    setVerdict(null);
-    if (!v) return setChecking(false);
-    try {
-      const r = await api<BgCheckResult>('/api/background/check?url=' + encodeURIComponent(v));
-      if (r.ok) {
-        const url = r.url ?? null;
-        set({ appearance: { background: { photo: url } } });
-        setVerdict(url == null ? null : url === v
-          ? { ok: true, text: 'Direct image — the Hub will use it.' }
-          : { ok: true, text: `Resolved to a direct image on ${hostOf(url)}.` });
-      } else {
-        setVerdict({ ok: false, text: r.error || 'This URL could not be used as a background.' });
-      }
-    } catch {
-      setVerdict({ ok: false, text: 'Could not verify this URL right now — check the connection and try again.' });
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  const files = bgs?.files || [];
-  const urlPhoto = photo && !files.some((f) => f.url === photo) ? photo : null;
-  return (
-    <>
-      <Block title="Background">
-        <Row label="Style" desc="Quiet is flat. Horizon is one muted ramp. Photo uses your own image behind an automatic scrim.">
-          <Segmented value={a.background.mode} onChange={(v) => set({ appearance: { background: { mode: v } } })} ariaLabel="Background mode"
-            options={[{ value: 'quiet', label: 'Quiet' }, { value: 'horizon', label: 'Horizon' }, { value: 'photo', label: 'Photo' }]} />
-        </Row>
-      </Block>
-      {a.background.mode === 'photo' && (
-        <Block title="Image">
-          <div className="bg-tile-grid">
-            <button className={`bg-tile ${!photo ? 'sel' : ''}`} onClick={() => { setVerdict(null); set({ appearance: { background: { photo: null } } }); }}>
-              <span className="none">None</span>
-            </button>
-            {urlPhoto && (
-              <div className={`bg-tile sel bg-tile--url`} style={{ backgroundImage: `url("${urlPhoto.replace(/"/g, '\\"')}")` }} title={urlPhoto}>
-                <span className="bg-tile-tag">URL</span>
-              </div>
-            )}
-            {files.map((f) => (
-              <button
-                key={f.url} className={`bg-tile ${photo === f.url ? 'sel' : ''}`}
-                style={{ backgroundImage: `url("${f.url}")` }} title={f.name}
-                onClick={() => { setVerdict(null); set({ appearance: { background: { photo: f.url } } }); }}
-              />
-            ))}
-          </div>
-          <p className="stale-note" style={{ marginTop: 'var(--sp-3)' }}>
-            Drop images into <code className="mono-meta">config/backgrounds/</code>, or paste a URL below.
-            {' '}{photo
-              ? <>In use: <span className="mono-meta">{files.some((f) => f.url === photo) ? photo.replace('/user/backgrounds/', '') : photo}</span>{files.some((f) => f.url === photo) ? ' (local file)' : urlPhoto ? ' (remote — validated when you set it)' : ''}</>
-              : 'Nothing selected.'}
-          </p>
-          <div className="field" style={{ marginTop: 'var(--sp-4)', maxWidth: 480 }}>
-            <label htmlFor="bgurl">Background URL</label>
-            <input id="bgurl" className="input mono-meta" key={photo || 'none'} placeholder="https://…/photo.jpg · an Unsplash photo page · /user/backgrounds/photo.jpg"
-              defaultValue={photo || ''}
-              aria-busy={checking}
-              onKeyDown={(e) => { if (e.key === 'Enter') { void check((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).blur(); } }}
-              onBlur={(e) => { void check(e.target.value); }}
-            />
-            <span className="hint">
-              A direct link to an image file (https), an Unsplash photo page — resolved to the image for you — or a file
-              from <code className="mono-meta">config/backgrounds/</code>. Web pages are refused, and http:// is not allowed.
-            </span>
-            {checking
-              ? <span className="stale-note bg-url-state" role="status">Checking the URL…</span>
-              : verdict
-                ? <span className={`stale-note bg-url-state ${verdict.ok ? 'bg-url-state--ok' : 'bg-url-state--err'}`} role="status">{verdict.ok ? '✓ ' : '✗ '}{verdict.text}</span>
-                : null}
-          </div>
-          <Row label="Blur" desc="Applied to the photo so text keeps its contrast.">
-            <input type="range" min={0} max={48} value={a.background.blur} onChange={(e) => set({ appearance: { background: { blur: Number(e.target.value) } } })} aria-label="Background blur" />
-            <span className="mono-meta" style={{ width: 40 }}>{a.background.blur}px</span>
-          </Row>
-          <Row label="Scrim" desc="Veil between photo and content. Below 45% the preview will tell you what it costs.">
-            <input type="range" min={0} max={100} value={a.background.scrim} onChange={(e) => set({ appearance: { background: { scrim: Number(e.target.value) } } })} aria-label="Background scrim" />
-            <span className="mono-meta" style={{ width: 40 }}>{a.background.scrim}%</span>
-          </Row>
-          <Row label="Position" desc="Which part of the image survives the crop. The subject is rarely in the middle of a photo.">
-            <Segmented
-              value={a.background.position} ariaLabel="Background position"
-              onChange={(v) => set({ appearance: { background: { position: v } } })}
-              options={[
-                { value: 'center', label: 'Centre' }, { value: 'top', label: 'Top' },
-                { value: 'bottom', label: 'Bottom' }, { value: 'left', label: 'Left' }, { value: 'right', label: 'Right' },
-              ]}
-            />
-          </Row>
-          <Row label="Fit" desc="Cover fills the viewport and crops; contain shows the whole image and lets the base background show through.">
-            <Segmented
-              value={a.background.fit} ariaLabel="Background fit"
-              onChange={(v) => set({ appearance: { background: { fit: v } } })}
-              options={[{ value: 'cover', label: 'Cover' }, { value: 'contain', label: 'Contain' }]}
-            />
-          </Row>
-          <Row label="Remove" desc="Clears the photo but keeps your blur, scrim, position and fit for the next one." tight>
-            <button className="btn btn-sm" disabled={!photo} onClick={() => { setVerdict(null); set({ appearance: { background: { photo: null } } }); }}>Remove background</button>
-          </Row>
-        </Block>
-      )}
-      <p className="stale-note">The preview above uses the same background layer as the Hub — what you see is what `/` renders. If an image stops loading later, the Hub quietly falls back to its base background.</p>
     </>
   );
 }
@@ -1787,148 +1640,6 @@ function NotificationsTab() {
   );
 }
 
-function hostOf(u: string) { try { return new URL(u).hostname; } catch { return u; } }
-
-/* ============ Advanced ============ */
-function AdvancedTab() {
-  const { settings, update } = useSettings();
-  return (
-    <>
-      <p className="lede">
-        Custom assets. Everything here is opt-in and stays on the frontend: a stylesheet can add to
-        OpusHub's rendering, and a script runs in the page only (never on the server).
-      </p>
-
-      <CustomCodeBlock
-        cssEnabled={settings?.advanced?.customCss ?? false}
-        jsEnabled={settings?.advanced?.customJs ?? false}
-        onToggle={(which, v) => update(which === 'css' ? { advanced: { customCss: v } } : { advanced: { customJs: v } }, true)}
-      />
-    </>
-  );
-}
-
-/**
- * The custom-code editor. Two files, each with its own switch, its own draft and its own failure.
- *
- * What it deliberately does not do is hide the file behind the switch: an operator who turns custom
- * CSS off still sees what is in theme.css, because the alternative is a file they cannot read
- * without a shell. Editing stays available either way — nothing here is loaded into a page until
- * the switch is on, and nothing here is ever executed by the server.
- *
- * A save is refused as a whole when the syntax check fails (server-side, in `PUT /api/custom`), so
- * the draft is preserved on screen and the previous file stays on disk. Reset is the escape hatch.
- */
-function CustomCodeBlock({ cssEnabled, jsEnabled, onToggle }: {
-  cssEnabled: boolean; jsEnabled: boolean; onToggle: (which: 'css' | 'js', v: boolean) => void;
-}) {
-  const { data: custom, refresh } = usePolled<CustomDoc>('/api/custom', 0);
-  const { save, busy, err } = useSave();
-  const [cssDraft, setCssDraft] = useState<string | null>(null);
-  const [jsDraft, setJsDraft] = useState<string | null>(null);
-  const [noted, setNoted] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<'theme.css' | 'app.js' | null>(null);
-
-  const commit = (which: 'css' | 'js') => save(async () => {
-    const body = which === 'css' ? { css: cssDraft ?? '' } : { js: jsDraft ?? '' };
-    await put('/api/custom', body);
-    if (which === 'css') setCssDraft(null); else setJsDraft(null);
-    await refresh();
-    invalidateShared('/api/custom');
-    setNoted(`${which === 'css' ? 'theme.css' : 'app.js'} saved — versions recorded`);
-  });
-
-  const reset = async (file: 'theme.css' | 'app.js') => {
-    await save(async () => {
-      await post('/api/custom/reset', { file });
-      setConfirming(null);
-      if (file === 'theme.css') setCssDraft(null); else setJsDraft(null);
-      await refresh();
-      invalidateShared('/api/custom');
-      setNoted(`${file} emptied`);
-    });
-  };
-
-  const dirty = (which: 'css' | 'js') => (which === 'css' ? cssDraft != null && cssDraft !== (custom?.css ?? '') : jsDraft != null && jsDraft !== (custom?.js ?? ''));
-
-  return (
-    <Block title="Custom CSS & JS" aside={<span className="stale-note">config/theme.css · config/app.js</span>}>
-      <p className="stale-note" style={{ marginBottom: 'var(--sp-3)' }}>
-        Same-origin, authenticated, opt-in, and never executed by the server: theme.css is a stylesheet
-        the browser loads, app.js is a script the browser runs in the page. A syntax error is refused
-        at save time, so the file that is live stays valid. Every save is a configuration version.
-      </p>
-
-      <Row label="theme.css" desc={custom?.cssEnabled ? 'Loading on every page.' : 'Not loaded — the file is saved but no page links it.'} tight>
-        <span className="mono-meta">
-          {custom ? `${new Blob([cssDraft ?? custom.css]).size} B · ${custom.cssModified ? relTime(Date.parse(custom.cssModified)) : 'never written'}` : '—'}
-        </span>
-        <Switch checked={cssEnabled} onChange={(v) => onToggle('css', v)} label="Enable custom CSS" />
-      </Row>
-      <div className="field" style={{ marginBottom: 'var(--sp-4)' }}>
-        <textarea
-          className="textarea mono-meta cfg-code" rows={9} spellCheck={false} aria-label="theme.css"
-          value={cssDraft ?? custom?.css ?? ''}
-          onChange={(e) => { setCssDraft(e.target.value); setNoted(null); }}
-        />
-        <div className="cfg-code-actions">
-          <button className="btn btn-sm btn-primary" disabled={busy || !dirty('css')} onClick={() => void commit('css')}>{busy ? 'Saving…' : 'Save theme.css'}</button>
-          {dirty('css') && <button className="btn btn-sm btn-quiet" onClick={() => setCssDraft(null)}>Discard</button>}
-          <button className="btn btn-sm btn-quiet" disabled={busy || !(custom?.css)} onClick={() => setConfirming('theme.css')}>Reset</button>
-          <span className="stale-note">
-            stylesheets add — they cannot remove OpusHub&apos;s own rules, and <code className="mono-meta">@import</code> is refused
-            so a theme cannot pull in a third-party page.
-          </span>
-        </div>
-      </div>
-
-      <Row label="app.js" desc={custom?.jsEnabled ? 'Running in every page you open.' : 'Not loaded — the file is saved but no page includes it.'} tight>
-        <span className="mono-meta">
-          {custom ? `${new Blob([jsDraft ?? custom.js]).size} B · ${custom.jsModified ? relTime(Date.parse(custom.jsModified)) : 'never written'}` : '—'}
-        </span>
-        <Switch checked={jsEnabled} onChange={(v) => onToggle('js', v)} label="Enable custom JS" />
-      </Row>
-      <div className="field">
-        <textarea
-          className="textarea mono-meta cfg-code" rows={9} spellCheck={false} aria-label="app.js"
-          value={jsDraft ?? custom?.js ?? ''}
-          onChange={(e) => { setJsDraft(e.target.value); setNoted(null); }}
-        />
-        <div className="cfg-code-actions">
-          <button className="btn btn-sm btn-primary" disabled={busy || !dirty('js')} onClick={() => void commit('js')}>{busy ? 'Saving…' : 'Save app.js'}</button>
-          {dirty('js') && <button className="btn btn-sm btn-quiet" onClick={() => setJsDraft(null)}>Discard</button>}
-          <button className="btn btn-sm btn-quiet" disabled={busy || !(custom?.js)} onClick={() => setConfirming('app.js')}>Reset</button>
-          <span className="stale-note">
-            this runs in your browser only. It has exactly the privileges the page has — no shell, no
-            filesystem, no Docker — because the server never evaluates it.
-          </span>
-        </div>
-      </div>
-
-      {(err || noted) && (
-        <p className="stale-note" role="status" style={{ marginTop: 'var(--sp-3)', color: err ? 'var(--fail)' : 'var(--ok)' }}>
-          {err || noted}
-        </p>
-      )}
-
-      {confirming && (
-        <Modal
-          title={`Empty ${confirming}?`}
-          onClose={() => setConfirming(null)}
-          footer={(
-            <>
-              <button className="btn" onClick={() => setConfirming(null)}>Cancel</button>
-              <button className="btn btn-primary" disabled={busy} onClick={() => void reset(confirming)}>Reset the file</button>
-            </>
-          )}
-        >
-          <p>This writes an empty file and records a version first, so it can be restored from History.</p>
-          <p className="stale-note">Nothing else is touched — the enable switch stays where it is.</p>
-        </Modal>
-      )}
-    </Block>
-  );
-}
 
 /** Provider health — one quiet table, technical detail behind disclosure. The Hub itself is
  *  never dominated by this; it lives here for the moment something stops answering. */

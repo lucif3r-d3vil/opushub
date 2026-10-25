@@ -23,7 +23,6 @@ export const DEFAULT_SETTINGS = {
     density: 'comfortable',
     transparency: true,
     fontScale: 1,
-    background: { mode: 'quiet', photo: null, blur: 24, scrim: 62, position: 'center', fit: 'cover' },
   },
   hub: { greetingName: null, clock24h: false, showSeconds: false },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
@@ -34,7 +33,6 @@ export const DEFAULT_SETTINGS = {
     hostAddress: null,
     entrypointPorts: {},
   },
-  advanced: { customCss: false, customJs: false },
 };
 
 const str = (v, max = 240) => (typeof v === 'string' ? v.trim().slice(0, max) : null);
@@ -610,20 +608,15 @@ export function getSettings() {
   const merged = deepMerge(DEFAULT_SETTINGS, raw || {});
   // clamp
   merged.appearance.fontScale = clampInt(10 * merged.appearance.fontScale, 9, 12, 10) / 10;
-  merged.appearance.background.blur = clampInt(merged.appearance.background.blur, 0, 48, 24);
-  merged.appearance.background.scrim = clampInt(merged.appearance.background.scrim, 0, 100, 62);
-  // Positioning is a closed vocabulary, not free CSS: a stored value can never become an
-  // arbitrary declaration in the page.
-  const BG_POSITION = ['center', 'top', 'bottom', 'left', 'right'];
-  const BG_FIT = ['cover', 'contain'];
-  merged.appearance.background.position = BG_POSITION.includes(merged.appearance.background.position) ? merged.appearance.background.position : 'center';
-  merged.appearance.background.fit = BG_FIT.includes(merged.appearance.background.fit) ? merged.appearance.background.fit : 'cover';
   merged.behavior.refresh.system = clampInt(merged.behavior.refresh.system, 2, 300, 5);
   merged.behavior.refresh.services = clampInt(merged.behavior.refresh.services, 5, 600, 30);
   merged.infrastructure = merged.infrastructure || {};
   // News, weather and market settings were removed with those widgets. An older settings.yaml may
   // still carry them; they are ignored rather than rejected, so the file keeps loading.
   delete merged.integrations;
+  // The background image and custom CSS/JS were removed too: those sections are ignored on read.
+  delete merged.appearance.background;
+  delete merged.advanced;
   merged._raw = raw || {}; // raw file content (for the YAML view)
   return merged;
 }
@@ -643,18 +636,6 @@ function sanitizeSettings(s) {
   const out = structuredClone(s);
   const rejected = [];
   delete out._raw;
-  // The background photo is the one setting whose value becomes a URL the browser fetches,
-  // so it is clamped here too (the deep check happens on the API route): only https image
-  // URLs, Unsplash photo pages, or same-origin files under /user/backgrounds/ may be stored.
-  const photo = out?.appearance?.background?.photo;
-  if (photo != null) {
-    const s = str(photo, 2048);
-    if (!s) out.appearance.background.photo = null;
-    else if (!/^https:\/\//i.test(s) && !s.startsWith('/user/backgrounds/')) {
-      rejected.push('appearance.background.photo must be an https:// image URL, an Unsplash photo page, or a /user/backgrounds/ file');
-      out.appearance.background.photo = null;
-    } else out.appearance.background.photo = s;
-  }
   // infrastructure knobs are validated, never silently accepted: a typo'd host would otherwise
   // show up as wrong URLs everywhere with no clue why.
   const infra = out.infrastructure;

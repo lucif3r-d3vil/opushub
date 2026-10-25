@@ -40,7 +40,6 @@ export function applyTheme(s: SettingsDoc | null, media: MediaQueryList | null) 
   el.setAttribute('data-accent', s?.appearance?.accent ?? 'sage');
   el.setAttribute('data-density', s?.appearance?.density ?? 'comfortable');
   el.setAttribute('data-transparency', s?.appearance?.transparency ? 'on' : 'off');
-  el.setAttribute('data-bg', s?.appearance?.background?.mode ?? 'quiet');
   el.style.setProperty('--font-scale', String(s?.appearance?.fontScale ?? 1));
   el.style.setProperty('--page-bg', 'transparent');
   // The configured name is what the tab says — one place, every page, so a rename is visible
@@ -123,11 +122,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
 const FALLBACK: SettingsDoc = {
   app: { name: 'OpusHub', tagline: 'The OpusGrid homelab, at a glance.' },
-  appearance: { theme: 'system', accent: 'sage', density: 'comfortable', transparency: true, fontScale: 1, background: { mode: 'quiet', photo: null, blur: 24, scrim: 62, position: 'center', fit: 'cover' } },
+  appearance: { theme: 'system', accent: 'sage', density: 'comfortable', transparency: true, fontScale: 1 },
   hub: { greetingName: null, clock24h: false, showSeconds: false },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
   infrastructure: { hostAddress: null, entrypointPorts: {} },
-  advanced: { customCss: false, customJs: false },
 };
 
 // ---------- layout (widgets, zones, ordering, visibility) ----------

@@ -136,7 +136,7 @@ test('every Phase 6 write route refuses a cross-origin request (CSRF)', async ()
   const writes = [
     ['POST', '/api/config/import/parse', { files: {} }],
     ['POST', '/api/config/import/apply', { files: {} }],
-    ['POST', '/api/config/validate', { area: 'custom-css', draft: '' }],
+    ['POST', '/api/config/validate', { area: 'bookmarks', draft: { groups: [] } }],
     ['PUT', '/api/groups', { groups: [] }],
     ['POST', '/api/config/history/x/restore', {}],
     ['POST', '/api/custom/reset', { file: 'theme.css' }],
@@ -483,10 +483,6 @@ test('the draft validator answers for every area without writing', async () => {
     ['bookmarks', { groups: [{ name: 'B', items: [{ name: 'X', href: 'https://ok.example' }] }] }, true],
     ['bookmarks', { groups: [{ name: 'B', items: [{ name: 'X', href: 'ftp://bad' }] }] }, false],
     ['layout', { version: 2, hub: { widgets: [{ id: 'w', type: 'system', zone: 'main', size: 'md', visible: true, config: {} }] } }, true],
-    ['custom-css', 'a { color: red }', true],
-    ['custom-css', 'a { color: red', false],
-    ['custom-js', 'const a = 1;', true],
-    ['custom-js', 'function () {', false],
   ];
   for (const [area, draft, shouldPass] of cases) {
     const r = await post('/api/config/validate', { area, draft });
@@ -592,45 +588,4 @@ test('exporting never includes the runtime state directories', async () => {
   for (const secret of ['PLANTED-AUTH-HASH', 'PLANTED-SESSION-ID', 'PLANTED-ACTIVITY']) {
     assert.ok(!whole.includes(secret), `an export leaked ${secret}`);
   }
-});
-
-// ---------------------------------------------------------------------------
-// custom code
-// ---------------------------------------------------------------------------
-
-test('malformed custom CSS or JS is refused with the syntax problem named', async () => {
-  for (const [file, bad, good] of [
-    ['theme.css', 'a { color: red', 'a { color: red; }'],
-    ['app.js', 'function () {', 'function f () {}'],
-  ]) {
-    const key = file === 'theme.css' ? 'css' : 'js';
-    const refused = await put('/api/custom', { [key]: bad });
-    assert.equal(refused.status, 400, `${file} accepted malformed content`);
-    assert.equal(refused.json.code, 'custom_syntax');
-    assert.ok(refused.json.problems.length > 0);
-
-    const accepted = await put('/api/custom', { [key]: good });
-    assert.equal(accepted.status, 200, `${file} refused valid content: ${JSON.stringify(accepted.json)}`);
-    assert.ok(accepted.json[file === 'theme.css' ? 'cssModified' : 'jsModified'], `${file} reported no mtime`);
-  }
-});
-
-test('custom CSS is refused when it would load a third-party stylesheet', async () => {
-  const r = await put('/api/custom', { css: '@import url("https://evil.example/x.css");' });
-  assert.equal(r.status, 400);
-  assert.match(r.json.error, /@import/);
-});
-
-test('custom code can be reset, and the reset is versioned', async () => {
-  await put('/api/custom', { css: '.x { color: red; }' });
-  const r = await post('/api/custom/reset', { file: 'theme.css' });
-  assert.equal(r.status, 200);
-  assert.equal(fs.readFileSync(path.join(CONFIG_DIR, 'theme.css'), 'utf8'), '');
-  const versions = (await get('/api/config/history')).json.versions;
-  assert.ok(versions.some((v) => v.reason === 'custom.reset' || v.reason === 'custom.updated'));
-});
-
-test('a reset naming an arbitrary file is refused', async () => {
-  const r = await post('/api/custom/reset', { file: '../../data/auth.json' });
-  assert.equal(r.status, 400);
 });

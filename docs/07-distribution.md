@@ -107,7 +107,7 @@ volumes:
 
 | Mount | Contents | Back it up? |
 | --- | --- | --- |
-| `./config` | `services.yaml`, `stacks.yaml`, `settings.yaml`, `bookmarks.yaml`, `layout.json`, `theme.css`, `app.js`, `icons/`, `backgrounds/`, `.env` — your presentation layer | **Yes** — this is the work |
+| `./config` | `services.yaml`, `stacks.yaml`, `settings.yaml`, `bookmarks.yaml`, `layout.json`, `icons/`, `.env` — your presentation layer | **Yes** — this is the work |
 | `./data` | `auth.json` (the account), `sessions.json`, the activity log, metric history, and `config-backups/` | Recommended — `auth.json` is what stands between the Hub and the network |
 
 Both are plain directories on the host: `tar czf opushub-backup.tgz config data` is a complete

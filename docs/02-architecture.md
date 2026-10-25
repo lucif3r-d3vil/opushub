@@ -18,14 +18,11 @@ opushub/
 ├── config/                  # user-editable YAML state; Docker is the source of truth for what exists
 │   ├── services.yaml          optional overlay: per-container presentation (displayName, icon, group, order, url override)
 │   ├── stacks.yaml            optional overlay: rename/describe a compose project the engine reported
-│   ├── settings.yaml          appearance, integrations, behavior (theme, accent, feeds, …)
+│   ├── settings.yaml          appearance, behavior, host address (theme, accent, …)
 │   ├── bookmarks.yaml         flat link collection
 │   ├── layout.json            hub composition v2: widget instances (id/type/zone/size/visible/config),
 │   │                          spacing, group + service order (persisted by drag & drop)
-│   ├── theme.css              optional custom CSS (Homepage-style)
-│   ├── app.js                 optional custom JS (disabled unless explicitly allowed)
 │   ├── icons/                 local icon files, served at /user/icons/*
-│   ├── backgrounds/           local background images, served at /user/backgrounds/*
 │   └── .env                   secrets (git-ignored) — discovered, never sent to the client
 ├── data/                    # runtime state (git-ignored): activity log, metric history
 ├── server/                  # Node 22, ESM, zero framework
@@ -121,7 +118,7 @@ results are cached briefly (60s) so an unreachable source is retried gently rath
 | `GET /api/activity?limit&source` | timeline events (config writes, app lifecycle, docker events, provider state changes — all real) |
 | `GET /api/search?q=` | pages · services · stacks · bookmarks · settings keys (debounced by client) |
 | `GET /api/icons/search?q=` | local collections, then Iconify; `GET /api/icon?ref=` returns SVG |
-| `GET /user/icons/*`, `/user/backgrounds/*` | static, path-traversal guarded |
+| `GET /user/icons/*` | static, session-gated, path-traversal guarded |
 
 > **Status note:** the paragraph below describes the original V1. It is superseded — see
 > "Current write surface".
@@ -236,7 +233,7 @@ browser ──▶ /api ──▶ model join ──▶ server/providers/docker.js
 
 Read-mostly by construction; no shell, no docker writes, no arbitrary file access (allow-listed
 config filenames only), `.env` values never serialized to any response, SPA served same-origin with
-CSP (self assets + user-configured inline custom css/js opt-in). Intended for LAN/VPN — V1
+CSP (self assets only). Intended for LAN/VPN — V1
 documents this in README.
 
 Phase 2 boundary audit (all verified by tests and/or live probes):

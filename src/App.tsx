@@ -7,7 +7,6 @@ import { OperationsHost } from './components/Operations';
 import { ContainerEditorHost } from './components/ContainerEditor';
 import { Freshness } from './components/ui';
 import { LogoMark } from './components/Logo';
-import { BackgroundImage } from './components/BackgroundImage';
 import { NotificationBell } from './components/Notifications';
 import { useLiveEvents } from './lib/sse';
 
@@ -37,7 +36,7 @@ const Login = lazy(() => import('./pages/Login'));
  *
  * Everything else lives *inside* one of those parents: the Docker engine, storage, networking,
  * power and the host itself are views of System; updates, Autoheal and lifecycle actions are
- * part of Services; imports, connections, backgrounds and custom code are Settings. Icons come
+ * part of Services; imports and connections are Settings. Icons come
  * from one stroke family, and every glyph is unique (Monitoring keeps the pulse; Activity is a
  * history clock — they briefly shared an icon, which made the rail lie).
  */
@@ -52,32 +51,8 @@ const NAV = [
 ];
 
 function Background() {
-  const { settings } = useSettings();
-  const bg = settings?.appearance.background;
-  const mode = bg?.mode ?? 'quiet';
-  const blur = bg?.blur ?? 24;
-  const scrim = bg?.scrim ?? 62;
-  // Preferred structure: root ├── background layer (image) ├── overlay (scrim) ├── content
-  // Both background and overlay are fixed viewport layers at z-index 0, content is z-index 1.
-  // This ensures full-viewport coverage, behind rail (z-index 40), no pointer-events, no flow impact.
-  return (
-    <>
-      <div
-        className={`bg-layer bg-${mode}`}
-        style={{ ['--bg-blur' as never]: `${blur}`, ['--bg-scrim' as never]: `${scrim}` }}
-        aria-hidden="true"
-      >
-        {mode === 'photo' && bg?.photo && <BackgroundImage url={bg.photo} position={bg.position} fit={bg.fit} />}
-      </div>
-      {mode === 'photo' && (
-        <div
-          className="bg-overlay"
-          style={{ ['--bg-scrim' as never]: `${scrim}` }}
-          aria-hidden="true"
-        />
-      )}
-    </>
-  );
+  // One fixed, quiet viewport layer behind the content (z-index 0, no pointer events, no flow impact).
+  return <div className="bg-layer bg-quiet" aria-hidden="true" />;
 }
 
 function SaveIndicator() {
@@ -165,7 +140,6 @@ function Shell() {
       <OperationsHost />
       <ContainerEditorHost />
       <SaveIndicator />
-      <CustomAssets />
     </>
   );
 }
@@ -184,18 +158,6 @@ function ThemeToggle() {
           : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round"><path d="M12 3v1.8M5.6 5.6l1.3 1.3M3 12h1.8M18.4 5.6l-1.3 1.3M21 12h-1.8M12 21v-1.8M17.1 17.1l1.3 1.3M12 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9Z" /></svg>}
       <span className="tip">{label} · click to cycle</span>
     </button>
-  );
-}
-
-function CustomAssets() {
-  const { settings } = useSettings();
-  const css = settings?.advanced?.customCss;
-  const js = settings?.advanced?.customJs;
-  return (
-    <>
-      {css && <link rel="stylesheet" href="/user/theme.css" />}
-      {js && <script src="/user/app.js" defer />}
-    </>
   );
 }
 

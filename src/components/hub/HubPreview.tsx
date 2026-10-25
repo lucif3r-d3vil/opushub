@@ -2,42 +2,13 @@
 //
 // It is the real Hub component (HubSurface) rendered with the layout currently being edited, inside
 // a frame. Nothing here re-implements the page: what the preview shows is exactly what `/` will
-// render once the change is saved, including theme, accent, density and background.
+// render once the change is saved, including theme, accent and density.
 import { useMemo, useState } from 'react';
 import type { LayoutDoc } from '../../lib/types';
 import { useHubData } from '../../lib/hubData';
 import { neededData } from '../../lib/hubLayout';
-import { useSettings } from '../../lib/theme';
 import { Modal } from '../ui';
-import { BackgroundImage } from '../BackgroundImage';
 import { HubSurface } from './HubSurface';
-
-function EmbeddedBackground() {
-  const { settings } = useSettings();
-  const bg = settings?.appearance.background;
-  const mode = bg?.mode ?? 'quiet';
-  if (mode === 'quiet') return null;
-  const blur = bg?.blur ?? 24;
-  const scrim = bg?.scrim ?? 62;
-  return (
-    <>
-      <div
-        className={`bg-layer bg-embedded bg-${mode}`}
-        style={{ ['--bg-blur' as never]: `${blur}`, ['--bg-scrim' as never]: `${scrim}` }}
-        aria-hidden="true"
-      >
-        {mode === 'photo' && bg?.photo && <BackgroundImage url={bg.photo} />}
-      </div>
-      {mode === 'photo' && (
-        <div
-          className="bg-overlay bg-embedded"
-          style={{ ['--bg-scrim' as never]: `${scrim}` }}
-          aria-hidden="true"
-        />
-      )}
-    </>
-  );
-}
 
 export interface HubPreviewProps {
   /** the layout to render; omit to preview the saved one */
@@ -67,7 +38,6 @@ export function HubPreview({ layout, label, height = 520 }: HubPreviewProps) {
         <PreviewFullscreen layout={layout} />
       </div>
       <div className={`hub-preview-frame hub-preview-frame--${width}`} style={{ height }} aria-hidden={false}>
-        <EmbeddedBackground />
         <div className="hub-preview-surface" inert>
           <div className="hub-preview-scale">
             <HubSurface data={data} layout={layout} interactive={false} preview frozenNow={FROZEN} />
@@ -91,7 +61,6 @@ function PreviewFullscreen({ layout }: { layout: LayoutDoc | null }) {
       {open && (
         <Modal title="Hub preview" onClose={() => setOpen(false)} wide>
           <div className="hub-preview-frame hub-preview-frame--full" style={{ height: '70dvh' }}>
-            <EmbeddedBackground />
             <div className="hub-preview-surface" inert>
               <div className="hub-preview-scale">
                 <HubSurface data={data} layout={layout} interactive={false} preview frozenNow={FROZEN} />

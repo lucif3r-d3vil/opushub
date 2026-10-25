@@ -47,7 +47,6 @@ const settings = {
   appearance: { theme: 'dark', accent: 'sage', density: 'comfortable', transparency: true, fontScale: 1, background: { mode: 'quiet', photo: null, blur: 24, scrim: 62 } },
   hub: { greetingName: 'Nora', clock24h: true, showSeconds: false },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
-  advanced: { customCss: false, customJs: false },
 };
 
 const layout: LayoutDoc = layoutWith([
@@ -963,7 +962,7 @@ export async function runWebTests(): Promise<WebResult> {
   await test('settings: the Hub tabs render their editors', async (h) => {
     for (const [tab, expected] of [
       ['widgets', 'Reset layout'], ['templates', 'Minimal'], ['services', 'config/services.yaml'],
-      ['groups', 'group'], ['advanced', 'Custom CSS & JS'], ['hub', 'Spacing'],
+      ['groups', 'group'], ['hub', 'Spacing'],
     ] as const) {
       h.root.unmount;
       const hh = await createHarness({ routes: stubRoutes(), fallback: () => ({}) });
@@ -1220,7 +1219,7 @@ export async function runWebTests(): Promise<WebResult> {
     }
     // every section of the IA is reachable, including the three Phase 5 panes and Phase 6's four
     const navText = text(q('.settings-nav')!);
-    for (const item of ['General', 'Appearance', 'Services', 'Groups', 'Bookmarks', 'Widgets', 'Import & migration', 'History', 'Export', 'Account & sessions', 'Environment', 'Advanced']) {
+    for (const item of ['General', 'Appearance', 'Services', 'Groups', 'Bookmarks', 'Widgets', 'Import & migration', 'History', 'Export', 'Account & sessions', 'Environment']) {
       expect(navText.includes(item), `“${item}” is missing from the settings navigation`);
     }
     // the item you are on says so — visually and to assistive tech
@@ -1711,79 +1710,6 @@ export async function runWebTests(): Promise<WebResult> {
     } finally {
       window.alert = realAlert;
     }
-  });
-
-  /* 26 — the background URL is verified server-side before it is stored */
-  await test('background: an Unsplash page resolves to a direct URL; a web page is refused in place', async (h) => {
-    const photoSettings = structuredClone(settings);
-    photoSettings.appearance.background = { mode: 'photo' as const, photo: null, blur: 24, scrim: 62 };
-    let storedPhoto: string | null = null;
-    h.setRoutes({
-      ...stubRoutes(),
-      '/api/settings': (body) => {
-        const b = (body || {}) as { appearance?: { background?: { photo?: string | null } } };
-        if (b?.appearance?.background && 'photo' in b.appearance.background) storedPhoto = b.appearance.background.photo ?? null;
-        const cur = structuredClone(photoSettings);
-        cur.appearance.background.photo = storedPhoto;
-        return cur;
-      },
-      '/api/backgrounds': { files: [] },
-      '/api/background/check': (_b, p) => {
-        const url = decodeURIComponent(String(p).split('url=')[1] || '');
-        if (url.startsWith('https://unsplash.com/photos/')) {
-          return { ok: true, url: 'https://images.unsplash.com/photo-1465189684280-6a8fa9b19a7a?ixlib=rb-4.1.0', kind: 'unsplash' };
-        }
-        if (/\.(jpe?g|png|webp|avif|svg)$/i.test(url)) return { ok: true, url, kind: 'direct' };
-        return { ok: false, error: 'That URL serves a web page, not an image. Paste a direct link to an image file, or an Unsplash photo page.' };
-      },
-    });
-    await h.mount(<TestApp entry="/settings/background"><Settings /></TestApp>);
-    await h.waitFor(() => !!q('#bgurl'), 'the background URL field');
-
-    // the pasted Unsplash page → the check runs first, then the RESOLVED direct URL is what saves
-    let input = q<HTMLInputElement>('#bgurl')!;
-    type(input, 'https://unsplash.com/photos/body-of-water-surrounding-with-trees-_LuLiJc1cdo');
-    key(input, 'Enter');
-    await h.flush(40);
-    const checkCall = h.calls.find((c) => c.method === 'GET' && c.path.startsWith('/api/background/check'));
-    expect(!!checkCall, 'the URL was not verified before saving');
-    expect(checkCall!.path.includes('body-of-water-surrounding-with-trees-_LuLiJc1cdo'), 'the pasted URL was not sent to the checker');
-    await h.waitFor(() => storedPhoto !== null, 'the settings write with the resolved URL');
-    expect(storedPhoto === 'https://images.unsplash.com/photo-1465189684280-6a8fa9b19a7a?ixlib=rb-4.1.0',
-      `the stored value is not the resolved direct image (got ${storedPhoto})`);
-    expect(text().includes('Resolved to a direct image'), 'the resolution outcome is not shown');
-    expect(q('.bg-tile--url'), 'the pasted URL has no visible preview tile');
-    // the field now shows the canonical value the server stored
-    input = q<HTMLInputElement>('#bgurl')!;
-    expect(input.value.startsWith('https://images.unsplash.com/'), `the field shows ${input.value}, expected the resolved URL`);
-
-    // a web-page URL → refused in place with the reason, and nothing is written
-    const putsBefore = h.writes('PUT', '/api/settings').length;
-    type(input, 'https://public-cdn.example/some-page');
-    key(input, 'Enter');
-    await h.waitFor(() => !!q('.bg-url-state--err'), 'the refusal beside the field');
-    expect(text().includes('web page, not an image'), 'the refusal does not explain why');
-    expect(h.writes('PUT', '/api/settings').length === putsBefore, 'a refused URL was saved anyway');
-    expect(input.value === 'https://public-cdn.example/some-page', 'the refused draft was thrown away instead of left to fix');
-
-    // “None” resets to no background
-    const noneTile = qa('.bg-tile button, button.bg-tile').find((t) => text(t).trim() === 'None');
-    expect(!!noneTile, 'the None tile is missing');
-    click(noneTile!);
-    await h.waitFor(() => storedPhoto === null, 'the reset to no background');
-  });
-
-  /* 27 — the background layer itself degrades: a dead image drops out, the Hub keeps rendering */
-  await test('background: a broken remote image falls back to the base background', async (h) => {
-    const { BackgroundImage } = await import('../../src/components/BackgroundImage');
-    await h.mount(<div className="bg-layer bg-photo" style={{ position: 'relative' }}><BackgroundImage url="https://dead.example/photo.jpg" /></div>);
-    await h.flush(20);
-    expect(!!q('.bg-img'), 'the background layer did not render');
-    const img = q('.bg-img img')!;
-    expect(!!img, 'no hidden probe image — the failure could never be detected');
-    await act(async () => { img.dispatchEvent(new window.Event('error')); });
-    await h.flush(20);
-    expect(!q('.bg-img'), 'a dead image left the layer in place instead of falling back');
   });
 
   /* 30 — Phase 5: the Authentication pane changes the password and audits sessions */

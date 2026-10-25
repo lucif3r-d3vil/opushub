@@ -30,7 +30,6 @@ const PAGES = [
 /** Settings destinations — real routes, so Enter lands on the pane that owns the thing searched. */
 const SETTINGS = [
   { title: 'Appearance', href: '/settings/appearance', hint: 'Theme, accent, density, type scale', keywords: ['dark', 'light', 'theme', 'accent', 'colour', 'color', 'compact', 'font'] },
-  { title: 'Background', href: '/settings/background', hint: 'Quiet, horizon, or your own photo', keywords: ['wallpaper', 'photo', 'blur', 'scrim', 'image'] },
   { title: 'Hub layout', href: '/settings/hub', hint: 'Sections, spacing, greeting, clock', keywords: ['home screen', 'composition', 'sections', 'greeting', 'name', 'clock', '24 hour'] },
   { title: 'Widgets', href: '/settings/widgets', hint: 'Add, hide, resize and configure Hub widgets', keywords: ['widget', 'rail', 'bookmarks', 'activity', 'clock', 'system'] },
   { title: 'Templates', href: '/settings/templates', hint: 'Layout presets: minimal, balanced, media…', keywords: ['preset', 'layout', 'theme pack'] },
@@ -42,7 +41,6 @@ const SETTINGS = [
   { title: 'Environment', href: '/settings/environment', hint: 'Engine status, URL sources, Homepage-compatible files', keywords: ['docker', 'engine', 'socket', 'discovery', 'unmatched', 'env', 'paths', 'homepage', 'overlay'] },
   { title: 'Connections', href: '/settings/connections', hint: 'Docker connection status', keywords: ['docker', 'engine', 'socket', 'connect', 'status'] },
   { title: 'Account & sessions', href: '/settings/authentication', hint: 'Password, signed-in browsers, revocation', keywords: ['password', 'change password', 'sessions', 'sign out', 'security', 'login', 'revoke'] },
-  { title: 'Advanced', href: '/settings/advanced', hint: 'Custom CSS & JS, refresh intervals, launch logging', keywords: ['custom css', 'custom js', 'theme.css', 'app.js', 'advanced', 'refresh', 'poll', 'launch log'] },
   // Phase 6 — the configuration surfaces themselves are destinations worth searching for.
   { title: 'Import & migration', href: '/settings/import', hint: 'Bring a Homepage configuration across, with a review before anything is written', keywords: ['homepage', 'migrate', 'import', 'services.yaml', 'bookmarks.yaml', 'widgets.yaml', 'move', 'convert', 'porter'] },
   { title: 'Configuration history', href: '/settings/history', hint: 'Every version, what changed, and restore', keywords: ['history', 'backup', 'versions', 'restore', 'undo', 'rollback', 'diff', 'snapshot', 'revert'] },
@@ -308,7 +306,6 @@ function describeEventType(type) {
     'layout.updated': 'layout changed',
     'services.updated': 'services changed',
     'bookmarks.updated': 'bookmarks changed',
-    'custom.updated': 'custom assets changed',
     'service.launch': 'opened',
     'app.boot': 'OpusHub started',
     'auth.login': 'signed in',

@@ -13,7 +13,6 @@ import * as auth from './auth.js';
 import * as model from './model.js';
 import { collect as collectSystem, History } from './providers/system.js';
 import * as docker from './providers/docker.js';
-import { checkBackgroundUrl } from './providers/background.js';
 import { URL_REASONS } from './urlResolver.js';
 import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons.js';
 import { logEvent, readEvents, firstEventAt } from './activity.js';
@@ -29,7 +28,7 @@ import * as configHistory from './configHistory.js';
 import { parseHomepageBundle, buildImportPreview, HOMEPAGE_FILES, REFUSED_FILES } from './homepageImport.js';
 import { planImport, commitPlan } from './configImport.js';
 import { exportNative, exportHomepage } from './configExport.js';
-import { lintCss, lintJs, LIMITS } from './configSchema.js';
+import { LIMITS } from './configSchema.js';
 import { makeWidget, defaultWidgets, WIDGET_TYPES } from './widgets.js';
 import { templateList, templateIds } from './templates.js';
 import { hostDocument } from './host.js';
@@ -515,20 +514,7 @@ export async function handleApi(req, res, url) {
     return send(res, 200, { ...s, _text: raw || '' });
   }
   if (route === 'PUT /api/settings') {
-    let patch = await jsonBody();
-    // The background photo is verified server-side before it is written, so a URL that is not
-    // an image can never reach the Hub as a broken <background-image>: the browser would only
-    // find out on every single load. A failed check is a 400 with the reason, not a silent
-    // fallback that looks like "the setting just doesn't work".
-    if (patch?.appearance?.background && Object.hasOwn(patch.appearance.background, 'photo')) {
-      const r = await checkBackgroundUrl(patch.appearance.background.photo);
-      if (!r.ok) return send(res, 400, { error: r.error, code: 'background_url' });
-      // a photo page that resolved to a direct image is stored as the direct image — the
-      // setting file keeps what the browser will actually render
-      if (r.url != null && r.url !== patch.appearance.background.photo) {
-        patch = { ...patch, appearance: { ...patch.appearance, background: { ...patch.appearance.background, photo: r.url } } };
-      }
-    }
+    const patch = await jsonBody();
     const next = model.putSettings(patch);
     model.invalidateDiscovery(); // infrastructure.* changes how URLs are resolved
     recordVersion({ reason: 'settings.updated', subject: 'settings.yaml', label: summarizeSettingsPatch(patch), actor: session?.username });
@@ -984,57 +970,6 @@ export async function handleApi(req, res, url) {
     return res.end(r.svg);
   }
 
-  // ---------- custom css/js ----------
-  if (route === 'GET /api/custom') {
-    const s = model.getSettings();
-    // The text is returned whether or not it is enabled: this is the editor's read, and an editor
-    // that cannot show a file it is asked to edit is not an editor. Nothing here is a secret —
-    // theme.css and app.js are files the operator writes by hand.
-    return send(res, 200, {
-      cssEnabled: !!s.advanced?.customCss,
-      jsEnabled: !!s.advanced?.customJs,
-      css: readConfigText('theme.css') ?? '',
-      js: readConfigText('app.js') ?? '',
-      cssModified: fileMtime('theme.css'),
-      jsModified: fileMtime('app.js'),
-      jsPresent: fs.existsSync(path.join(CONFIG_DIR, 'app.js')),
-    });
-  }
-  if (route === 'PUT /api/custom') {
-    const b = await jsonBody();
-    // Custom code is the one configuration area where a syntax error is *visible* and a bad save
-    // is *invisible until reload* — so it is linted here, and a refusal writes nothing at all.
-    const problems = [];
-    if (typeof b.css === 'string') {
-      if (Buffer.byteLength(b.css, 'utf8') > LIMITS.cssBytes) problems.push(`theme.css exceeds the ${Math.round(LIMITS.cssBytes / 1024)} KB cap`);
-      else { const lint = lintCss(b.css); if (!lint.ok) problems.push(`theme.css: ${lint.problems[0]}`); }
-    }
-    if (typeof b.js === 'string') {
-      if (Buffer.byteLength(b.js, 'utf8') > LIMITS.jsBytes) problems.push(`app.js exceeds the ${Math.round(LIMITS.jsBytes / 1024)} KB cap`);
-      else { const lint = lintJs(b.js); if (!lint.ok) problems.push(`app.js: ${lint.problems[0]}`); }
-    }
-    if (problems.length) return send(res, 400, { error: problems.join('; '), code: 'custom_syntax', problems });
-    if (typeof b.css === 'string') writeText('theme.css', b.css);
-    if (typeof b.js === 'string') writeText('app.js', b.js);
-    recordVersion({ reason: 'custom.updated', subject: 'theme.css / app.js', label: 'custom code updated', actor: session?.username });
-    logEvent({ source: 'config', type: 'custom.updated', subject: 'theme.css / app.js', message: 'custom code updated' });
-    return send(res, 200, { ok: true, cssModified: fileMtime('theme.css'), jsModified: fileMtime('app.js') });
-  }
-
-  // ---------- background images ----------
-  // Verify a background URL the same way it will be stored: the response is a verdict only
-  // ({ ok, url | error }) — the image bytes never cross the API.
-  if (route === 'GET /api/background/check') {
-    const input = url.searchParams.get('url') ?? '';
-    return send(res, 200, await checkBackgroundUrl(input));
-  }
-  if (route === 'GET /api/backgrounds') {
-    const dir = path.join(CONFIG_DIR, 'backgrounds');
-    let files = [];
-    try { files = fs.readdirSync(dir).filter((f) => /\.(svg|png|jpe?g|webp|avif)$/i.test(f)); } catch { /* ok */ }
-    return send(res, 200, { files: files.map((f) => ({ name: f, url: `/user/backgrounds/${encodeURIComponent(f)}` })) });
-  }
-
   // =========================================================================
   // Phase 6 — configuration: scope, drafts, history, migration, export
   // =========================================================================
@@ -1054,14 +989,6 @@ export async function handleApi(req, res, url) {
   if (route === 'POST /api/config/validate') {
     const body = await jsonBody();
     const area = String(body?.area || '');
-    if (area === 'custom-css') {
-      const lint = lintCss(body?.draft ?? '');
-      return send(res, 200, { ok: lint.ok, area, problems: lint.problems });
-    }
-    if (area === 'custom-js') {
-      const lint = lintJs(body?.draft ?? '');
-      return send(res, 200, { ok: lint.ok, area, problems: lint.problems });
-    }
     // The YAML/JSON editors validate by *trying the write against a copy of the model*. The model
     // functions are pure up to their final write, so the honest way to know whether a document is
     // acceptable is to run the same normalisation the write would, and discard the result.
@@ -1376,15 +1303,6 @@ export async function handleApi(req, res, url) {
     return send(res, 200, next);
   }
 
-  // ---------- custom CSS / JS: enable, disable, reset ----------
-  if (route === 'POST /api/custom/reset') {
-    const body = await jsonBody();
-    const which = String(body?.file || '');
-    if (which === 'theme.css') { writeText('theme.css', ''); recordVersion({ reason: 'custom.reset', subject: 'theme.css', label: 'custom CSS reset', actor: session?.username }); logEvent({ source: 'config', type: 'custom.updated', subject: 'theme.css', message: 'custom CSS reset' }); return send(res, 200, { ok: true, file: 'theme.css', bytes: 0 }); }
-    if (which === 'app.js') { writeText('app.js', ''); recordVersion({ reason: 'custom.reset', subject: 'app.js', label: 'custom JS reset', actor: session?.username }); logEvent({ source: 'config', type: 'custom.updated', subject: 'app.js', message: 'custom JS reset' }); return send(res, 200, { ok: true, file: 'app.js', bytes: 0 }); }
-    return send(res, 400, { error: 'file must be theme.css or app.js', code: 'bad_file' });
-  }
-
   // ---------- export helpers ----------
 
   notFound();
@@ -1550,14 +1468,6 @@ function writeConfigTarget(name, value, _kind, opts = {}) {
  */
 function recordVersion({ reason, subject, label, actor = null, force = false }) {
   return configHistory.snapshot({ reason, subject, label, actor, force });
-}
-
-/** Last-modified time of a config file, for the custom-code panel. */
-function fileMtime(name) {
-  try {
-    const file = path.join(CONFIG_DIR, name);
-    return fs.statSync(file).mtime.toISOString();
-  } catch { return null; }
 }
 
 /** What this install calls itself. Falls back to the product name if settings.yaml has no app.name

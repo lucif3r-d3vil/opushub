@@ -331,12 +331,12 @@ test('there is no arbitrary-file-write route', async () => {
   assert.equal(injectedNow['theme.css'], before['theme.css'], 'theme.css is byte-identical');
   assert.equal(injectedNow['app.js'], before['app.js'], 'app.js is byte-identical');
 
-  // The positive control: the one route that does write custom code writes only its own two files.
-  const put = await call('PUT', '/api/custom', { css: ':root { --control: 1; }\n' });
+  // The positive control: a route that does write a file writes only the file it owns.
+  const put = await call('PUT', '/api/bookmarks', { groups: [{ name: 'Control', items: [{ name: 'Probe', href: 'https://control.example' }] }] });
   assert.equal(put.status, 200, put.body);
   const finalChanges = changedBetween(before, snapshot());
-  assert.ok(finalChanges.every((f) => f === 'settings.yaml' || f === 'theme.css'), `only files that were named changed: ${finalChanges}`);
-  assert.match(snapshot()['theme.css'], /--control/);
+  assert.ok(finalChanges.every((f) => f === 'settings.yaml' || f === 'bookmarks.yaml'), `only files that were named changed: ${finalChanges}`);
+  assert.match(snapshot()['bookmarks.yaml'], /control\.example/);
 });
 
 test('the per-file writer refuses a name outside the presentation scope', async () => {

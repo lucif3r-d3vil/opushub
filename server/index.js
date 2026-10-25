@@ -83,8 +83,8 @@ const server = http.createServer(async (req, res) => {
     // if that script changes, recompute: node -e "…" (see docs/03-design-system.md)
     "script-src 'self' 'sha256-wV7KrfbxQ7GQ61LOA7WeOy66fhFZ28qCHefeeuHPRDY='",
     "style-src 'self' 'unsafe-inline'",
-    // 'self' = /user/backgrounds/*, icons and bundled assets. The scheme sources cover the
-    // operator's own remote material: a validated https background image and URL icon refs
+    // 'self' = /user/icons/*, and bundled assets. The scheme sources cover the operator's own
+    // remote material: URL icon refs
     // (http: stays because LAN icon servers are legitimately plain-http). There are no
     // 'unsafe-*' keywords here; every URL that reaches the page is server-checked first.
     "img-src 'self' data: blob: https: http:",
@@ -99,7 +99,7 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/api/')) return await handleApi(req, res, url);
 
     // user-config static assets — everything under /user is the operator's own material
-    // (uploaded icons, personal backgrounds, custom CSS/JS). It is not public: a session cookie
+    // (uploaded icons). It is not public: a session cookie
     // is required, exactly as for the API. The browser sends it on these same-origin loads.
     if (p.startsWith('/user/') && !auth.authenticate(req)) {
       res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' });
@@ -107,18 +107,6 @@ const server = http.createServer(async (req, res) => {
     }
     if (p.startsWith('/user/icons/')) {
       if (serveFile(res, safeJoin(path.join(CONFIG_DIR, 'icons'), p.slice('/user/icons/'.length)))) return;
-    } else if (p.startsWith('/user/backgrounds/')) {
-      if (serveFile(res, safeJoin(path.join(CONFIG_DIR, 'backgrounds'), p.slice('/user/backgrounds/'.length)))) return;
-    } else if (p === '/user/theme.css') {
-      res.setHeader('cache-control', 'no-cache');
-      res.setHeader('content-type', 'text/css; charset=utf-8');
-      try { res.end(fs.readFileSync(path.join(CONFIG_DIR, 'theme.css'), 'utf8')); } catch { res.writeHead(404); res.end('/* none */'); }
-      return;
-    } else if (p === '/user/app.js') {
-      res.setHeader('cache-control', 'no-cache');
-      res.setHeader('content-type', 'text/javascript; charset=utf-8');
-      try { res.end(fs.readFileSync(path.join(CONFIG_DIR, 'app.js'), 'utf8')); } catch { res.writeHead(404); res.end('/* none */'); }
-      return;
     }
 
     // SPA + assets

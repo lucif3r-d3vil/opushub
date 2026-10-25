@@ -250,14 +250,13 @@ test('the setup template id is an identifier, never a path, and traversal is ref
   }
 });
 
-test('custom CSS/JS cannot be switched on, or written, through setup', async () => {
+test('custom CSS/JS cannot be written through setup, and settings no longer carry it', async () => {
   const session = await seedSession();
   const auth = { cookie: session };
 
   const settings = await call('GET', '/api/settings', undefined, auth);
   assert.equal(settings.status, 200, settings.body);
-  assert.equal(settings.json.advanced.customCss, false, 'custom CSS must start off');
-  assert.equal(settings.json.advanced.customJs, false, 'custom JS must start off');
+  assert.equal(settings.json.advanced, undefined, 'custom CSS/JS is no longer part of the settings model');
 
   const before = tree();
   const r = await call('POST', '/api/setup', {

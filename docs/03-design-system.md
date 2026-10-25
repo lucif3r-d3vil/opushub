@@ -187,9 +187,7 @@ light: bg #f7f7f5 (paper) · raised #fff · overlay rgba(255,255,255,.9)+blur
 
 ## Surfaces & background
 
-- Background modes: Quiet (flat), Horizon (single muted vertical ramp, no blobs), Photo (from
-  config/backgrounds or URL; scrim + blur slider, text always ≥ 4.5:1 over scrim — scrim is
-  automatic, min 55% on photos). Content never sits on raw imagery.
+- The background is one flat, quiet layer. Content never sits on raw imagery.
 - The nav rail and command overlay get the only translucent materials; everything else is opaque.
 
 ## Accessibility

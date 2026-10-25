@@ -158,9 +158,9 @@ test('only health, setup status, me and the auth endpoints are public', async ()
 
 test('user assets are not served to an anonymous caller', async () => {
   // a file that really exists in the config directory, so a 401 cannot be a 404 in disguise
-  fs.mkdirSync(path.join(CONFIG_DIR, 'backgrounds'), { recursive: true });
-  fs.writeFileSync(path.join(CONFIG_DIR, 'backgrounds', 'probe.png'), 'not-a-real-png');
-  const anon = await get('/user/backgrounds/probe.png', { auth: false });
+  fs.mkdirSync(path.join(CONFIG_DIR, 'icons'), { recursive: true });
+  fs.writeFileSync(path.join(CONFIG_DIR, 'icons', 'probe.png'), 'not-a-real-png');
+  const anon = await get('/user/icons/probe.png', { auth: false });
   assert.equal(anon.status, 401);
   assert.ok(!anon.text.includes('not-a-real-png'));
   const themeAnon = await get('/user/theme.css', { auth: false });
@@ -210,7 +210,7 @@ test('the same endpoints are open now, and the hash is not', async () => {
   assert.equal(me.json.setupComplete, true);
   assert.equal(me.json.user.username, 'admin');
   assert.ok(!('passwordHash' in me.json.user));
-  const asset = await get('/user/backgrounds/probe.png');
+  const asset = await get('/user/icons/probe.png');
   assert.equal(asset.status, 200, 'the session also unlocks user assets');
 });
 

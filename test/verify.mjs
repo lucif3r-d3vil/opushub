@@ -431,9 +431,6 @@ async function main() {
       check('search: a query about the engine reaches discovery and, when live, real services',
         docker.body?.results?.some((r) => r.href === '/settings/environment'),
         `${(docker.body?.results || []).length} results`);
-      const advanced = await get('/api/search?q=advanced');
-      check('search: the Advanced tab is reachable by the words people would type',
-        advanced.body?.results?.some((r) => r.href === '/settings/advanced'), JSON.stringify((advanced.body?.results || []).slice(0, 3)));
       const empty = await get('/api/search?q=');
       check('search: an empty query gives a start surface rather than an error',
         empty.status === 200 && Array.isArray(empty.body?.results));
@@ -622,27 +619,22 @@ async function main() {
         prov.body?.providers?.find((p) => p.name === 'docker')?.state === (engineLive ? 'available' : 'unavailable'));
     }
 
-    // ---- 9. custom CSS/JS stay opt-in frontend-only ----------
+    // ---- 9. custom CSS/JS and the background image are gone ----------
     {
-      const off = await send('PUT', '/api/settings', { advanced: { customCss: false, customJs: false } });
-      check('custom assets: opt-in flags are stored as given',
-        off.body?.advanced?.customCss === false && off.body?.advanced?.customJs === false);
-      const custom = await get('/api/custom');
-      check('custom assets: the API reports what it would serve', custom.status === 200, `status ${custom.status}`);
-      await send('PUT', '/api/settings', { advanced: { customCss: false, customJs: false } });
+      for (const gone of ['/api/custom', '/api/backgrounds', '/api/background/check']) {
+        const r = await get(gone);
+        check(`${gone}: removed`, r.status === 404, `status ${r.status}`);
+      }
     }
 
-    // ---- 10. background + theme settings survive a round trip ----------
+    // ---- 10. theme settings survive a round trip; sections from older builds are ignored ----------
     {
-      const bg = await send('PUT', '/api/settings', { appearance: { theme: 'dark', background: { mode: 'solid', blur: 10, scrim: 50 } } });
-      check('appearance: theme and background settings round-trip',
-        bg.body?.appearance?.theme === 'dark' && bg.body?.appearance?.background?.mode === 'solid',
-        JSON.stringify(bg.body?.appearance?.background));
-      const clamped = await send('PUT', '/api/settings', { appearance: { background: { blur: -5, scrim: 999 } } });
-      check('appearance: out-of-range values are clamped, not stored',
-        clamped.body?.appearance?.background?.blur >= 0 && clamped.body?.appearance?.background?.scrim <= 100,
-        JSON.stringify(clamped.body?.appearance?.background));
-      await send('PUT', '/api/settings', { appearance: { theme: 'system', background: { mode: 'quiet', blur: 24, scrim: 62 } } });
+      const set = await send('PUT', '/api/settings', { appearance: { theme: 'dark', background: { mode: 'solid', blur: 10, scrim: 50 } }, advanced: { customCss: true } });
+      check('appearance: the theme round-trips',
+        set.body?.appearance?.theme === 'dark', JSON.stringify(set.body?.appearance));
+      check('appearance: background and custom-code sections from older builds are ignored, not served',
+        set.body?.appearance?.background === undefined && set.body?.advanced === undefined);
+      await send('PUT', '/api/settings', { appearance: { theme: 'system' } });
     }
 
     console.log('');

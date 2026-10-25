@@ -110,7 +110,6 @@ Everything lives in the `config/` folder. You can start with an empty folder —
 | `bookmarks.yaml` | Simple list of links |
 | `layout.json` | Hub composition (written automatically when you drag widgets) |
 | `icons/` | Your own icon files |
-| `backgrounds/` | Custom background images |
 | `.env` | Secrets (never sent to the browser) |
 
 You can also edit most of these from the Settings UI. Changes are written as clean, readable YAML.
