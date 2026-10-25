@@ -362,24 +362,6 @@ export interface IconSearchDoc { results: IconSearchResult[]; total?: number; re
 
 /* ---------------- Phase 3: read-only service intelligence ---------------- */
 
-/** One sample of a container's resource history — real readings only, taken while somebody
- *  was looking at this service (never by a background loop; see server/statsHistory.js). */
-export interface StatsSample {
-  t: number;
-  cpu: number | null;
-  mem: number | null;
-  memLimit: number | null;
-  netRx: number | null;
-  netTx: number | null;
-  pids: number | null;
-  blockIo: number | null;
-}
-export interface StatsHistoryDoc {
-  service: string;
-  samples: StatsSample[];
-  watchingSince: number | null;
-  capped: number;
-}
 export interface StatsDoc { status: 'ok' | 'unavailable' | string; stats: ContainerStats | null; at?: number }
 export interface ContainerStats {
   cpu: number | null;

@@ -5,14 +5,14 @@
 // What it can DO: start, restart or stop this one container — through the Operations Engine,
 // after a server-side dry-run and a confirmation, with the result verified and recorded.
 // What it never does: exec, create, delete, update, deploy, or anything else Docker can do.
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, usePolled } from '../lib/api';
 import { bytes, pct, relTime, uptime } from '../lib/format';
 import { useSettings } from '../lib/theme';
-import type { ActivityEvent, ContainerStats, ImageInfo, MonitoringOverview, Service, ServiceHealthDoc, ServiceHistoryDoc, Stack, StatsSample, SystemSnapshot } from '../lib/types';
+import type { ActivityEvent, ContainerStats, ImageInfo, MonitoringOverview, Service, ServiceHealthDoc, ServiceHistoryDoc, Stack, SystemSnapshot } from '../lib/types';
 import { Icon } from '../components/Icon';
-import { AreaChart, MeterBar, Sparkline } from '../components/Charts';
+import { MeterBar } from '../components/Charts';
 import { Freshness, Loading, OpenLink, ProviderNote, SectionHead, StatusLine } from '../components/ui';
 import { StateBadge, TargetLine, TypeChip, UptimeValue } from '../components/monitoring/parts';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
@@ -83,7 +83,6 @@ export default function ServiceDetail() {
   const basePath = `/api/services/${encodeURIComponent(group)}/${encodeURIComponent(name)}`;
   const { data, error, loading, refresh, fetchedAt } = usePolled<Detail>(basePath, (settings?.behavior?.refresh?.system ?? 5) * 2000);
   // stats + history poll ONLY while this page is mounted — unmounting stops both (§29)
-  const statsHist = usePolled<{ samples: StatsSample[]; watchingSince: number | null }>(data?.container ? `${basePath}/stats/history` : null, 5000);
   const health = usePolled<ServiceHealthDoc>(data?.service ? `${basePath}/health` : null, 60_000);
   const history = usePolled<ServiceHistoryDoc>(data?.service ? `${basePath}/history?limit=12` : null, 60_000);
   const activity = usePolled<{ items: ActivityEvent[] }>(`/api/activity?limit=40`, 60_000);
@@ -120,7 +119,6 @@ export default function ServiceDetail() {
   const running = c?.state.status === 'running';
   const restartCount = c?.state?.restartCount ?? s.container?.restartCount ?? null;
   const restartLoop = c?.state.status === 'restarting' || (running && (restartCount ?? 0) >= 5 && startedMs != null && now - startedMs < 5 * 60_000);
-  const samples = statsHist.data?.samples || [];
   const logLaunch = () => { if (settings?.behavior?.logLaunches) void api(basePath, { method: 'POST' }).catch(() => undefined); };
 
   return (
@@ -289,17 +287,13 @@ export default function ServiceDetail() {
             <SectionHead
               id="res-head"
               title="Resource usage"
-              right={samples.length > 0 ? <span className="stale-note">{samples.length} sample{samples.length === 1 ? '' : 's'} while viewing</span> : undefined}
             />
             {!data.dockerAvailable ? (
               <DockerOffNote reason={s.statusReason || null} />
             ) : !running ? (
               <ProviderNote compact status="unavailable" reason={c ? `Stats are only reported while the container is running — this one is ${words.stateWord.toLowerCase()}.` : 'Connect Docker to see live resource use.'} />
             ) : (
-              <>
-                <ResourceGrid stats={st} samples={samples} />
-                <SessionHistory samples={samples} watchingSince={statsHist.data?.watchingSince ?? null} />
-              </>
+              <ResourceGrid stats={st} />
             )}
           </section>
 
@@ -686,23 +680,9 @@ function LabelList({ s }: { s: Service }) {
 
 /* ---------------- resources: values + compact sparklines ---------------- */
 
-function ResourceGrid({ stats, samples }: { stats: ContainerStats | null; samples: StatsSample[] }) {
+function ResourceGrid({ stats }: { stats: ContainerStats | null }) {
   const memUsed = stats?.memory.used ?? null;
   const memLimit = stats?.memory.limit ?? null;
-  // net rx/tx are cumulative counters — rates come from consecutive real samples, never guessed
-  const netRates = useMemo(() => {
-    const out: { rx: number; tx: number }[] = [];
-    for (let i = 1; i < samples.length; i++) {
-      const a = samples[i - 1], b = samples[i];
-      const dt = (b.t - a.t) / 1000;
-      if (dt <= 0 || a.netRx == null || b.netRx == null || a.netTx == null || b.netTx == null) continue;
-      if (b.netRx < a.netRx || b.netTx < a.netTx) continue; // counter reset — skip, don't fake
-      out.push({ rx: (b.netRx - a.netRx) / dt, tx: (b.netTx - a.netTx) / dt });
-    }
-    return out;
-  }, [samples]);
-  const lastRate = netRates[netRates.length - 1] || null;
-
   if (!stats) {
     return <ProviderNote compact status="unavailable" reason="The engine has no stats for this container right now." />;
   }
@@ -723,71 +703,14 @@ function ResourceGrid({ stats, samples }: { stats: ContainerStats | null; sample
       </div>
       <div className="stat">
         <div className="stat-k">Network</div>
-        <div className="stat-v" style={{ fontSize: 15 }}>
-          {lastRate ? `${bytes(lastRate.rx, true)} ↓ · ${bytes(lastRate.tx, true)} ↑` : 'Not available yet'}
-        </div>
-        <div className="stat-sub">lifetime {bytes(stats.net.rx)} ↓ · {bytes(stats.net.tx)} ↑</div>
-        {netRates.length >= 2 && <Sparkline values={netRates.slice(-60).map((r) => r.rx)} width={120} height={22} color="var(--ok)" />}
+        <div className="stat-v" style={{ fontSize: 15 }}>{bytes(stats.net.rx)} ↓ · {bytes(stats.net.tx)} ↑</div>
+        <div className="stat-sub">since the container started</div>
       </div>
       <div className="stat">
         <div className="stat-k">Block I/O</div>
         <div className="stat-v" style={{ fontSize: 15 }}>{stats.blockIo != null ? bytes(stats.blockIo) : 'Not available'}</div>
         <div className="stat-sub">{stats.pids != null ? `${stats.pids} processes` : 'processes not reported'}</div>
       </div>
-    </div>
-  );
-}
-
-/* ---------------- resource history: what we actually watched ---------------- */
-
-/**
- * The container's resource history, and nothing more.
- *
- * Two rules keep this honest and cheap:
- *  · it can only ever show the stretch during which a page was *watching* — OpusHub samples
- *    container stats on demand, so the window is the session, never a backfilled hour;
- *  · it is drawn by the measured chart component, so the graph owns a fixed box and can never
- *    paint under the labels beneath it.
- */
-function SessionHistory({ samples, watchingSince }: { samples: StatsSample[]; watchingSince: number | null }) {
-  const cpu = samples.filter((s) => s.cpu != null).map((s) => ({ t: s.t, v: s.cpu as number }));
-  const mem = samples
-    .filter((s) => s.mem != null && s.memLimit)
-    .map((s) => ({ t: s.t, v: (100 * (s.mem as number)) / (s.memLimit as number) }));
-  if (cpu.length < 2 && mem.length < 2) return null;
-
-  const first = Math.min(...[...cpu, ...mem].map((p) => p.t));
-  const last = Math.max(...[...cpu, ...mem].map((p) => p.t));
-  // the axis spans the session we witnessed (clamped to a sane floor/ceiling), not a fixed hour
-  const windowMs = Math.min(30 * 60_000, Math.max(2 * 60_000, last - first));
-  const latestCpu = cpu.length ? cpu[cpu.length - 1].v : null;
-  const latestMem = mem.length ? mem[mem.length - 1].v : null;
-  const spanMinutes = Math.max(1, Math.round((last - first) / 60_000));
-
-  return (
-    <div className="res-history">
-      <div className="res-history-head">
-        <span className="micro-label">Since you opened this page</span>
-        <span className="res-legend">
-          <span className="res-key"><i style={{ background: 'var(--accent)' }} />CPU{latestCpu != null ? ` ${pct(latestCpu, 1)}` : ''}</span>
-          <span className="res-key"><i style={{ background: 'var(--ok)' }} />Memory{latestMem != null ? ` ${latestMem.toFixed(0)}%` : ''}</span>
-        </span>
-      </div>
-      <AreaChart
-        height={118}
-        windowMs={windowMs}
-        maxHint={100}
-        fmt={(v) => `${v.toFixed(0)}%`}
-        series={[
-          { points: cpu, label: 'CPU', color: 'var(--accent)', fill: false },
-          { points: mem, label: 'Memory', color: 'var(--ok)', fill: false },
-        ]}
-      />
-      <p className="stale-note">
-        {samples.length} sample{samples.length === 1 ? '' : 's'} over the last {spanMinutes} min — container stats are
-        collected only while a page is watching, so anything earlier was never recorded
-        {watchingSince ? ` (sampling began ${relTime(watchingSince)})` : ''}.
-      </p>
     </div>
   );
 }

@@ -83,7 +83,7 @@ test.before(async () => {
   COOKIE = await seedSession();
   activity = await import('../server/activity.js');
   healthMod = await import('../server/providers/health.js');
-  statsMod = await import('../server/statsHistory.js');
+  statsMod = await import('../server/containerStats.js');
 });
 
 test.after(async () => {
@@ -204,27 +204,13 @@ test('stats: malformed engine payloads become unavailable, not a crash', async (
   assert.equal(json.status, 'unavailable');
 });
 
-test('stats history: samples accumulate only when asked, and stay bounded', async () => {
-  statsMod.resetStatsHistory();
-  const first = await get('/api/services/Media/jellyfin/stats');
-  assert.equal(first.json.status, 'ok');
-  const h1 = await get('/api/services/Media/jellyfin/stats/history');
-  assert.equal(h1.json.samples.length, 1, 'one request → one real sample');
-  // an immediate second fetch shares the dedup cache — no extra sample, no extra Docker call
-  await get('/api/services/Media/jellyfin/stats');
-  const h2 = await get('/api/services/Media/jellyfin/stats/history');
-  assert.equal(h2.json.samples.length, 1, 'dedup window prevents a polling storm');
-  assert.ok(h2.json.watchingSince > 0);
-  // the buffer itself is capped (keyed by the container id the service resolves to)
-  const cap = statsMod._internals.MAX_SAMPLES;
-  assert.equal(statsMod._internals.buffers.size, 1, 'only the watched container has a buffer');
-  const buf = [...statsMod._internals.buffers.values()][0];
-  for (let i = 0; i < cap + 50; i++) buf.samples.push({ t: Date.now(), cpu: 1 });
-  // force one more real sample through (past the min-interval and dedup guards) to trigger the trim
-  buf.lastAt = 0;
-  statsMod._internals.inflight.clear();
-  await get('/api/services/Media/jellyfin/stats');
-  assert.ok(buf.samples.length <= cap, `ring buffer stays capped (${buf.samples.length} ≤ ${cap})`);
+test('stats: concurrent readers share one Docker call and nothing is stored', async () => {
+  statsMod.resetContainerStats();
+  const [a, b] = await Promise.all([get('/api/services/Media/jellyfin/stats'), get('/api/services/Media/jellyfin/stats')]);
+  assert.equal(a.json.status, 'ok');
+  assert.equal(b.json.status, 'ok');
+  const gone = await get('/api/services/Media/jellyfin/stats/history');
+  assert.equal(gone.status, 404, 'per-container history no longer exists');
 });
 
 // ── LOGS: read-only, bounded, honest ─────────────────────────────────────────
@@ -293,8 +279,6 @@ test('activity: looking at pages and polling never writes an event', async () =>
     await get('/api/search?q=wave');
     await get('/api/services/Music/wave');
     await get('/api/stacks/media');
-    await get('/api/services/Music/wave/stats/history');
-    await get('/api/stacks/media/history');
   }
   const after = (await get('/api/activity?limit=500')).json.total;
   assert.equal(after, before, `polling wrote ${after - before} activity event(s)`);

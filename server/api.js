@@ -21,7 +21,7 @@ import { checkForUpdates, lastUpdateCheck, REPO_URL } from './updateCheck.js';
 import { searchAll } from './search.js';
 import { loadEnv } from './env.js';
 import { DATA_DIR } from './configStore.js';
-import { statsWithHistory, statsHistory, aggregateHistory } from './statsHistory.js';
+import { containerStatsShared } from './containerStats.js';
 import { providerHealthDoc, reportProvider } from './providers/health.js';
 import { configScopeDoc, presentationFileNames } from './configScope.js';
 import * as configHistory from './configHistory.js';
@@ -584,9 +584,8 @@ export async function handleApi(req, res, url) {
     if (docker.availability().ok) {
       try {
         container = await docker.inspectContainer(ref);
-        // stats flow through the shared sampler: one Docker call per interval no matter how
-        // many UI elements are showing this service, and every fetch grows its sparkline history
-        containerStats = await statsWithHistory(ref);
+        // stats are shared: one Docker call per interval no matter how many UI elements ask
+        containerStats = await containerStatsShared(ref);
       } catch { /* keep partial */ }
     }
     // inspect is the only place health and restartCount exist — surface them on the record
@@ -612,7 +611,7 @@ export async function handleApi(req, res, url) {
   // ---------- per-service read-only detail: stats, history, logs ----------
   // Generic routes keyed by the same stable service id as the page (`:group/:name`); there is
   // deliberately no /api/jellyfin — every application is addressed through the one model.
-  const svcSub = p.match(/^\/api\/services\/([^/]+)\/([^/]+)\/(stats|stats\/history|logs|history|health)$/);
+  const svcSub = p.match(/^\/api\/services\/([^/]+)\/([^/]+)\/(stats|logs|history|health)$/);
   if (method === 'GET' && svcSub) {
     const group = decodeURIComponent(svcSub[1]);
     const name = decodeURIComponent(svcSub[2]);
@@ -624,13 +623,8 @@ export async function handleApi(req, res, url) {
 
     if (what === 'stats') {
       if (!docker.availability().ok) return send(res, 200, { status: 'unavailable', code: 'docker_unavailable', stats: null });
-      const stats = await statsWithHistory(ref);
+      const stats = await containerStatsShared(ref);
       return send(res, 200, { status: stats ? 'ok' : 'unavailable', stats, at: Date.now() });
-    }
-
-    if (what === 'stats/history') {
-      const win = Math.min(30 * 60_000, Math.max(60_000, Number(url.searchParams.get('window')) || 30 * 60_000));
-      return send(res, 200, { service: service.name, ...statsHistory(ref, { windowMs: win }) });
     }
 
     if (what === 'logs') {
@@ -705,19 +699,6 @@ export async function handleApi(req, res, url) {
     });
   }
 
-  const stHistory = p.match(/^\/api\/stacks\/([^/]+)\/history$/);
-  if (method === 'GET' && stHistory) {
-    const name = decodeURIComponent(stHistory[1]);
-    const data = await model.getStacksDoc();
-    const key = name.toLowerCase();
-    const stack = data.stacks.find((s) => String(s.id).toLowerCase() === key || s.name.toLowerCase() === key || String(s.project || '').toLowerCase() === key);
-    if (!stack) return send(res, 404, { error: `stack not found: ${name}` });
-    // No Docker calls here: this reads the shared per-container buffers, which the stack detail
-    // poll keeps warm. A member nobody has looked at simply contributes nothing.
-    const refs = stack.members.filter((m) => m.container?.state === 'running').map((m) => m.container.id || m.container.name);
-    const win = Math.min(30 * 60_000, Math.max(60_000, Number(url.searchParams.get('window')) || 30 * 60_000));
-    return send(res, 200, { stack: stack.id, ...aggregateHistory(refs, { windowMs: win }) });
-  }
   if (route === 'PUT /api/stacks') {
     const patch = await jsonBody();
     const next = model.writeStacks(patch);

@@ -10,7 +10,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stackRollup } from '../server/model.js';
-import { aggregateHistory, statsWithHistory, statsHistory, resetStatsHistory, _internals } from '../server/statsHistory.js';
 
 const member = (over = {}) => ({
   service: 'svc', containerName: 'svc', container: { name: 'svc', id: 'c1', state: 'running', status: 'Up 2 hours', health: null, image: 'img' },
@@ -64,63 +63,6 @@ test('net totals are summed across members and stay null when nobody reported', 
   const b = stackRollup([member({ stats: { cpu: 1, memory: { used: 10, limit: 100 }, net: null, pids: null, blockIo: null } })]);
   assert.equal(b.netRx, null, 'a container that reported no counters does not contribute a zero');
   assert.equal(b.cpu, 1);
-});
-
-test('aggregate history sums buckets, counts reporters and never invents a point', () => {
-  resetStatsHistory();
-  // Two containers sampled "together" by pushing through the sampler's public surface is not
-  // possible without a Docker engine, so build the buffers through the module's documented hook.
-  const { buffers } = _internals;
-  // Placed on the 2 s bucket grid so that every sample sits mid-bucket (500 ms or 1500 ms into it):
-  // the two containers' samples are 50 ms apart and must land in one bucket on every run, not only
-  // when the wall clock happens to be far from a rounding boundary.
-  const now = Math.floor(Date.now() / 2_000) * 2_000 + 1_500;
-  buffers.clear();
-  buffers.set('a', {
-    lastAt: now, readAt: now,
-    samples: [
-      { t: now - 10_000, cpu: 5, mem: 100, memLimit: 1000, netRx: 1_000, netTx: 100, pids: 1, blockIo: null },
-      { t: now - 5_000, cpu: 7, mem: 120, memLimit: 1000, netRx: 2_000, netTx: 200, pids: 1, blockIo: null },
-    ],
-  });
-  buffers.set('b', {
-    lastAt: now, readAt: now,
-    samples: [
-      { t: now - 10_050, cpu: 3, mem: 50, memLimit: 500, netRx: 500, netTx: 50, pids: 1, blockIo: null },
-      { t: now - 5_050, cpu: 1, mem: 60, memLimit: 500, netRx: 900, netTx: 90, pids: 1, blockIo: null },
-    ],
-  });
-  buffers.set('c', { lastAt: 0, readAt: now, samples: [] }); // watched, but nothing recorded
-
-  const doc = aggregateHistory(['a', 'b', 'c', 'ghost'], { windowMs: 60_000 });
-  assert.equal(doc.containers, 4, 'every ref that was asked about is accounted for');
-  assert.equal(doc.reporting, 2, 'only the two with samples count as reporting');
-  assert.equal(doc.samples.length, 2, 'one point per cadence, not per container');
-  assert.equal(doc.samples[0].cpu, 8, 'cpu is summed inside the bucket');
-  assert.equal(doc.samples[0].mem, 150);
-  assert.equal(doc.samples[0].netRx, 1_500);
-  assert.equal(doc.samples[1].cpu, 8);
-  assert.equal(doc.samples[0].count, 2);
-  assert.ok(doc.watchingSince <= now - 9_000);
-  assert.equal(doc.bucketMs, 2000);
-
-  // a ref nobody ever watched contributes nothing and cannot drag a sum down
-  const onlyGhost = aggregateHistory(['ghost'], { windowMs: 60_000 });
-  assert.deepEqual(onlyGhost.samples, []);
-  assert.equal(onlyGhost.reporting, 0);
-  assert.equal(onlyGhost.watchingSince, null);
-  buffers.clear();
-});
-
-test('the sampler is still demand-driven: a ref with no buffer makes no Docker call', async () => {
-  resetStatsHistory();
-  const before = statsHistory('never-seen');
-  assert.deepEqual(before.samples, []);
-  assert.equal(before.watchingSince, null);
-  // and history for something nobody sampled stays empty rather than inventing a point
-  const agg = aggregateHistory(['never-seen'], { windowMs: 60_000 });
-  assert.equal(agg.samples.length, 0);
-  void statsWithHistory; // the only way to add a sample is still to ask for one
 });
 
 // ── the route's Docker budget (docs/archive/08-phase-5-plan.md § 4) ───────────────────
@@ -190,46 +132,14 @@ test('the stack route inspects only running members, bounds concurrency and shar
     assert.equal(detail.rollup.containers, detail.members.length);
     assert.equal(detail.rollup.reporting, statsCalls > 0 ? statsCalls : 0, 'reporting counts what actually answered');
 
-    // the second poll inside the sampler's cache window must not re-ask for the same stats
+    // the second poll inside the stats cache window must not re-ask for the same stats
     engine.reset();
     await fetch(`${base}/api/stacks/${encodeURIComponent(stack.id)}`, { headers: { cookie } });
     assert.ok(engine.count('/stats') <= statsCalls, `stats were re-fetched inside the cache window (${engine.count('/stats')} > ${statsCalls})`);
-
-    // aggregate history makes no Docker calls at all — it reads buffers that are already warm
-    engine.reset();
-    const hist = await (await fetch(`${base}/api/stacks/${encodeURIComponent(stack.id)}/history?window=60000`, { headers: { cookie } })).json();
-    assert.equal(engine.count(''), 0, 'the history endpoint talked to Docker');
-    assert.ok(Array.isArray(hist.samples));
-    assert.ok(hist.samples.length >= 1, 'the two warm polls produced an aggregated point');
-    assert.ok(hist.containers >= running, 'the aggregate knows how many members it represents');
   } finally {
     child.kill('SIGTERM');
     await new Promise((r) => child.once('exit', r));
     await engine.stop();
     fs.rmSync(scratch, { recursive: true, force: true });
   }
-});
-
-test('a container nobody has watched for fifteen minutes stops costing memory', () => {
-  const { buffers, prune, IDLE_DROP_MS } = _internals;
-  resetStatsHistory();
-  const now = Date.now();
-  const sample = { t: now, cpu: 1, mem: 2, memLimit: 3, netRx: 4, netTx: 5, pids: 6, blockIo: null };
-  // one buffer read a moment ago, one that nothing has touched for twenty minutes
-  buffers.set('live', { samples: [sample], lastAt: now, readAt: now });
-  buffers.set('stale', { samples: [{ ...sample, t: now - 20 * 60_000 }], lastAt: now - 20 * 60_000, readAt: now - 20 * 60_000 });
-  assert.ok(IDLE_DROP_MS === 15 * 60_000, 'the idle window moved');
-
-  prune(now);
-  assert.ok(buffers.has('live'), 'an active buffer was dropped');
-  assert.ok(!buffers.has('stale'), 'a buffer untouched for twenty minutes survived — retention is not bounded');
-
-  // and a read counts as a touch: the chart that just drew it keeps its history
-  const before = aggregateHistory(['live'], { windowMs: 60_000 });
-  assert.equal(before.reporting, 1);
-  prune(now + 14 * 60_000);
-  assert.ok(buffers.has('live'), 'reading a buffer did not refresh it');
-  prune(now + 16 * 60_000);
-  assert.ok(!buffers.has('live'), 'a buffer nobody has read for over fifteen minutes was kept');
-  buffers.clear();
 });

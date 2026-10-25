@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { usePolled } from '../lib/api';
 import { bytes, num, pct, relTime, timeOfDay, uptime } from '../lib/format';
 import { useSettings } from '../lib/theme';
 import type { ActivityEvent } from '../lib/types';
 import { Icon } from '../components/Icon';
-import { AreaChart, MeterBar } from '../components/Charts';
+import { MeterBar } from '../components/Charts';
 import { Loading, PageHero, ProviderNote, SectionHead, StatusLine } from '../components/ui';
 import { DockerOffNote, LogsDrawer } from '../lib/dockerStatus';
 import { humanEvent } from '../lib/events';
@@ -16,11 +16,6 @@ interface StackRollup {
   containers: number; running: number; stopped: number; unhealthy: number; reporting: number;
   cpu: number | null; memory: number | null; memoryLimit: number | null;
   netRx: number | null; netTx: number | null; upSince: number | null;
-}
-
-interface StackHistoryDoc {
-  stack: string; reporting: number; containers: number; watchingSince: number | null; bucketMs: number;
-  samples: { t: number; cpu: number | null; mem: number | null; memLimit: number | null; netRx: number | null; netTx: number | null; count: number }[];
 }
 
 interface StackDetailDoc {
@@ -48,77 +43,6 @@ const stateWord = (m: StackDetailDoc['members'][number]) => {
   if (m.container.state === 'exited') return 'down';
   return m.container.state;
 };
-
-/**
- * The stack's resources over the session, measured.
- *
- * Three readings, one chart, one focal point. The series are aggregated server-side from the same
- * per-container buffers the member rows read (no extra Docker calls at all), and the note under
- * the chart says how many containers actually answered — an aggregate over 2 of 5 containers is
- * still useful, but it is never presented as the whole project.
- */
-function StackHistory({ stackId, members }: { stackId: string; members: number }) {
-  const [reading, setReading] = useState<'cpu' | 'memory' | 'network'>('cpu');
-  const { data } = usePolled<StackHistoryDoc>(`/api/stacks/${encodeURIComponent(stackId)}/history?window=1800000`, 5000);
-
-  const samples = (data?.samples || []).filter((s) => s.cpu != null || s.mem != null);
-  // every hook runs before the first return: the chart appears and disappears as samples arrive,
-  // and a conditional hook would break the component the moment it did
-  const rateSeries = useMemo(() => {
-    const out: { t: number; v: number | null }[] = [];
-    for (let i = 1; i < samples.length; i++) {
-      const a = samples[i - 1], b = samples[i];
-      const dt = (b.t - a.t) / 1000;
-      if (dt <= 0 || a.netRx == null || b.netRx == null) { out.push({ t: b.t, v: null }); continue; }
-      if (b.netRx < a.netRx) { out.push({ t: b.t, v: null }); continue; } // counter reset: skip, never guess
-      out.push({ t: b.t, v: (b.netRx - a.netRx) / dt });
-    }
-    return out;
-  }, [samples]);
-
-  if (!data || samples.length < 2) {
-    return (
-      <p className="stale-note" role="status" style={{ marginBottom: 'var(--sp-5)' }}>
-        {data ? 'Collecting samples — a stack chart appears once its containers have been read more than once.' : 'Reading the stack’s recent samples…'}
-      </p>
-    );
-  }
-
-  const cpuSeries = samples.map((s) => ({ t: s.t, v: s.cpu }));
-  const memSeries = samples.map((s) => ({ t: s.t, v: s.mem }));
-  const series = reading === 'cpu'
-    ? [{ points: cpuSeries, label: 'CPU', color: 'var(--accent)', fill: false }]
-    : reading === 'memory'
-      ? [{ points: memSeries, label: 'Memory', color: 'var(--accent)', fill: false }]
-      : [{ points: rateSeries, label: 'Network in', color: 'var(--ok)', fill: false }];
-  const fmt = reading === 'network' ? (v: number) => `${bytes(v, true)}/s` : reading === 'memory' ? (v: number) => bytes(v) : (v: number) => `${v.toFixed(0)}%`;
-  const first = samples[0].t, last = samples[samples.length - 1].t;
-  const windowMs = Math.min(30 * 60_000, Math.max(2 * 60_000, last - first));
-  const avgCount = Math.round(samples.reduce((a, s) => a + s.count, 0) / samples.length);
-  const spanMinutes = Math.max(1, Math.round((last - first) / 60_000));
-
-  return (
-    <div className="res-history">
-      <div className="res-history-head">
-        <span className="micro-label">Since you opened this page</span>
-        <span className="seg" role="group" aria-label="Stack reading">
-          {(['cpu', 'memory', 'network'] as const).map((k) => (
-            <button key={k} className="seg-btn" aria-pressed={reading === k} onClick={() => setReading(k)}>
-              {k === 'cpu' ? 'CPU' : k === 'memory' ? 'Memory' : 'Network'}
-            </button>
-          ))}
-        </span>
-      </div>
-      <AreaChart height={118} windowMs={windowMs} fmt={fmt} series={series} maxHint={reading === 'cpu' ? 100 : undefined} />
-      <p className="stale-note">
-        {samples.length} aggregated point{samples.length === 1 ? '' : 's'} over the last {spanMinutes} min — each point sums{' '}
-        {avgCount} of {members} container{members === 1 ? '' : 's'}. Members nobody has looked at contribute nothing, and the
-        aggregate exists only for the time this page has been open
-        {data.watchingSince ? ` (sampling began ${relTime(data.watchingSince)})` : ''}. Anything older was never recorded.
-      </p>
-    </div>
-  );
-}
 
 export default function StackDetailPage() {
   const { name = '' } = useParams();
@@ -281,7 +205,6 @@ export default function StackDetailPage() {
         <div>
           <section className="detail-block">
             <SectionHead title="Resources" right={data.live && totals.hasAny ? <span className="stale-note">from the engine, every {settings?.behavior?.refresh?.services ?? 30}s</span> : undefined} />
-            {data.live && <StackHistory stackId={data.id} members={data.members.length} />}
             {data.members.some((m) => m.stats) ? (
               <div>
                 {data.members.filter((m) => m.stats).map((m) => (

@@ -260,12 +260,6 @@
 
 /* session resource history: the measured chart plus its own legend — the graph owns a fixed
    box (see AreaChart), so it can never paint under the text that follows it */
-.res-history { margin-top: var(--sp-6); padding-top: var(--sp-5); border-top: 1px solid var(--hair); }
-.res-history-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-3); }
-.res-legend { display: inline-flex; gap: var(--sp-4); font-size: var(--fs-meta); color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.res-key { display: inline-flex; align-items: center; gap: 6px; }
-.res-key i { width: 16px; height: 2px; border-radius: 2px; display: inline-block; }
-.res-history .stale-note { margin-top: var(--sp-3); display: block; }
 
 /* label rows: label name, separator, value, and the provenance note in a lighter tone */
 .label-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }

@@ -7,7 +7,7 @@
 // System, and a quiet banner on Services) instead of being rendered as if it were installed.
 import { readYaml, readJson, writeYaml, writeJson } from './configStore.js';
 import * as docker from './providers/docker.js';
-import { statsWithHistory } from './statsHistory.js';
+import { containerStatsShared } from './containerStats.js';
 import { discover } from './discovery.js';
 import { suggestRef, existsLocal } from './providers/icons.js';
 import { hostAddress } from './lib/hostAddress.js';
@@ -1057,8 +1057,8 @@ const STACK_ENRICH_CONCURRENCY = 4;
  *     from the list projection, and asking the daemon about a container that cannot be running
  *     buys nothing;
  *   • at most STACK_ENRICH_CONCURRENCY inspects are in flight at any moment;
- *   • stats go through the shared sampler (`statsWithHistory`), so a container that the service
- *     page is also watching costs one Docker call per interval for both, and both get history.
+ *   • stats go through the shared single-flight cache (`containerStatsShared`), so a container that the service
+ *     page is also watching costs one Docker call per interval for both.
  */
 export async function enrichStackMembers(stack) {
   const blank = (m) => ({ ...m, stats: null, ports: [], networks: [], mounts: [] });
@@ -1082,7 +1082,7 @@ export async function enrichStackMembers(stack) {
         }
         const [insp, stats] = await Promise.all([
           docker.inspectContainer(ref),
-          statsWithHistory(ref),
+          containerStatsShared(ref),
         ]);
         out[i] = {
           ...m,
