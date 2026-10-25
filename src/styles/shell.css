@@ -126,3 +126,4 @@ html[data-transparency='off'] .glass, html[data-transparency='off'] .topbar { ba
   .tb-search { display: none; }
   .av { width: 34px; height: 34px; }
 }
+html[data-theme='light'] .topbar { box-shadow: none; }

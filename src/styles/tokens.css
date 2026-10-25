@@ -76,7 +76,7 @@
   --r-xl: 18px;
   --shadow-tile: 0 18px 40px -22px rgba(0, 0, 0, 0.85), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   --shadow-pop: 0 24px 60px -20px rgba(0, 0, 0, 0.85), 0 2px 10px rgba(0, 0, 0, 0.4);
-  --pop: rgba(16, 18, 22, 0.985);
+  --pop: #101216;
 }
 
 html[data-theme='light'] {
@@ -106,7 +106,7 @@ html[data-theme='light'] {
   --bar: rgba(247, 247, 245, 0.88);
   --shadow-tile: 0 1px 2px rgba(20, 20, 25, 0.06), 0 10px 26px -16px rgba(20, 20, 30, 0.2);
   --shadow-pop: 0 16px 48px -16px rgba(20, 20, 30, 0.22), 0 2px 8px rgba(20, 20, 30, 0.08);
-  --pop: rgba(255, 255, 255, 0.98);
+  --pop: #ffffff;
 }
 
 /* accents — muted, single-hue; chosen to sit under content, never be it */

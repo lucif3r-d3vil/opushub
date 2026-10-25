@@ -11,7 +11,7 @@ import { TopBar } from './components/shell/TopBar';
 import { BackgroundLayer } from './components/shell/BackgroundLayer';
 import { useLiveEvents } from './lib/sse';
 
-const Hub = lazy(() => import('./pages/Hub'));
+const Home = lazy(() => import('./pages/Home'));
 const Services = lazy(() => import('./pages/Services'));
 const ServiceDetail = lazy(() => import('./pages/ServiceDetail'));
 const Monitoring = lazy(() => import('./pages/Monitoring'));
@@ -112,7 +112,7 @@ function ShellWithRoutes() {
   return (
     <Routes>
       <Route element={<Shell />}>
-            <Route index element={<Hub />} />
+            <Route index element={<Home />} />
             <Route path="services" element={<Services />} />
             <Route path="services/:group/:name" element={<ServiceDetail />} />
             <Route path="monitoring" element={<Monitoring />} />

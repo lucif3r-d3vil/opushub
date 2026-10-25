@@ -23,6 +23,11 @@ import { GREETINGS, greetingFor } from '../../src/components/hub/HubHeader';
 import type { LayoutDoc, Monitor, UptimeWindow, WidgetInstance } from '../../src/lib/types';
 import type { HubData } from '../../src/lib/hubData';
 import App from '../../src/App';
+import {
+  buildAttention, buildStacks, buildUpdates, hostNow, stackHue, stateOf, updateFor, uptimeSummary,
+} from '../../src/lib/homeModel';
+import { resetSharedCache } from '../../src/lib/api';
+import { chartStats, downsample } from '../../src/components/home/HostChart';
 import { GroupNameField } from '../../src/components/GroupNameField';
 import { MenuButton } from '../../src/components/ui';
 import { AreaChart } from '../../src/components/Charts';
@@ -2328,6 +2333,171 @@ export async function runWebTests(): Promise<WebResult> {
     click(qa('button', seg).find((b) => text(b) === 'Critical')!);
     await h.waitFor(() => h.writes('PUT', '/api/notifications/policy').length >= 1, 'the policy write');
     expect((h.lastCall('PUT', '/api/notifications/policy')!.body as { telegram: { minSeverity: string } }).telegram.minSeverity === 'critical', 'the telegram floor did not commit');
+  });
+
+  /* ==================================================================
+     Home (rebuild slice 1): the page shows only what exists
+     ================================================================== */
+  const svcBase = servicesDoc.groups[0].services[0];
+  const mkSvc = (name: string, over: Record<string, unknown> = {}) => ({
+    ...svcBase, name, displayName: name[0].toUpperCase() + name.slice(1), id: `id-${name}`, order: null,
+    container: { ...svcBase.container, name, id: `cid-${name}` }, ...over,
+  }) as typeof svcBase;
+  const docOf = (groups: { name: string; services: (typeof svcBase)[] }[]) => ({ ...servicesDoc, groups, services: groups.flatMap((g) => g.services) });
+  const upd = (containerId: string, over: Record<string, unknown> = {}) => ({
+    containerId, serviceId: null, imageRef: 'ghcr.io/x/app:1.0', currentTag: '1.0', availableTag: '1.0', status: 'update_available',
+    updateAvailable: true, updateEligible: true, detectedAt: Date.now() - 3600_000, lastCheckedAt: Date.now() - 3600_000, ...over,
+  }) as never;
+
+  await test('home model: stack colour is stable, and unhealthy is amber, never red', async () => {
+    expect(stackHue('Media') === stackHue('Media') && stackHue('Media') !== stackHue('Downloads'), 'the hue is not a stable function of the name');
+    expect(stackHue('Anything') >= 0 && stackHue('Anything') < 360, 'the hue is out of range');
+    expect(stateOf({ status: 'unhealthy' }).state === 'warn' && stateOf({ status: 'restarting' }).state === 'warn', 'unhealthy or restarting is not amber');
+    expect(stateOf({ status: 'down' }).state === 'fail' && stateOf({ status: 'up' }).word === '', 'down is not red or up carries a word');
+    expect(stateOf({ status: 'unavailable' }).state === 'off', 'an unknown state is not drawn as neutral');
+  });
+
+  await test('home model: tiles group by Compose stack, hide infrastructure and hidden services, put Other last', async () => {
+    const doc = docOf([{ name: 'g', services: [
+      mkSvc('b-app', { stackDisplayName: 'Zeta', stack: 'zeta' }), mkSvc('a-app', { stackDisplayName: 'Alpha', stack: 'alpha' }),
+      mkSvc('loose', { stackDisplayName: null, stack: null }), mkSvc('db', { kind: 'infrastructure', stackDisplayName: 'Alpha' }),
+      mkSvc('secret', { hidden: true, stackDisplayName: 'Alpha' }), mkSvc('off', { showOnHub: false, stackDisplayName: 'Alpha' }),
+    ] }]);
+    const stacks = buildStacks(doc, []);
+    expect(stacks.map((x) => x.name).join(',') === 'Alpha,Zeta,Other', `stack order: ${stacks.map((x) => x.name).join(',')}`);
+    expect(stacks[0].tiles.map((t) => t.svc.name).join(',') === 'a-app', `Alpha holds ${stacks[0].tiles.map((t) => t.svc.name).join(',')}`);
+    expect(buildStacks(null, []).length === 0, 'no data should be no stacks');
+  });
+
+  await test('home model: update notices match containers by id, and "from → to" only appears when the tags differ', async () => {
+    const a = mkSvc('app');
+    expect(updateFor(a, [upd('cid-app')])?.to === null, 'equal tags were presented as a version change');
+    expect(updateFor(a, [upd('cid-app', { currentTag: '1.0', availableTag: '1.1' })])?.to === '1.1', 'a changed tag was not shown');
+    expect(updateFor(a, [upd('cid-app', { status: 'dismissed' })]) === null, 'a dismissed notice still counts');
+    expect(updateFor(a, [upd('someone-else')]) === null, 'a notice for another container matched');
+    const doc = docOf([{ name: 'g', services: [a] }]);
+    const u = buildUpdates([upd('cid-app'), upd('gone', { imageRef: 'x/y:2' })], doc);
+    expect(u.rows.length === 2 && u.rows.some((r) => r.name === 'App') && u.rows.some((r) => r.svc === null), 'rows were not built for matched and unmatched notices');
+    expect(u.checkedAt != null && buildUpdates([], doc).rows.length === 0 && buildUpdates([], doc).checkedAt === null, 'the check time is invented when there are no notices');
+  });
+
+  await test('home model: needs attention reads container health, auto-heal and monitors, and is empty when all is well', async () => {
+    const rel = () => 'just now';
+    const doc = docOf([{ name: 'g', services: [mkSvc('fine', { status: 'up' }), mkSvc('sick', { status: 'unhealthy', statusReason: null }), mkSvc('dead', { status: 'down', container: { ...svcBase.container, name: 'dead', id: 'cid-dead', status: 'Exited (137) 3 hours ago' } })] }]);
+    const heal = { available: true, running: true, monitoredCount: 1, optedInCount: 1, unhealthyCount: 0, monitoredContainers: [], unhealthyContainers: [], recentRecoveries: [{ id: 'r', t: 1, containerId: 'cid-sick', containerName: 'sick', service: 'sick', success: true, message: 'restarted' }] } as never;
+    const mon = { at: 1, counts: {}, engine: {}, monitors: [{ id: 'm1', name: 'Router', enabled: true, status: 'down', downSince: 1 }, { id: 'm2', name: 'Fine', enabled: true, status: 'up' }, { id: 'm3', name: 'Sick', enabled: true, status: 'down' }] } as never;
+    const items = buildAttention(doc, heal, mon, rel);
+    expect(items.map((i) => i.name).join(',') === 'Dead,Router,Sick', `attention order: ${items.map((i) => i.name).join(',')}`);
+    expect(items[0].state === 'fail' && items[0].reason.includes('Exited (137)'), `the stopped container reason is not Docker's own: ${items[0].reason}`);
+    expect(items[2].reason.includes('auto-heal restarted it'), `the auto-heal note is missing: ${items[2].reason}`);
+    expect(items.filter((i) => i.name === 'Sick').length === 1, 'a monitor for a container already listed was counted twice');
+    expect(buildAttention(docOf([{ name: 'g', services: [mkSvc('fine')] }]), null, null, rel).length === 0, 'something was reported when everything is up');
+    expect(uptimeSummary(null) === null && uptimeSummary({ monitors: [] } as never) === null, 'an uptime figure was invented without monitors');
+    const hn = hostNow(null);
+    expect(Object.values(hn).every((r) => r.value === null), 'the host strip shows numbers without a snapshot');
+  });
+
+  await test('home chart: statistics, and one-hour views are averaged down instead of drawn as noise', async () => {
+    expect(chartStats([]) === null, 'statistics of nothing');
+    const st = chartStats([{ t: 1, v: 10 }, { t: 2, v: 30 }, { t: 3, v: 20 }])!;
+    expect(st.now === 20 && st.avg === 20 && st.peak.v === 30 && st.peak.t === 2 && st.low.v === 10, `stats: ${JSON.stringify(st)}`);
+    const many = Array.from({ length: 720 }, (_, i) => ({ t: i, v: i % 2 ? 10 : 20 }));
+    const small = downsample(many);
+    expect(small.length <= 130 && small.length >= 100 && Math.abs(small[3].v - 15) < 2, `downsampled to ${small.length}`);
+    expect(downsample(many.slice(0, 50)).length === 50, 'a short series was resampled');
+  });
+
+  const homeRoutes = (extra: Record<string, unknown> = {}) => ({
+    ...stubRoutes(), ...AUTH_ROUTES,
+    '/api/container-updates': { updates: [], count: 0, availableCount: 0 },
+    '/api/autoheal/status': { available: false, running: false, monitoredCount: 0, optedInCount: 0, unhealthyCount: 0, monitoredContainers: [], unhealthyContainers: [], recentRecoveries: [] },
+    '/api/monitoring': { at: 1, counts: {}, engine: {}, monitors: [] },
+    '/api/system/history': { window: 3600000, stepMs: 5000, points: Array.from({ length: 30 }, (_, i) => ({ t: Date.now() - (30 - i) * 5000, cpu: 10 + i % 7, memUsedPct: 40, load: 1, rx: 1000 * i, tx: 1, temp: 40, procs: 100, diskUsedPct: 20 })) },
+    '/api/operations': { docker: { operations: false }, actions: [] },
+    ...extra,
+  });
+
+  await test('home: a greeting by account name, the host strip, tiles as links, and no empty bands', async (h) => {
+    h.setRoutes(homeRoutes());
+    await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('.hm-hero h1') && qa('.hm-tile').length > 0, 'the home page');
+    expect(text(q('.hm-hero h1')!).includes('admin'), `the greeting does not use the account name: ${text(q('.hm-hero h1')!)}`);
+    const cells = qa('.hm-host .hm-h').map((c) => text(c));
+    expect(cells.length === 6, `the host strip has ${cells.length} cells`);
+    expect(cells[0].includes('CPU') && cells[0].includes('12'), `CPU reading: ${cells[0]}`);
+    expect(cells[1].includes('40%') && cells[1].includes('4 GB'), `memory reading: ${cells[1]}`);
+    expect(cells[3].includes('19%'), `disk reading (4 of 21 GB): ${cells[3]}`);
+    expect(qa('.hm-hb').length === 5, 'five readings should be expandable');
+    // nothing is wrong and no update was received, so those bands are not drawn at all
+    expect(!q('.hm-attn'), 'an attention band is drawn although everything is up');
+    expect(!text().includes('Updates available'), 'an updates card is drawn with no notices');
+    expect(!text().includes('Uptime') || !q('.hm-rail')?.textContent?.includes('up now'), 'an uptime card is drawn with no monitors');
+    // a tile is one link that opens the service; one without a web address opens its details
+    const wave = qa('a.hm-tile').find((a) => text(a).includes('Wave'))!;
+    expect(wave.getAttribute('href') === 'http://fixture.local/wave' && wave.getAttribute('target') === '_blank' && /noopener/.test(wave.getAttribute('rel') || ''), 'the launch tile is not a safe new-tab link');
+    const photos = qa('a.hm-tile').find((a) => text(a).includes('Photos'))!;
+    expect(photos.getAttribute('href') === '/services/Media/photos' && text(photos).includes('No web address'), 'a tile without a URL invented one');
+    expect(qa('.hm-stack').length === 1 && text(q('.hm-stack')!).includes('Media'), 'tiles are not grouped by stack');
+    expect(!q('.hm-attn'), 'attention shows for healthy containers');
+  });
+
+  await test('home: attention, updates and uptime appear from real data, and the start or restart action is offered only when permitted', async (h) => {
+    const sick = mkSvc('sick', { status: 'unhealthy', stackDisplayName: 'Media', stack: 'media', group: 'Media' });
+    const dead = mkSvc('dead', { status: 'down', stackDisplayName: 'Media', stack: 'media', group: 'Media', container: { ...svcBase.container, name: 'dead', id: 'cid-dead', state: 'exited', status: 'Exited (1) 2 minutes ago' } });
+    h.setRoutes(homeRoutes({
+      '/api/services': docOf([{ name: 'Media', services: [sick, dead, mkSvc('ok1', { stackDisplayName: 'Media', stack: 'media', group: 'Media' })] }]),
+      '/api/container-updates': { updates: [upd('cid-ok1', { currentTag: '1.0', availableTag: '1.1' })], count: 1, availableCount: 1 },
+      '/api/monitoring': { at: 1, counts: {}, engine: {}, monitors: [{ id: 'm1', name: 'Router', enabled: true, status: 'down', downSince: Date.now() - 600_000, uptime: { ok: 90, judged: 100 } }, { id: 'm2', name: 'NAS', enabled: true, status: 'up', uptime: { ok: 100, judged: 100 } }] },
+      '/api/operations': { docker: { operations: true }, actions: [{ id: 'container.restart', permitted: true }, { id: 'container.start', permitted: true }] },
+    }));
+    await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('.hm-attn') && !!q('.hm-rail'), 'the attention band');
+    const band = text(q('.hm-attn')!);
+    expect(band.includes('3') && band.includes('Dead') && band.includes('Exited (1) 2 minutes ago') && band.includes('Sick') && band.includes('Router'), `attention band: ${band}`);
+    await h.waitFor(() => qa('button.hm-go').length > 0, 'the one-click actions');
+    const acts = qa('button.hm-go').map((b) => text(b));
+    expect(acts.sort().join(',') === 'Restart →,Start →', `actions: ${acts.join(',')} (a stopped container is started, an unhealthy one restarted, a monitor has none)`);
+    const rail = text(q('.hm-rail')!);
+    expect(rail.includes('Updates available') && rail.includes('1.0 → 1.1') && rail.includes('nothing is applied automatically'), `updates card: ${rail}`);
+    expect(rail.includes('95') && rail.includes('1 of 2 up now'), `uptime card: ${rail}`);
+    expect(text(q('.hm-hero')!).includes('1 update available') && text(q('.hm-hero')!).includes('3 need attention'), 'the greeting counts are not the same as the bands');
+    expect(qa('.hm-upd').length === 1 && text(qa('.hm-upd')[0]).includes('1.1'), 'the update chip is missing from the tile');
+  });
+
+  await test('home: a host reading opens a chart with 1h / 24h / 7d, Escape closes it, and the history is only fetched while open', async (h) => {
+    h.setRoutes(homeRoutes());
+    await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    await h.waitFor(() => qa('.hm-hb').length === 5, 'the host strip');
+    expect(!h.calls.some((c) => c.path.includes('window=86400000') || c.path.includes('window=604800000')), 'long history was fetched before anyone asked');
+    click(qa('.hm-hb')[0]);
+    await h.waitFor(() => !!q('.hm-hx') && !!q('.hm-chart'), 'the expanded chart');
+    expect(qa('.hm-hb')[0].getAttribute('aria-expanded') === 'true', 'the strip does not show which reading is open');
+    expect(text(q('.hm-hx')!).includes('CPU'), 'the chart does not name its reading');
+    const seg = qa('.hm-hx .seg-sm button').map((b) => text(b));
+    expect(seg.join(',') === '1 hour,24 hours,7 days', `ranges: ${seg.join(',')}`);
+    expect(text(q('.hm-stats')!).includes('latest') && text(q('.hm-stats')!).includes('peak') && text(q('.hm-stats')!).includes('lowest'), 'the figures under the chart are incomplete');
+    click(qa('.hm-hx .seg-sm button')[2]);
+    await h.waitFor(() => h.calls.some((c) => c.path.includes('window=604800000')), 'the 7-day request');
+    key(document.body, 'Escape');
+    await h.waitFor(() => !q('.hm-hx'), 'the chart to close');
+    expect(qa('.hm-hb')[0].getAttribute('aria-expanded') === 'false', 'the strip still shows the reading open');
+  });
+
+  await test('home: Docker being unreachable is said plainly, with a way forward', async (h) => {
+    h.setRoutes(homeRoutes({ '/api/services': { ...servicesDoc, groups: [], services: [], live: false, statusReason: 'Docker is not reachable.' } }));
+    await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('.hm-empty'), 'the Docker message');
+    expect(text(q('.hm-empty')!).includes('Configure Docker'), 'no way forward is offered');
+    expect(qa('.hm-tile').length === 0, 'tiles were drawn without Docker');
+  });
+
+  await test('home: a history too short to draw says so instead of drawing a line', async (h) => {
+    h.setRoutes(homeRoutes({ '/api/system/history': { window: 3600000, stepMs: 5000, points: [] } }));
+    await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    await h.waitFor(() => qa('.hm-hb').length === 5, 'the host strip');
+    click(qa('.hm-hb')[3]);
+    await h.waitFor(() => text(q('.hm-hx') || document.body).includes('Not enough'), 'the short-history message');
+    expect(!q('.hm-chart'), 'a chart was drawn from no data');
   });
 
   for (const r of results) {
