@@ -478,18 +478,6 @@ export async function systemDf() {
   catch { return null; }
 }
 
-export function netAvailable() {
-  // TCP probe variant support (DOCKER_HOST tcp://)
-  const ep = resolveEndpoint();
-  return !!(ep.host) ? new Promise((res) => {
-    const s = net.connect(ep.port, ep.host);
-    s.setTimeout(1500);
-    s.on('connect', () => { s.destroy(); res(true); });
-    s.on('error', () => res(false));
-    s.on('timeout', () => { s.destroy(); res(false); });
-  }) : Promise.resolve(true);
-}
-
 /** Test helper — the negotiated version is process-global state. */
 export const _internals = {
   get apiVersion() { return apiVersion; },

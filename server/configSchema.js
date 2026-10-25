@@ -177,26 +177,6 @@ export function safeIcon(value, { label = 'icon' } = {}) {
   throw configError(`${label} is not a recognised icon reference: ${s.slice(0, 40)}`, { code: 'unsafe_icon' });
 }
 
-/** Path-traversal and absolute-path refusal, for anything claiming to be a user content file. */
-export function safeUserAssetPath(value, { dir = 'icons' } = {}) {
-  const s = boundedString(value, 200);
-  if (!s) return null;
-  if (s.includes('\0')) throw configError('path contains a null byte', { code: 'unsafe_path' });
-  if (s.startsWith('/') || /^[a-z]:/i.test(s) || s.startsWith('\\\\')) {
-    throw configError('absolute paths are not accepted', { code: 'unsafe_path' });
-  }
-  if (s.split(/[/\\]/).includes('..')) {
-    throw configError('path traversal is not accepted', { code: 'unsafe_path' });
-  }
-  if (s.includes('/') || s.includes('\\')) {
-    throw configError('nested paths are not accepted — only a bare filename', { code: 'unsafe_path' });
-  }
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/.test(s)) {
-    throw configError(`not a valid ${dir} filename`, { code: 'unsafe_path' });
-  }
-  return s;
-}
-
 // ---------------------------------------------------------------------------
 // Structural limits — measured on the *parsed* value, not the text
 // ---------------------------------------------------------------------------

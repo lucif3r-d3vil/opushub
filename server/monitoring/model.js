@@ -49,9 +49,6 @@ export const PROVENANCE = Object.freeze(['discovered', 'configured', 'imported']
  */
 export const TARGET_SCOPES = Object.freeze(['public', 'internal', 'mixed']);
 
-/** Result kinds a check may return. `unknown` is "no verdict", never a silent failure. */
-export const RESULT_KINDS = Object.freeze(['ok', 'degraded', 'fail', 'unknown']);
-
 /**
  * Server-side bounds. These are *not* defaults the client may exceed: every value that arrives
  * from a request is clamped into the range below, and the effective settings document says so.

@@ -52,9 +52,6 @@ const PRESENTATION_NAMES = new Set(PRESENTATION_FILES.map((f) => f.name));
 /** True for the seven files Phase 6 is allowed to read and write in bulk. */
 export const isPresentationFile = (name) => PRESENTATION_NAMES.has(String(name ?? ''));
 
-/** Metadata for one presentation file, or null. */
-export const presentationFile = (name) => PRESENTATION_FILES.find((f) => f.name === name) || null;
-
 /** The seven names, in a stable order (settings first: it is the one a human looks for). */
 export const presentationFileNames = () => PRESENTATION_FILES.map((f) => f.name);
 

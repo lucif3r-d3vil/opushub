@@ -150,9 +150,4 @@ export function classifySpec(spec, { current = null } = {}) {
   return { level, findings, blocked: level === 'BLOCKED', dangerous: RANK[level] >= RANK.DANGEROUS };
 }
 
-/** The higher of two levels. */
-export function maxLevel(a, b) {
-  return RANK[a] >= RANK[b] ? a : b;
-}
-
 export const _internals = Object.freeze({ RANK, SUPPORTED_SECURITY_OPT });

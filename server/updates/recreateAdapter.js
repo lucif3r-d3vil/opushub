@@ -153,11 +153,6 @@ export function isValidImageRef(ref) {
   return typeof ref === 'string' && ref.length <= 300 && IMAGE_REF_RE.test(ref.trim());
 }
 
-/** Whether a string is a container name this adapter will pass to the daemon. */
-export function isSafeName(name) {
-  return typeof name === 'string' && SAFE_NAME_RE.test(String(name).replace(/^\//, ''));
-}
-
 /**
  * Pull an image. `registryAuth` is an optional base64url-encoded X-Registry-Auth document minted
  * server-side by the registries module — it is a header, never logged, never returned.

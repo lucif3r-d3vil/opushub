@@ -216,11 +216,3 @@ export function closeAllSSE() {
   globalConnections = 0;
   perSession.clear();
 }
-
-export function sseStats() {
-  return {
-    global: globalConnections,
-    perSession: Object.fromEntries(perSession.entries()),
-    active: activeClients.size,
-  };
-}

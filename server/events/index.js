@@ -68,9 +68,4 @@ export function getEventById(id) {
   return store.getEventById(id);
 }
 
-export function getPublicRecentEvents(opts) {
-  const items = getRecentEvents(opts);
-  return items.map(toPublicEvent).filter(Boolean);
-}
-
 export { bus, store, toPublicEvent };

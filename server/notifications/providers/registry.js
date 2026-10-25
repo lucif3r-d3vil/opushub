@@ -23,10 +23,4 @@ export function listProviders() {
   }));
 }
 
-export function getProviderStatus(id) {
-  const p = providers.get(id);
-  if (!p) return null;
-  return typeof p.getStatus === 'function' ? p.getStatus() : { state: 'unknown' };
-}
-
 // Future providers can register themselves via this registry without changing core.

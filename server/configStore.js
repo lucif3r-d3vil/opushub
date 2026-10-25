@@ -106,18 +106,6 @@ export function writeYaml(name, value, { header = null } = {}) {
   return { file };
 }
 
-/** Edit YAML while preserving comments: mutate a live Document, then serialize. */
-export function editYaml(name, mutate, fallbackValue = {}) {
-  const file = assertName(name);
-  let doc;
-  const text = readConfigText(name);
-  doc = YAML.parseDocument(text ?? '', { keepSourceTokens: true });
-  if (doc.isEmpty && fallbackValue != null) doc.setSchemaProps?.(null);
-  mutate(doc, fallbackValue);
-  atomicWrite(file, String(doc), name);
-  return doc.toJS();
-}
-
 export function writeJson(name, value) {
   const file = assertName(name);
   if (!JSON_FILES.has(name)) throw Object.assign(new Error(`not a json file: ${name}`), { status: 400 });

@@ -78,8 +78,6 @@ export const ROLES = Object.freeze({
   }),
 });
 
-export const ROLE_IDS = Object.freeze(Object.keys(ROLES));
-
 /**
  * Resolve the role of an authenticated username.
  *

@@ -2,8 +2,6 @@
 
 import { randomUUID } from 'node:crypto';
 
-export const NOTIF_SEVERITIES = ['info', 'notice', 'warning', 'critical'];
-
 function sanitizeString(s, max = 300) {
   if (s == null) return '';
   let str = String(s);

@@ -55,11 +55,6 @@ export function saveTransaction(tx) {
   writeAllTx(all);
 }
 
-export function getTransaction(id) {
-  const all = readAllTx();
-  return all[id] || null;
-}
-
 export function getIncompleteTransactions() {
   const all = readAllTx();
   const incomplete = [];
@@ -70,14 +65,6 @@ export function getIncompleteTransactions() {
     }
   }
   return incomplete;
-}
-
-export function clearTransaction(id) {
-  const all = readAllTx();
-  if (all[id]) {
-    delete all[id];
-    writeAllTx(all);
-  }
 }
 
 // In-memory set of actively updating container IDs (narrowly scoped Autoheal suppression window)

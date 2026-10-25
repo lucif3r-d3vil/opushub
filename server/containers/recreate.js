@@ -137,8 +137,3 @@ async function rollbackNew(ops, tx, oldId, newId, originalName, wasRunning, step
   step('rolled_back');
   return fail(code, reason, true);
 }
-
-/** Boot recovery: incomplete transactions, so the UI can say "recovery required" honestly. */
-export function incompleteTransactions() {
-  return txStore.getIncompleteTransactions();
-}

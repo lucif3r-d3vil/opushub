@@ -1,7 +1,4 @@
-// Server-side cache with a disk snapshot so provider data survives restarts.
-import fs from 'node:fs';
-import path from 'node:path';
-import { writeFileAtomic } from './atomicFile.js';
+// Server-side in-memory cache with per-entry TTL and a bounded size.
 
 export class TimedCache {
   constructor({ max = 128 } = {}) {
@@ -21,12 +18,4 @@ export class TimedCache {
     }
     this.map.set(key, { value, expires: ttlMs > 0 ? Date.now() + ttlMs : 0 });
   }
-}
-
-export function persistSnapshot(file, obj) {
-  try { writeFileAtomic(file, JSON.stringify(obj)); } catch { /* best-effort */ }
-}
-
-export function readSnapshot(dir, name) {
-  try { return JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')); } catch { return null; }
 }

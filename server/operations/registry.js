@@ -29,12 +29,6 @@ function envMs(name, fallback) {
   return Number.isFinite(v) && v > 0 ? Math.max(500, Math.min(120_000, v)) : fallback;
 }
 
-/** Risk levels, used only for confirmation strength and UI emphasis — never for authorization. */
-export const RISKS = ['low', 'medium', 'high'];
-
-/** Confirmation strength. `none` is not used by any shipped action. */
-export const CONFIRMATIONS = ['none', 'normal', 'strong'];
-
 /**
  * The registry. Frozen: no runtime mutation, and no way to reach a Docker operation that is
  * not one of these three ids.
@@ -314,9 +308,6 @@ export const ACTION_IDS = Object.freeze([
   'stack.deploy', 'stack.start', 'stack.stop', 'stack.remove',
   'image.pull', 'service.install',
 ]);
-
-/** The action ids that target an existing container (the ones a service page may offer). */
-export const CONTAINER_ACTION_IDS = Object.freeze(ACTION_IDS.filter((id) => ACTIONS[id].targetType === 'container'));
 
 /** Every permission the operations engine knows about (deduplicated, in registry order). */
 export const OPERATION_PERMISSIONS = Object.freeze([...new Set(Object.values(ACTIONS).map((a) => a.permission))]);

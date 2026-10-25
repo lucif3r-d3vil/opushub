@@ -99,9 +99,6 @@ export function normalizeLayout(raw) {
   };
 }
 
-/** Widget instances in render order for one zone. */
-export const widgetsInZone = (layout, zone) => (layout?.hub?.widgets || []).filter((w) => w.zone === zone);
-
 /** The settings-facing summary used by the layout change event. */
 export function describeLayoutPatch(patch) {
   const what = [];

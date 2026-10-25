@@ -74,8 +74,3 @@ export function providerHealthDoc(now = Date.now()) {
     }),
   };
 }
-
-/** Test helper — reset between runs. */
-export function resetProviderHealth() {
-  registry.clear();
-}

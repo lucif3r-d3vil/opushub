@@ -187,4 +187,3 @@ export function shouldSendBrowser(event) {
 }
 
 export const POLICY_FILE = FILE;
-export const POLICY_CHANNELS = CHANNELS;

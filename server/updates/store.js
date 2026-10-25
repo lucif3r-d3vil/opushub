@@ -84,23 +84,6 @@ export function putUpdate(record) {
   return clean;
 }
 
-export function removeUpdate(containerOrServiceId) {
-  if (!containerOrServiceId) return false;
-  ensureDir();
-  const raw = readRaw();
-  const id = String(containerOrServiceId).toLowerCase();
-  const prevLen = raw.updates.length;
-  raw.updates = raw.updates.filter((item) =>
-    item.containerId?.toLowerCase() !== id &&
-    (!item.serviceId || item.serviceId.toLowerCase() !== id)
-  );
-  if (raw.updates.length !== prevLen) {
-    atomicWrite(raw);
-    return true;
-  }
-  return false;
-}
-
 export function clearUpdates() {
   ensureDir();
   atomicWrite({ updates: [] });

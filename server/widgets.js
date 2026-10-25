@@ -10,7 +10,6 @@
 // shows is always discovered at runtime (see docs/04-discovery.md).
 
 export const WIDGET_ZONES = ['main', 'rail'];
-export const WIDGET_SIZES = ['sm', 'md', 'lg'];
 export const HUB_SPACING = ['cozy', 'comfortable', 'airy'];
 
 /**

@@ -25,7 +25,6 @@ export const PROBE_TIMEOUT_MS = 5000;
 export const PROBE_MAX_REDIRECTS = 3;
 export const PROBE_MAX_BYTES = 64 * 1024;
 export const PROBE_CACHE_MS = 60_000;
-export const PROBE_MIN_INTERVAL_MS = 30_000;
 const MAX_CONCURRENT = 4;
 
 const TRUSTED_SOURCES = new Set(['traefik', 'published-port', 'manual']);

@@ -19,8 +19,6 @@
 // §21 of the brief and the alert integration in engine.js.
 import crypto from 'node:crypto';
 
-export const INCIDENT_STATUSES = Object.freeze(['open', 'recovering', 'resolved']);
-
 /** How many resolved incidents are kept. Open incidents are never dropped. */
 export const MAX_INCIDENTS = 2000;
 

@@ -276,7 +276,3 @@ export function deserializeEvent(line) {
     return null;
   }
 }
-
-export function isPublicType(type) {
-  return PUBLIC_EVENT_TYPES.has(type);
-}

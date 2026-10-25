@@ -45,10 +45,6 @@ export function checkWebhookRateLimit(clientIp, now = Date.now()) {
   return { ok: true };
 }
 
-export function resetWebhookRateLimits() {
-  ipHits.clear();
-}
-
 /**
  * Resolve configured webhook secret.
  * Priority:

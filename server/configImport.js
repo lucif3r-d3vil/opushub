@@ -345,25 +345,3 @@ export function commitPlan({ plan, read, write, snapshot = null, actor = null, r
   return { written, restored: [], changed: true, version: after?.id || null, targets: targets.map((t) => t.name) };
 }
 
-/**
- * The draft → validate → preview → save pipeline the editors share.
- *
- * `validate` is a plain function per editor that throws a ConfigError with a legible message. The
- * point of routing every editor through one function is the guarantee in the second sentence: a
- * failed validation returns the error and changes nothing, so a user's draft survives a rejection
- * and the active configuration is never left half-written.
- */
-export function validateDraft({ area, draft, validate }) {
-  try {
-    const value = validate(draft);
-    return { ok: true, value, problems: [] };
-  } catch (err) {
-    return {
-      ok: false,
-      area,
-      problems: [err.message],
-      code: err.code || 'invalid_config',
-    };
-  }
-}
-

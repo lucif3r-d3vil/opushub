@@ -396,10 +396,5 @@ export function putWebhookConfig({ url, secret, enabled, allowInternal, allowIns
   return getWebhookConfig();
 }
 
-export function testWebhookConfig() {
-  // returns config without secret, for UI
-  return getWebhookConfig();
-}
-
 export const WEBHOOK_FILE = FILE;
 export const WEBHOOK_DIR = DIR;

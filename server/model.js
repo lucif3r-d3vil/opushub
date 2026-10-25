@@ -11,7 +11,7 @@ import { statsWithHistory } from './statsHistory.js';
 import { discover } from './discovery.js';
 import { suggestRef, existsLocal } from './providers/icons.js';
 import { hostAddress } from './lib/hostAddress.js';
-import { defaultLayout, normalizeLayout, describeLayoutPatch } from './layout.js';
+import { normalizeLayout, describeLayoutPatch } from './layout.js';
 import { applyTemplate, hasTemplate, templateList } from './templates.js';
 import { WIDGET_CATEGORIES, WIDGET_TYPES, widgetCatalogue } from './widgets.js';
 import { validateSymbol as validateMarketSymbol } from './providers/market.js';
@@ -47,8 +47,6 @@ export const DEFAULT_SETTINGS = {
   },
   advanced: { customCss: false, customJs: false },
 };
-
-export const DEFAULT_LAYOUT = defaultLayout();
 
 const str = (v, max = 240) => (typeof v === 'string' ? v.trim().slice(0, max) : null);
 const clampInt = (v, lo, hi, dflt) => {
@@ -1074,18 +1072,6 @@ export function _resetLastKnown() {
   infraCache = { at: 0, value: null };
 }
 
-export function serviceStatus(service, containers) {
-  // Kept for the (rare) direct-mapping call sites and tests: a container is required — no
-  // container means "not installed here", never "unmanaged but present".
-  if (!containers) return { state: 'unavailable', reason: containers === null ? 'Docker not connected' : null };
-  const c = containers.find((x) => (service?.container && (x.name === service.container || x.id === service.container || x.id.startsWith(service.container))))
-    || containers.find((x) => x.name === service?.name || x.name.toLowerCase() === String(service?.name || '').toLowerCase())
-    || containers.find((x) => x.labels?.service?.toLowerCase() === String(service?.name || '').toLowerCase());
-  if (!c) return { state: 'absent', reason: 'no such container on this engine' };
-  const state = c.state === 'running' ? (c.health === 'unhealthy' ? 'unhealthy' : 'up') : c.state === 'exited' ? 'down' : c.state;
-  return { state, container: c };
-}
-
 /** Resolve a service by whatever the URL bar carries: container name, id, or display name.
  * Case-insensitive, group ignored when it doesn't match (old bookmarks keep working). */
 export function findService(inv, group, name) {
@@ -1116,9 +1102,6 @@ export async function getServicesView() {
     stats: inv.stats,
   };
 }
-
-/** @deprecated use getServicesView — kept so older call sites/tests keep resolving. */
-export const getServicesWithStatus = getServicesView;
 
 /** Stacks: compose projects (Docker's answer) enriched by stacks.yaml (our answer). */
 export async function getStacksDoc() {

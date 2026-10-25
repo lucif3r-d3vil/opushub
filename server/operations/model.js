@@ -6,26 +6,9 @@
 // and there is no path where an operation can happen without a record of it.
 import crypto from 'node:crypto';
 
-/** Every status an operation can hold. Terminal statuses never move again. */
-export const STATUSES = Object.freeze([
-  'pending',                 // created, not yet evaluated
-  'awaiting_confirmation',   // authorized and valid, waiting for a server-bound confirmation
-  'authorized',              // approved to run (recorded between confirmation and execution)
-  'running',                 // the Docker call is in flight
-  'succeeded',               // executed and the resulting state was verified
-  'failed',                  // executed (or attempted) and did not reach the expected state
-  'rejected',                // refused before execution — policy, permission, target, or limits
-  'cancelled',               // the user dismissed the confirmation
-  'timed_out',               // bounded time elapsed; the state was re-read and reported honestly
-]);
-
 export const TERMINAL = Object.freeze(new Set(['succeeded', 'failed', 'rejected', 'cancelled', 'timed_out']));
 
-/** Statuses in which an operation is still doing something (used for locks and the UI). */
-export const IN_FLIGHT = Object.freeze(new Set(['pending', 'authorized', 'running']));
-
 export const isTerminal = (status) => TERMINAL.has(status);
-export const isInFlight = (status) => IN_FLIGHT.has(status);
 
 // Operation ids are shown to the operator ("Operation #op-…") and used in URLs, so they must be
 // unique, unguessable enough not to be a lookup oracle, and free of anything that looks like a
