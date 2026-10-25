@@ -71,7 +71,7 @@
   /* translucent tiles and bars over the built-in backgrounds (DESIGN.md §2, §4) */
   --tile: rgba(19, 21, 25, 0.60);
   --tile-hover: rgba(26, 29, 35, 0.74);
-  --bar: rgba(12, 13, 16, 0.84);
+  --bar: rgba(12, 13, 16, 0.93);
   --blur: 16px;
   --r-xl: 18px;
   --shadow-tile: 0 18px 40px -22px rgba(0, 0, 0, 0.85), 0 1px 0 rgba(255, 255, 255, 0.04) inset;

@@ -1,6 +1,7 @@
 # OpusHub UI overhaul: design direction
 
-Status: **proposal for review.** Nothing in `src/` has changed. This extends
+Status: **slice 1 is built** (shell and Home, branch `rebuild/1-shell-home`; see "Slice 1" below). The
+other pages are still the old ones, running inside the new shell. This extends
 [`../03-design-system.md`](../03-design-system.md) and says where it proposes to overrule it, and why.
 
 Two static mockups illustrate it. Open them straight from disk, no build step:
@@ -22,6 +23,37 @@ The background picker now lives in the account menu (avatar, top right) and in S
 Mockup limits, so nothing surprises you: the two "photos" are generated stand-ins (SVG ridges and CSS
 bokeh); links go nowhere; the Containers page is not drawn; fonts load from `node_modules` if the repo is
 installed and fall back to the system stack otherwise.
+
+## Slice 1: what was built, and where it differs from the mockup
+
+Built: the top bar, account menu (theme, background, accent, Settings, Sign out), design tokens, four
+gradient backgrounds, Home (greeting, host strip with 1 h / 24 h / 7 d charts, needs attention, tiles by
+stack, rail), the host sampler's `diskUsedPct` and its 5-minute and hourly tiers, and
+`scripts/contrast.mjs` (part of `npm run check`).
+
+Differences, all because the page may only show data that exists:
+
+- **Backgrounds:** graphite, dusk, forest and ember (gradients), plus `photo`, which is
+  `config/background.jpg` and is offered only when that file exists (at most 6 MB, served read-only at
+  `/api/appearance/background`). Ridge and City are not built; there are no bundled photos yet.
+- **Needs attention** reads container health, Docker's own status text, auto-heal recoveries the
+  observer saw, and monitors that are down. A stopped container offers **Start**, a running one that is
+  unhealthy offers **Restart**, both only when the session may run them. Auto-heal is named only when it
+  acted. The band is not drawn when empty.
+- **Updates available** lists the notices already received (Diun). Diun reports the tag it watched, so
+  "from → to" is shown only when the two tags differ; otherwise the row shows the image and says a newer
+  image exists. The card is not drawn when there are none.
+- **Uptime** shows today's figure across enabled monitors (the engine's current day window, not 7 days)
+  and lists any that are not up. The mini ribbons wait for the Uptime page rebuild. Not drawn with no monitors.
+- **Host strip:** a reading the host does not report says "Not reported". Sparklines redraw when new
+  samples arrive; they do not tick on a timer. Memory, disk and temperature come from the host, so in a
+  container they describe what the container can see.
+- **Photo backgrounds** are checked against the worst possible image (pure white), which is why the photo
+  scrim is .50 to .62 and tiles are .78 opaque. `--ink-3` was lightened to `#949ba3` (it was 3.7:1 on tiles).
+- The tile menu has Details, Open in new tab, Review update, Start/Restart and Copy address. Logs wait for
+  the Containers page. Start and Restart still use the existing confirmation dialog; dropping it for those two
+  (a round 2 decision) lands with the Containers slice, which owns that flow.
+- Stacks, System and Activity are listed in the account menu as "until rebuilt" so nothing becomes unreachable.
 
 ## 1. Direction
 

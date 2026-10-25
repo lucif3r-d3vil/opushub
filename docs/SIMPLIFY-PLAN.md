@@ -99,6 +99,8 @@ All safe to remove, with the dependencies that have to be handled in the same co
 
 **Status (branch `streamline/simplify-2`):** commits 6 to 9 are done (net about 9,900 lines removed). Commit 6 did not add the host sampler's `diskUsedPct` field; that goes into the Home build (decision 9, and the round 2 decision in `docs/design/DESIGN.md`).
 
+**Rebuild slice 1 (shell and Home) is built** on branch `rebuild/1-shell-home`: the Home page replaces the Hub page, the top bar replaces the rail, and the host sampler has `diskUsedPct`. The widget composition, templates and the Setup template step (commit 12's removal half) are still in place: Settings still previews them.
+
 **Deferred to the rebuild** (they depend on the new bell, Containers page and Settings, so they are built there instead of removed first):
 - Commits 10 and 11: the bell panel (recent activity, alert ack) and removal of the Activity page.
 - Commit 14: the Settings trim to five sections.
