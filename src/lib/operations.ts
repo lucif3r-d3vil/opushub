@@ -18,10 +18,10 @@ export type OperationAction =
   | 'container.update' | 'container.recreate' | 'container.edit' | 'container.change_image'
   | 'container.duplicate' | 'container.create' | 'container.remove'
   | 'stack.deploy' | 'stack.start' | 'stack.stop' | 'stack.remove'
-  | 'image.pull' | 'service.install';
+  | 'image.pull';
 
 export interface OperationTargetRef {
-  type: 'service' | 'container' | 'stack' | 'image' | 'new' | 'catalog';
+  type: 'service' | 'container' | 'stack' | 'image' | 'new';
   id?: string;
   group?: string;
   name?: string;
@@ -222,7 +222,6 @@ export const ACTION_WORDS: Record<string, { verb: string; progressive: string; p
   'stack.stop': { verb: 'stop', progressive: 'Stopping', past: 'stopped', imperative: 'Stop' },
   'stack.remove': { verb: 'remove', progressive: 'Removing', past: 'removed', imperative: 'Remove' },
   'image.pull': { verb: 'pull', progressive: 'Pulling', past: 'pulled', imperative: 'Pull' },
-  'service.install': { verb: 'install', progressive: 'Installing', past: 'installed', imperative: 'Install' },
 };
 
 export const wordsFor = (action: string) =>

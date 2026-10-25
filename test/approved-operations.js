@@ -5,7 +5,7 @@
 // line here is the reviewed act of adding a capability; nothing not listed here can execute.
 //
 // Phase 8 shipped the first three container actions. Phase 10D (the Docker control plane) added
-// the rest of the controlled container lifecycle, stacks, image pulls and catalog installs.
+// the rest of the controlled container lifecycle, stacks, and image pulls.
 // Still deliberately absent: exec, attach, prune, commit, copy, arbitrary compose commands, shell.
 
 /** The frozen action set. Adding to it is a reviewed change to this file. */
@@ -16,7 +16,7 @@ export const APPROVED_ACTIONS = Object.freeze([
   'container.update', 'container.recreate', 'container.edit', 'container.change_image',
   'container.duplicate', 'container.create', 'container.remove',
   'stack.deploy', 'stack.start', 'stack.stop', 'stack.remove',
-  'image.pull', 'service.install',
+  'image.pull',
 ]);
 export const APPROVED_PERMISSIONS = Object.freeze([
   'operations.container.start', 'operations.container.restart', 'operations.container.stop',

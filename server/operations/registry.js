@@ -9,13 +9,13 @@
 // Adding an action is therefore a five-part, reviewable change:
 //   1. an entry here (metadata + risk + confirmation + timeouts + parameter kind)
 //   2. an explicit adapter method (providers/dockerOperations.js or updates/recreateAdapter.js)
-//      or a transactional runner (containers/runners.js, stacks/deployer.js, catalog/installer.js)
+//      or a transactional runner (containers/runners.js, stacks/deployer.js)
 //   3. a case in the engine's static dispatch switch
 //   4. a parameter schema in operations/params.js when the action takes input
 //   5. tests — including the mechanical proof that the action and endpoint sets are unchanged
 //
 // Phase 8 shipped three lifecycle actions. Phase 10D (a Docker control plane) adds the rest of
-// the controlled container lifecycle, stack deployment and catalog installation. What is still
+// the controlled container lifecycle, and stack deployment. What is still
 // deliberately NOT here: exec, attach, logs-follow as a mutation, image/volume/network removal
 // outside a stack's own resources, prune, commit, copy, arbitrary compose commands, arbitrary
 // shell. See docs/archive/16-phase-10d.md.
@@ -276,7 +276,7 @@ export const ACTIONS = Object.freeze({
     summary: 'Tear a stack down. Volumes are kept.', params: 'none', executor: 'transaction',
   }),
 
-  /* ---------------- Phase 10D-D: images & catalog ---------------- */
+  /* ---------------- Phase 10D-D: images ---------------- */
 
   'image.pull': Object.freeze({
     id: 'image.pull', targetType: 'image', permission: 'operations.image.pull',
@@ -286,15 +286,6 @@ export const ACTIONS = Object.freeze({
     timeoutMs: envMs('OPUSHUB_OP_PULL_TIMEOUT_MS', 300_000), verifyMs: envMs('OPUSHUB_OP_VERIFY_MS', 5_000),
     expect: 'image', auditCategory: 'docker', adapter: 'image_pull', offerWhen: Object.freeze([]),
     summary: 'Pull an image from a registry.', params: 'pull', executor: 'control',
-  }),
-  'service.install': Object.freeze({
-    id: 'service.install', targetType: 'catalog', permission: 'operations.container.create',
-    confirmation: 'strong', risk: 'high',
-    verb: 'install', progressive: 'Installing', past: 'installed', imperative: 'Install',
-    consequence: 'The image is pulled, volumes and networks are created as needed, the container is created and started, and it is registered with monitoring (and Autoheal/updates when the manifest asks for it).',
-    timeoutMs: envMs('OPUSHUB_OP_TX_TIMEOUT_MS', 300_000), verifyMs: envMs('OPUSHUB_OP_VERIFY_MS', 30_000),
-    expect: 'created', auditCategory: 'service', adapter: 'install', offerWhen: Object.freeze([]),
-    summary: 'Install a service from the catalog.', params: 'install', executor: 'transaction',
   }),
 });
 
@@ -306,7 +297,7 @@ export const ACTION_IDS = Object.freeze([
   'container.update', 'container.recreate', 'container.edit', 'container.change_image',
   'container.duplicate', 'container.create', 'container.remove',
   'stack.deploy', 'stack.start', 'stack.stop', 'stack.remove',
-  'image.pull', 'service.install',
+  'image.pull',
 ]);
 
 /** Every permission the operations engine knows about (deduplicated, in registry order). */
@@ -334,7 +325,7 @@ export function registrySummary() {
     const a = ACTIONS[id];
     return {
       id: a.id,
-      label: a.targetType === 'container' ? `${a.imperative} container` : a.targetType === 'stack' ? `${a.imperative} stack` : a.targetType === 'image' ? `${a.imperative} image` : a.targetType === 'catalog' ? `${a.imperative} service` : `${a.imperative} container`,
+      label: a.targetType === 'container' ? `${a.imperative} container` : a.targetType === 'stack' ? `${a.imperative} stack` : a.targetType === 'image' ? `${a.imperative} image` : `${a.imperative} container`,
       targetType: a.targetType,
       params: a.params,
       executor: a.executor,

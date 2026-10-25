@@ -33,7 +33,6 @@ import { engineReason, evaluate, publicPlan } from './policy.js';
 import { confirmationKey } from './params.js';
 import * as runners from '../containers/runners.js';
 import * as stackRunners from '../stacks/runners.js';
-import * as catalogRunners from '../catalog/runners.js';
 import { eventSummary } from '../containers/diff.js';
 import { operationTrail as readTrail } from './audit.js';
 import { createOperation, publicOperation, operationError, isWellFormedOperationId } from './model.js';
@@ -396,7 +395,6 @@ function dispatchControlled(action, ctx) {
     case 'stack_start': return stackRunners.start({ ...ctx, action });
     case 'stack_stop': return stackRunners.stop({ ...ctx, action });
     case 'stack_remove': return stackRunners.remove({ ...ctx, action });
-    case 'install': return catalogRunners.install({ ...ctx, action });
     default: return Promise.resolve({ ok: false, code: 'unknown_action', reason: 'No runner for that action.' });
   }
 }
@@ -442,7 +440,6 @@ function eventSubject(target, op) {
   if (!target) return { kind: 'service', id: op.id, label: op.action, href: '/services' };
   if (target.type === 'stack') return { kind: 'stack', id: target.id, label: target.label || target.id, href: '/stacks' };
   if (target.type === 'image') return { kind: 'image', id: target.id, label: target.id, href: '/services' };
-  if (target.type === 'catalog') return { kind: 'service', id: target.name || target.id, label: target.label || target.id, href: '/services' };
   return { kind: 'service', id: target.containerId || target.id || op.id, label: target.label || target.containerName || op.action, href: '/services' };
 }
 

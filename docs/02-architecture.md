@@ -130,7 +130,7 @@ previous contents in `data/config-backups/`, 20 per file.
 `server/operations/registry.js` and executed through one pipeline (plan → confirmation token →
 run → audit): container start/stop/restart/pause/unpause/kill/rename/pull_image/network
 attach+detach/update/recreate/edit/change_image/duplicate/create/remove, stack
-deploy/start/stop/remove, image pull, and catalog `service.install`. Write adapters:
+deploy/start/stop/remove, and image pull. Write adapters:
 `providers/dockerOperations.js` (lifecycle) and `updates/recreateAdapter.js` (create/recreate);
 the read provider `providers/docker.js` stays GET-only (asserted by `phase7-proof.test.js`). There
 is no exec endpoint. Action buttons render only when the backing capability reports `ok`. The
@@ -264,7 +264,7 @@ The V1 text above predates these; each is a module family under `server/` with a
 | --- | --- | --- |
 | Monitoring | `monitoring/` | Own uptime engine: HTTP, TCP and Docker-state checks, scheduler, incidents with real durations, state persisted under `data/monitoring/` |
 | Events and notifications | `events/`, `notifications/` | Event bus with SSE to the browser; notification center (in-app) and Telegram, allow-list policy (`notifications/policy.js`) |
-| Operations | `operations/`, `containers/`, `stacks/`, `catalog/` | The audited write pipeline: registry of actions, permissions, confirmation tokens, per-target locks and rate limits, audit log. Containers, stacks and catalog installs are planners/runners on top of it |
+| Operations | `operations/`, `containers/`, `stacks/` | The audited write pipeline: registry of actions, permissions, confirmation tokens, per-target locks and rate limits, audit log. Containers and stacks are planners/runners on top of it |
 | Updates and recovery | `updates/`, `autoheal/`, `registries/` | Update-available state from Diun webhooks, "Update now" with rollback transactions, Autoheal webhook observer, a minimal OCI registry client. OpusHub does not run its own update detector or heal loop yet |
 | Auth | `auth.js` | Single local administrator, sessions, CSRF defence (`06-auth.md`) |
 

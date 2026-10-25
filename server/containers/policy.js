@@ -1,5 +1,5 @@
 // The configuration policy classifier — one judgement for a container spec, wherever it came
-// from (the editor, a duplicate, a Compose service, a catalog manifest).
+// from (the editor, a duplicate, a Compose service).
 //
 // A spec is classified into exactly one of four levels, with every finding listed:
 //

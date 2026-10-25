@@ -28,7 +28,7 @@ You do **not** need to be a developer or know React/Node to use it.
 | **Stacks** | Your Compose projects exactly as Docker reports them, with member containers and aggregate health |
 | **Monitoring** | OpusHub’s own uptime engine. Create monitors for HTTP, TCP, or Docker state. It records incidents with real durations and never pretends a service is up when it isn’t |
 | **System** | Honest host metrics — CPU, memory, storage, network — read directly from the Linux kernel (`/proc` and `/sys`) |
-| **Operations** | Confirmation-gated, audited actions on containers (start, stop, restart, pause, kill, rename, recreate, edit, update, remove), stacks (deploy, start, stop, remove), images (pull) and a small service catalog. Each action shows its consequence and needs a server-minted confirmation token |
+| **Operations** | Confirmation-gated, audited actions on containers (start, stop, restart, pause, kill, rename, recreate, edit, update, remove), stacks (deploy, start, stop, remove), and images (pull). Each action shows its consequence and needs a server-minted confirmation token |
 | **Updates & recovery** | Update-available state and "Update now" (pull, recreate, health-check, rollback) for containers, fed today by [Diun](https://crazymax.dev/diun/) webhooks; recovery events from [Docker Autoheal](https://github.com/willfarrell/docker-autoheal) webhooks. Both are external tools OpusHub *observes*; it does not yet replace them. Webhooks are authenticated with `OPUSHUB_WEBHOOK_SECRET` |
 | **Notifications** | An in-app notification center plus Telegram, driven by an event bus (container state, monitor incidents, updates, operations, alerts) and a simple allow-list policy |
 | **Activity** | A clean timeline of things that actually happened: config changes, container state changes, operations, etc. |
@@ -49,7 +49,7 @@ OpusHub takes a different approach:
 - **Docker is the source of truth.** If a container exists, it appears. If you remove it, it disappears from every page. No stale entries.
 - **YAML is only presentation.** You can rename services, pick icons, change groups, and set order — but you cannot invent a container that doesn’t exist.
 - **No fake data.** If Docker is disconnected or a metric is unavailable, the UI says so clearly instead of showing zeros or placeholders.
-- **Safety by design.** Docker access is a fixed, enumerated set of calls, not a pass-through. Mutating operations (container start/stop/restart/pause/kill/rename/recreate/update/remove, stack deploy, image pull, catalog install) require a server-minted confirmation token and are fully audited. Note that mounting the socket `:ro` does **not** stop Docker API writes — the boundary is OpusHub's own code; for an outside-enforced boundary, set `OPUSHUB_OPERATIONS_SOCKET` to a filtering socket proxy.
+- **Safety by design.** Docker access is a fixed, enumerated set of calls, not a pass-through. Mutating operations (container start/stop/restart/pause/kill/rename/recreate/update/remove, stack deploy, image pull) require a server-minted confirmation token and are fully audited. Note that mounting the socket `:ro` does **not** stop Docker API writes — the boundary is OpusHub's own code; for an outside-enforced boundary, set `OPUSHUB_OPERATIONS_SOCKET` to a filtering socket proxy.
 - **One local administrator account.** Simple, honest authentication. Designed for LAN / VPN use, not the public internet.
 
 ---

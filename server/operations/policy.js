@@ -23,7 +23,6 @@ import { parseParams } from './params.js';
 import { evaluateEligibility } from '../updates/eligibility.js';
 import { planContainerOperation } from '../containers/planner.js';
 import { resolveStackTarget, planStackOperation, stackLockKey } from '../stacks/targets.js';
-import { planInstall, resolveCatalogTarget } from '../catalog/planner.js';
 import { isValidImageRef } from '../updates/recreateAdapter.js';
 
 /** Reasons a Docker lifecycle call can fail, said in the operator's language. */
@@ -172,7 +171,6 @@ export function lockKeysFor(target) {
   if (target.type === 'stack') return [stackLockKey(target.id), ...(target.memberIds || [])];
   if (target.type === 'container') return [target.containerId, ...(target.stack ? [stackLockKey(target.stack)] : [])];
   if (target.type === 'image') return [`image:${target.id}`];
-  if (target.type === 'catalog') return [`catalog:${target.id}:${target.name || ''}`, ...(target.name ? [`name:${target.name}`] : [])];
   if (target.type === 'new') return [`name:${target.name || 'new'}`];
   return [String(target.id || 'none')];
 }
@@ -190,7 +188,6 @@ async function resolveByType(type, ref, params) {
       const name = params?.spec?.name || null;
       return { ok: true, target: { type: 'new', id: name || 'new-container', name, label: name || 'a new container', self: false } };
     }
-    case 'catalog': return resolveCatalogTarget(ref, params);
     default: return { ok: false, error: operationError('bad_target', 'Unknown target type.') };
   }
 }
@@ -200,7 +197,6 @@ async function planByType(action, target, params) {
     case 'container': return ['transaction', 'control'].includes(action.executor) ? planContainerOperation(action, target, params) : null;
     case 'new': return planContainerOperation(action, target, params);
     case 'stack': return planStackOperation(action, target, params);
-    case 'catalog': return planInstall(action, target, params);
     default: return null;
   }
 }
@@ -229,7 +225,6 @@ function describeParams(kind, params) {
     case 'spec_patch': return `Fields: ${Object.keys(params.spec).join(', ')}`;
     case 'duplicate': return `Copy named ${params.name}${Object.keys(params.spec || {}).length ? ` · overrides: ${Object.keys(params.spec).join(', ')}` : ''}`;
     case 'stack_source': return `${params.name ? `${params.name} · ` : ''}${params.compose.length} bytes of Compose${Object.keys(params.env).length ? ` · ${Object.keys(params.env).length} env` : ''}`;
-    case 'install': return `${Object.keys(params.config).length} configuration value${Object.keys(params.config).length === 1 ? '' : 's'}`;
     default: return 'Accepted';
   }
 }
@@ -238,7 +233,6 @@ function describeTarget(t) {
   if (t.type === 'stack') return `stack ${t.label} · ${t.memberIds?.length || 0} container${t.memberIds?.length === 1 ? '' : 's'}${t.managed ? ' · managed by OpusHub' : ' · discovered'}`;
   if (t.type === 'image') return `image ${t.id}`;
   if (t.type === 'new') return t.name ? `new container ${t.name}` : 'a new container';
-  if (t.type === 'catalog') return `${t.label} from the catalog${t.name ? ` as ${t.name}` : ''}`;
   return `${t.label} · ${t.containerName} · ${t.state || 'unknown state'}${t.self ? ' · this is the container OpusHub runs in' : ''}`;
 }
 

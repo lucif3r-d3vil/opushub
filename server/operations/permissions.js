@@ -20,7 +20,7 @@ export const PERMISSIONS = Object.freeze({
   KILL: 'operations.container.kill',
   CONFIGURE: 'operations.container.configure',   // rename, network attach/detach, in-place update, edit
   RECREATE: 'operations.container.recreate',     // recreate, change image
-  CREATE: 'operations.container.create',         // create, duplicate, catalog install
+  CREATE: 'operations.container.create',         // create, duplicate
   REMOVE: 'operations.container.remove',
   IMAGE_PULL: 'operations.image.pull',
   STACK_DEPLOY: 'operations.stack.deploy',

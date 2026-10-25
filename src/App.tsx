@@ -16,8 +16,6 @@ const ServiceDetail = lazy(() => import('./pages/ServiceDetail'));
 const Monitoring = lazy(() => import('./pages/Monitoring'));
 const MonitorDetail = lazy(() => import('./pages/MonitorDetail'));
 const Stacks = lazy(() => import('./pages/Stacks'));
-const Catalog = lazy(() => import('./pages/Catalog'));
-const CatalogInstall = lazy(() => import('./pages/CatalogInstall'));
 const StackDetail = lazy(() => import('./pages/StackDetail'));
 const ManagedStack = lazy(() => import('./pages/ManagedStack'));
 const Host = lazy(() => import('./pages/Host'));
@@ -225,8 +223,6 @@ function ShellWithRoutes() {
             <Route path="stacks/new" element={<ManagedStack />} />
             <Route path="stacks/:id/edit" element={<ManagedStack />} />
             <Route path="stacks/:name" element={<StackDetail />} />
-            <Route path="catalog" element={<Catalog />} />
-            <Route path="catalog/:id" element={<CatalogInstall />} />
             {/* System is the parent for the machine: live vitals and the host itself. */}
             <Route path="system" element={<SystemPage />} />
             <Route path="system/host" element={<Host />} />

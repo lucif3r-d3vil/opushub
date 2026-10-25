@@ -68,7 +68,7 @@ Sizes are approximate lines of code, to show the scale of each removal.
 | `updates/` (engine, transaction, eligibility, preserveConfig) | KEEP | "Update" with rollback stays. |
 | `updates/diun.js`, `updates/webhookAuth.js` (Diun part) | REMOVE | After native checking is verified. |
 | `autoheal/`, `autohealApi.js` | REMOVE | Replaced by native auto-heal. |
-| `catalog/`, `catalogApi.js` | REMOVE | ~1.3k lines with its pages. |
+| `catalog/`, `catalogApi.js` | REMOVED | Went with its pages and the `service.install` action. |
 | `files/`, `filesApi.js` | REMOVE | ~5.0k lines with its page. |
 | `infrastructure/`, `infrastructureApi.js`, `providers/{zfs,storage,network,power,opnsense,opnsenseConfig}.js`, `proxy/provider.js` | REMOVE | ~4.3k lines with the page and components. |
 | `providers/{news,weather,market,background}.js`, `lib/feed.js` | REMOVE | Homepage widgets, not Homepage's core job. |

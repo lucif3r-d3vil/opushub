@@ -7,7 +7,7 @@
 // anything the browser chose.
 //
 // Phase 10D (the Docker control plane) grew the frozen sets — from three lifecycle actions to the
-// controlled container lifecycle, stacks and catalog installs — and every set below was updated
+// controlled container lifecycle, and stacks — and every set below was updated
 // in the same review. The proof is still the same shape: the sets are spelled out here, in full,
 // and anything not spelled out is refused.
 //
@@ -130,7 +130,7 @@ test('the action registry is exactly the approved actions and nothing else', asy
     const a = registry.ACTIONS[id];
     assert.ok(params.PARAM_KINDS.includes(a.params), `${id} declares a parameter schema`);
     assert.ok(['lifecycle', 'control', 'transaction'].includes(a.executor), `${id} declares an executor`);
-    assert.ok(['container', 'stack', 'image', 'new', 'catalog'].includes(a.targetType), `${id} declares a target type`);
+    assert.ok(['container', 'stack', 'image', 'new'].includes(a.targetType), `${id} declares a target type`);
   }
   // still no exec, attach, prune, commit, copy or arbitrary compose command
   for (const id of APPROVED_ACTIONS) assert.ok(!['exec', 'attach', 'prune', 'commit', 'copy', 'shell', 'run', 'up', 'down'].includes(id.split('.')[1]), id);
@@ -227,7 +227,7 @@ test('the engine dispatches through a static switch, never through input', () =>
   const sw2 = src.match(/function dispatchControlled\(action, ctx\) \{([\s\S]*?)\n\}/);
   assert.ok(sw2, 'the engine has one controlled dispatch function');
   const cases2 = [...sw2[1].matchAll(/case '(\w+)': return (\w+)\.(\w+)\(/g)].map((m) => m[1]);
-  assert.deepEqual(cases2.sort(), ['rename', 'remove', 'pull', 'network_attach', 'network_detach', 'update', 'recreate', 'edit', 'change_image', 'duplicate', 'create', 'image_pull', 'stack_deploy', 'stack_start', 'stack_stop', 'stack_remove', 'install'].sort());
+  assert.deepEqual(cases2.sort(), ['rename', 'remove', 'pull', 'network_attach', 'network_detach', 'update', 'recreate', 'edit', 'change_image', 'duplicate', 'create', 'image_pull', 'stack_deploy', 'stack_start', 'stack_stop', 'stack_remove'].sort());
   assert.ok(/default: return Promise\.resolve\(\{ ok: false, code: 'unknown_action'/.test(sw2[1]), 'an unlisted adapter value is refused');
   // every registry adapter value is handled by exactly one of the two switches
   import('./operations/registry.js').then((registry) => {
@@ -239,7 +239,7 @@ test('the engine dispatches through a static switch, never through input', () =>
     }
   });
   // no dynamic dispatch anywhere in the operations path
-  for (const rel of serverFiles().filter((f) => f.includes('operations') || f.includes('containers/') || f.includes('stacks/') || f.includes('catalog/'))) {
+  for (const rel of serverFiles().filter((f) => f.includes('operations') || f.includes('containers/') || f.includes('stacks/'))) {
     const s = code(rel);
     assert.ok(!/dockerOps\[/.test(s), `${rel} indexes the adapter dynamically`);
     assert.ok(!/adapter\[/.test(s), `${rel} indexes the control adapter dynamically`);

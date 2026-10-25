@@ -25,7 +25,7 @@ const MAX_ENV_KEYS = 200;
 
 /** The parameter kinds. Every registry action names exactly one. */
 export const PARAM_KINDS = Object.freeze([
-  'none', 'rename', 'remove', 'network', 'spec', 'spec_patch', 'image', 'duplicate', 'stack_source', 'install', 'pull',
+  'none', 'rename', 'remove', 'network', 'spec', 'spec_patch', 'image', 'duplicate', 'stack_source', 'pull',
 ]);
 
 const bad = (reason, detail = null) => ({ ok: false, error: operationError('bad_params', reason, detail) });
@@ -146,24 +146,6 @@ export function parseParams(kind, raw) {
         }
       }
       return ok({ name: name || null, compose, env });
-    }
-    case 'install': {
-      const extra = onlyKeys(input, ['config']);
-      if (extra) return bad(`Unexpected parameter: ${extra[0]}`);
-      const config = input.config === undefined ? {} : input.config;
-      if (!config || typeof config !== 'object' || Array.isArray(config)) return bad('config must be an object.');
-      if (JSON.stringify(config).length > 64 * 1024) return bad('config is too large.');
-      // the catalog planner validates every field against the manifest's declared variables;
-      // here we only guarantee a bounded, plain-object shape with scalar leaves
-      const clean = {};
-      for (const [k, v] of Object.entries(config)) {
-        if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(k)) return bad(`config key "${k.slice(0, 40)}" is not valid.`);
-        if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) clean[k] = v;
-        else if (Array.isArray(v) && v.every((x) => ['string', 'number', 'boolean'].includes(typeof x)) && v.length <= 64) clean[k] = v.map(String);
-        else if (v && typeof v === 'object' && Object.values(v).every((x) => x === null || ['string', 'number', 'boolean'].includes(typeof x))) clean[k] = { ...v };
-        else return bad(`config value for ${k} must be a scalar, a list of scalars, or an object of scalars.`);
-      }
-      return ok({ config: clean });
     }
     default:
       return bad('This operation has no parameter schema.');

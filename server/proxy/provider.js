@@ -5,7 +5,7 @@
 // module is the inverse: given a canonical *exposure* — `{ domain, port, https, scheme }` — a
 // provider produces the labels (and the network to join) that make the running proxy route it.
 //
-// The canonical service model (containers/spec.js, catalog manifests) never mentions Traefik:
+// The canonical service model (containers/spec.js) never mentions Traefik:
 // it carries `expose` and asks `activeProvider()` for labels. Traefik is one provider; a second
 // one (Caddy docker-proxy, nginx-proxy) is another entry in PROVIDERS with the same shape.
 //

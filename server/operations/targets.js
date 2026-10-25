@@ -31,11 +31,9 @@ export const TARGET_TYPES = Object.freeze(['service', 'container']);
  *   stack     { type: 'stack', id: '<project or managed id>' }        → stacks/targets.js
  *   image     { type: 'image', id: '<image reference>' }              → engine (validated ref)
  *   new       { type: 'new' }                                         → a container that does not exist yet
- *   catalog   { type: 'catalog', id: '<manifest id>' }                → catalog/schema.js
  */
-export const EXTENDED_TARGET_TYPES = Object.freeze(['stack', 'image', 'new', 'catalog']);
+export const EXTENDED_TARGET_TYPES = Object.freeze(['stack', 'image', 'new']);
 const STACK_ID_RE = /^[a-z0-9][a-z0-9_.-]{0,63}$/i;
-const CATALOG_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
  * Normalize and validate the client's target reference *before* it is compared with anything.
@@ -54,7 +52,6 @@ export function parseTargetRef(input) {
     const id = read(input.id);
     if (type === 'new') return { ok: true, ref: { type, id: null, name: null, group: null } };
     if (type === 'stack' && !(id && STACK_ID_RE.test(id))) return { ok: false, error: operationError('bad_target', 'The stack reference is missing or malformed.') };
-    if (type === 'catalog' && !(id && CATALOG_ID_RE.test(id))) return { ok: false, error: operationError('bad_target', 'The catalog reference is missing or malformed.') };
     if (type === 'image' && !(id && id.length <= 300 && !/[\s\x00-\x1f\x7f]/.test(id))) return { ok: false, error: operationError('bad_target', 'The image reference is missing or malformed.') };
     return { ok: true, ref: { type, id: type === 'stack' ? id.toLowerCase() : id, name: null, group: null } };
   }
