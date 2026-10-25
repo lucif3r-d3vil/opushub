@@ -1229,7 +1229,7 @@ export async function runWebTests(): Promise<WebResult> {
     }
     // every section of the IA is reachable, including the three Phase 5 panes and Phase 6's four
     const navText = text(q('.settings-nav')!);
-    for (const item of ['General', 'Appearance', 'Services', 'Groups', 'Bookmarks', 'Widgets', 'Integrations', 'Import & migration', 'History', 'Export', 'Scope', 'Account & sessions', 'Environment', 'Advanced']) {
+    for (const item of ['General', 'Appearance', 'Services', 'Groups', 'Bookmarks', 'Widgets', 'Integrations', 'Import & migration', 'History', 'Export', 'Account & sessions', 'Environment', 'Advanced']) {
       expect(navText.includes(item), `“${item}” is missing from the settings navigation`);
     }
     // the item you are on says so — visually and to assistive tech
@@ -2221,17 +2221,6 @@ export async function runWebTests(): Promise<WebResult> {
     await h.waitFor(() => !!h.lastCall('POST', '/api/v1/operations/dry-run'), 'the dry-run request');
     expect(!h.lastCall('POST', '/api/v1/operations'), 'choosing a palette result executed the operation');
     await h.waitFor(() => text().includes('Registered action'), 'the confirmation dialog');
-  });
-
-  await test('settings: the operations pane reports the engine and offers no switch', async (h) => {
-    h.setRoutes({ ...stubRoutes(), '/api/v1/operations': opsOverview() });
-    await h.mount(<TestApp entry="/settings/operations"><Settings /></TestApp>);
-    await h.waitFor(() => text().includes('engine reachable'), 'the engine status');
-    expect(text().includes('Restart') && text().includes('Stop'), 'the pane does not list the registered actions');
-    expect(/audit/i.test(text()), 'the pane never mentions the audit trail');
-    expect(!qa('input[type=checkbox]').length, 'the operations pane offers a toggle — none of this is configurable');
-    expect(/no shell or command execution/i.test(text()), 'the boundaries are not stated in plain words');
-    expect(/no Docker API passthrough/i.test(text()), 'the passthrough boundary is not stated');
   });
 
   /* ---------------- Phase 10A: monitoring ---------------- */

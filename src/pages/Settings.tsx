@@ -18,8 +18,7 @@ import { GroupNameField } from '../components/GroupNameField';
 import { checkGroupName, renameGroupAt, uniqueGroupName } from '../lib/groupName';
 import { Sortable } from '../components/Sortable';
 import { Block, Row } from './settings/parts';
-import { ConfigurationTab, ExportTab, HistoryTab, ImportTab } from './settings/Configuration';
-import { OperationsSettingsTab } from './settings/Operations';
+import { ExportTab, HistoryTab, ImportTab } from './settings/Configuration';
 import { MonitoringSettingsTab } from './settings/Monitoring';
 import ConnectionsTab from './settings/Connections';
 import { HubPreview } from '../components/hub/HubPreview';
@@ -64,12 +63,9 @@ const TABS = [
   { id: 'import', label: 'Import & migration', section: 'Configuration' },
   { id: 'history', label: 'History', section: 'Configuration' },
   { id: 'export', label: 'Export', section: 'Configuration' },
-  { id: 'configuration', label: 'Scope', section: 'Configuration' },
   { id: 'environment', label: 'Environment', section: 'This install' },
   // Phase 10A — the monitoring defaults, their server-side bounds, and the monitors that exist
   { id: 'monitoring', label: 'Monitoring', section: 'This install' },
-  // Phase 8 — informational: what the operations engine is, what it may do, and what it refuses
-  { id: 'operations', label: 'Operations', section: 'This install' },
   { id: 'authentication', label: 'Account & sessions', section: 'This install' },
   { id: 'advanced', label: 'Advanced', section: 'This install' },
 ];
@@ -139,12 +135,10 @@ export default function SettingsPage() {
           {tab === 'authentication' && <AuthenticationTab />}
           {tab === 'environment' && <EnvironmentTab />}
           {tab === 'monitoring' && <MonitoringSettingsTab />}
-          {tab === 'operations' && <OperationsSettingsTab />}
           {tab === 'advanced' && <AdvancedTab />}
           {tab === 'import' && <ImportTab />}
           {tab === 'history' && <HistoryTab />}
           {tab === 'export' && <ExportTab />}
-          {tab === 'configuration' && <ConfigurationTab />}
           {!TABS.some((t) => t.id === tab) && (
             <p className="stale-note">Unknown section. <button className="section-link" onClick={() => nav('/settings/appearance')}>Go to Appearance →</button></p>
           )}
@@ -2024,24 +2018,9 @@ function AdvancedTab() {
   return (
     <>
       <p className="lede">
-        Custom assets and polling. Everything here is opt-in and stays on the frontend: a stylesheet can add to
-        OpusHub's rendering, a script runs in the page only (never on the server), and the refresh values decide how
-        often each provider is asked — lower is not better.
+        Custom assets. Everything here is opt-in and stays on the frontend: a stylesheet can add to
+        OpusHub's rendering, and a script runs in the page only (never on the server).
       </p>
-
-      <Block title="Hub behaviour">
-        <Row label="Log service launches" desc="Adds an Activity event when you open a service from OpusHub." tight>
-          <Switch checked={settings?.behavior.logLaunches ?? true} onChange={(v) => update({ behavior: { logLaunches: v } }, true)} label="Log launches" />
-        </Row>
-        <Row label="System refresh" desc="Seconds between host metric polls." tight>
-          <input type="number" min={2} max={300} className="input" style={{ width: 90 }} defaultValue={settings?.behavior.refresh.system}
-            onBlur={(e) => update({ behavior: { refresh: { system: Math.max(2, Number(e.target.value) || 5) } } }, true)} aria-label="System refresh seconds" />
-        </Row>
-        <Row label="Services refresh" desc="Containers are polled gently — the engine's API is not free." tight>
-          <input type="number" min={5} max={600} className="input" style={{ width: 90 }} defaultValue={settings?.behavior.refresh.services}
-            onBlur={(e) => update({ behavior: { refresh: { services: Math.max(5, Number(e.target.value) || 30) } } }, true)} aria-label="Services refresh seconds" />
-        </Row>
-      </Block>
 
       <CustomCodeBlock
         cssEnabled={settings?.advanced?.customCss ?? false}

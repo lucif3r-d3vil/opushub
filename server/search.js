@@ -48,7 +48,6 @@ const SETTINGS = [
   { title: 'Import & migration', href: '/settings/import', hint: 'Bring a Homepage configuration across, with a review before anything is written', keywords: ['homepage', 'migrate', 'import', 'services.yaml', 'bookmarks.yaml', 'widgets.yaml', 'move', 'convert', 'porter'] },
   { title: 'Configuration history', href: '/settings/history', hint: 'Every version, what changed, and restore', keywords: ['history', 'backup', 'versions', 'restore', 'undo', 'rollback', 'diff', 'snapshot', 'revert'] },
   { title: 'Export', href: '/settings/export', hint: 'Take your configuration somewhere else', keywords: ['export', 'download', 'backup', 'move', 'homepage', 'transfer', 'portable'] },
-  { title: 'Configuration scope', href: '/settings/configuration', hint: 'What configuration may change, and what it never can', keywords: ['scope', 'boundary', 'secrets', 'credentials', 'auth', 'separation', 'safety', 'docker'] },
 ];
 
 /**

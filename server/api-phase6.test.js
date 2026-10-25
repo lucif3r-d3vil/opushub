@@ -110,7 +110,7 @@ const HOMEPAGE_FILES = {
 
 test('every Phase 6 read route requires a session', async () => {
   const routes = [
-    '/api/config/scope', '/api/config/overview', '/api/config/history',
+    '/api/config/scope', '/api/config/history',
     '/api/config/import/files', '/api/config/export', '/api/groups',
   ];
   for (const route of routes) {

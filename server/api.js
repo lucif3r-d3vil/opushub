@@ -1084,37 +1084,6 @@ export async function handleApi(req, res, url) {
   // ---------- the boundary, stated ----------
   if (route === 'GET /api/config/scope') return send(res, 200, configScopeDoc());
 
-  /** What Settings → Configuration shows at the top: what can change, and what the last change was. */
-  if (route === 'GET /api/config/overview') {
-    const s = model.getSettings();
-    const services = model.readServices();
-    const bookmarks = model.readBookmarks();
-    const layout = model.getLayout();
-    const inv = await model.getInventory();
-    const stats = configHistory.historyStats();
-    return send(res, 200, {
-      scope: configScopeDoc(),
-      counts: {
-        groups: (inv.groupsRaw || []).length,
-        services: inv.services.length,
-        configured: inv.services.filter((x) => x.configured).length,
-        bookmarks: bookmarks.flat.length,
-        widgets: (layout.hub.widgets || []).length,
-        unmatched: inv.unmatched.length,
-      },
-      custom: {
-        cssEnabled: !!s.advanced?.customCss,
-        jsEnabled: !!s.advanced?.customJs,
-        cssBytes: Buffer.byteLength(readConfigText('theme.css') || '', 'utf8'),
-        jsBytes: Buffer.byteLength(readConfigText('app.js') || '', 'utf8'),
-        cssModified: fileMtime('theme.css'),
-        jsModified: fileMtime('app.js'),
-      },
-      history: stats,
-      limits: LIMITS,
-    });
-  }
-
   /**
    * Draft validation. Every editor posts here before it saves, so "will this be accepted?" has one
    * answer rather than one per screen. Nothing is written: a rejection returns the reason and the

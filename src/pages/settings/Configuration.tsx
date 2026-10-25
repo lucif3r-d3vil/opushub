@@ -17,7 +17,7 @@ import { Link } from 'react-router-dom';
 import { api, invalidateShared, post, put } from '../../lib/api';
 import { relTime } from '../../lib/format';
 import type {
-  ConfigOverviewDoc, ConfigScopeDoc, DiffDoc, ExportBundle, GroupsDoc, HistoryDoc, HistoryVersion,
+  ConfigScopeDoc, DiffDoc, ExportBundle, GroupsDoc, HistoryDoc, HistoryVersion,
   ImportApplyResult, ImportDecisions, ImportFilesDoc, ImportPreviewDoc, PresentationDoc, RestoreResult,
 } from '../../lib/types';
 import { Icon } from '../../components/Icon';
@@ -673,77 +673,3 @@ export function ExportTab() {
  * *list* — the seven files configuration may touch, and the specific runtime files it may not,
  * each with the reason it is excluded. A reader can then check the claim instead of believing it.
  */
-export function ConfigurationTab() {
-  const [overview, setOverview] = useState<ConfigOverviewDoc | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    void api<ConfigOverviewDoc>('/api/config/overview').then(setOverview).catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, []);
-  if (error) return <p className="cfg-error" role="alert">{error}</p>;
-  if (!overview) return <Loading what="configuration scope" />;
-  const { scope, counts, custom, history: hist } = overview;
-
-  return (
-    <>
-      <p className="lede">{scope.rule}</p>
-
-      <div className="cfg-counts">
-        <Count n={counts.groups} label="Groups" />
-        <Count n={counts.services} label="Containers discovered" />
-        <Count n={counts.configured} label="With presentation" />
-        <Count n={counts.bookmarks} label="Bookmarks" />
-        <Count n={counts.widgets} label="Hub widgets" />
-        <Count n={counts.unmatched} label="Unmatched overlays" tone={counts.unmatched ? 'warn' : undefined} />
-      </div>
-
-      <Block title="Presentation configuration" aside={<span className="stale-note">{scope.presentation.length} files</span>}>
-        <p className="stale-note">
-          These are the only files a configuration write, import, restore or template may touch. They live in
-          <code className="mono-meta"> config/</code> and are safe to version, copy and edit by hand.
-        </p>
-        <table className="cfg-table">
-          <thead><tr><th>File</th><th>Holds</th></tr></thead>
-          <tbody>{scope.presentation.map((f) => <tr key={f.name}><td><code className="mono-meta">{f.name}</code></td><td>{f.label}</td></tr>)}</tbody>
-        </table>
-      </Block>
-
-      <Block title="Never touched by configuration" aside={<span className="stale-note">declared, and enforced</span>}>
-        <p className="stale-note">
-          Restoring a version, applying an import or exporting cannot reach any of these. Each is excluded for a
-          different reason, which is why they are listed rather than summarised.
-        </p>
-        <table className="cfg-table">
-          <thead><tr><th>State</th><th>Kind</th><th>Why it is excluded</th></tr></thead>
-          <tbody>
-            {scope.protected.map((p) => (
-              <tr key={p.path}>
-                <td><code className="mono-meta">{p.path}</code></td>
-                <td><span className="cfg-badge cfg-badge--quiet">{p.kind}</span></td>
-                <td className="stale-note">{p.why}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Block>
-
-      <Block title="Custom code" aside={<span className="stale-note">{custom.cssEnabled || custom.jsEnabled ? 'enabled' : 'off'}</span>}>
-        <Row label="theme.css" desc="Loaded same-origin, authenticated, and only while custom CSS is enabled. Linted before it is saved." tight>
-          <span className="mono-meta">{bytes(custom.cssBytes)} · {custom.cssModified ? when(custom.cssModified) : 'none'}</span>
-        </Row>
-        <Row label="app.js" desc="Runs in your browser only. It never gains server-side capability — the server never executes it." tight>
-          <span className="mono-meta">{bytes(custom.jsBytes)} · {custom.jsModified ? when(custom.jsModified) : 'none'}</span>
-        </Row>
-        <Row label="Enabled in" desc="Both are opt-in and stay off until you turn them on.">
-          <Link className="btn btn-sm" to="/settings/advanced">Advanced</Link>
-        </Row>
-      </Block>
-
-      <Block title="History" aside={<span className="stale-note">{hist.count} version(s)</span>}>
-        <Row label="Retained" desc="Bounded by count and by total size, so configuration history cannot grow without limit." tight>
-          <span className="mono-meta">{bytes(hist.totalBytes)} of {bytes(hist.retention.bytes)}</span>
-        </Row>
-        <Row label="Manage" tight><Link className="btn btn-sm" to="/settings/history">Open History</Link></Row>
-      </Block>
-    </>
-  );
-}

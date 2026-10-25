@@ -462,14 +462,6 @@ export interface ConfigScopeDoc {
   rule: string;
 }
 
-export interface ConfigOverviewDoc {
-  scope: ConfigScopeDoc;
-  counts: { groups: number; services: number; configured: number; bookmarks: number; widgets: number; unmatched: number };
-  custom: { cssEnabled: boolean; jsEnabled: boolean; cssBytes: number; jsBytes: number; cssModified: string | null; jsModified: string | null };
-  history: HistoryStats;
-  limits: Record<string, number>;
-}
-
 /* ---------- migration ---------- */
 
 export interface ImportFileSpec { name: string; kind: string; label: string }
