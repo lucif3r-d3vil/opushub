@@ -632,8 +632,8 @@ async function main() {
       const set = await send('PUT', '/api/settings', { appearance: { theme: 'dark', background: { mode: 'solid', blur: 10, scrim: 50 } }, advanced: { customCss: true } });
       check('appearance: the theme round-trips',
         set.body?.appearance?.theme === 'dark', JSON.stringify(set.body?.appearance));
-      check('appearance: background and custom-code sections from older builds are ignored, not served',
-        set.body?.appearance?.background === undefined && set.body?.advanced === undefined);
+      check('appearance: the old background object reads as the default id, and custom-code sections are not served',
+        set.body?.appearance?.background === 'graphite' && set.body?.advanced === undefined);
       await send('PUT', '/api/settings', { appearance: { theme: 'system' } });
     }
 
