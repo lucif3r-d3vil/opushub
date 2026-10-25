@@ -14,8 +14,10 @@ Principles that stay: **Docker is the source of truth** (config can decorate, ne
 | **Home** | Containers grouped by stack, a health dot and an update badge on each, a link to open it, and a one-line host strip (CPU, memory, disk, uptime). | Homepage |
 | **Containers** | One list with detail: start, stop, restart, recreate, logs, update. Plus "add a compose block" (paste YAML, review, deploy). Per-container toggles for auto-heal and update checking. | Portainer |
 | **Uptime** | Monitors (HTTP, TCP, Docker state) and incidents with real durations. | Uptime Kuma |
-| **Bell** | One notification stream: updates available, heal events, downtime and recovery. Delivered in-app and to Telegram. | Diun alerts, Kuma alerts |
+| **Bell** | One notification stream: updates available, heal events, downtime and recovery. Delivered in-app and to Telegram. The panel also lists recent activity, including the audit record of operations (there is no Activity page). | Diun alerts, Kuma alerts |
 | **Settings** | One small page: Telegram, host address, monitoring defaults, account, theme. | n/a |
+
+**Ctrl+K search** stays (jump to a container, stack, monitor or setting).
 
 Login and first-run setup remain, because there is one local admin account.
 
@@ -38,9 +40,9 @@ Sizes are approximate lines of code, to show the scale of each removal.
 | `Stacks.tsx`, `StackDetail.tsx` | MERGE | Stack is a grouping on Home and a filter on Containers, not its own area. |
 | `ManagedStack.tsx` | MERGE | Becomes "add a compose block" inside Containers. |
 | `Monitoring.tsx`, `MonitorDetail.tsx` | KEEP | Becomes Uptime (rename, trim). |
-| `Activity.tsx` | MERGE | Folds into the bell's history. See "Unsure" for the audit trail. |
+| `Activity.tsx` | MERGE | Decided: becomes the bell panel's recent-activity list, including the audit record. No page. |
 | `System.tsx`, `Host.tsx` | REMOVE | Replaced by the host strip on Home. |
-| `Infrastructure.tsx` | REMOVE | ZFS, OPNsense and topology are not one of the five tools. See "Unsure". |
+| `Infrastructure.tsx` | REMOVE | ZFS, OPNsense and topology are not one of the five tools. **Open:** whether to keep a one-line ZFS status on Home (see Decisions). |
 | `Files.tsx` | REMOVE | A file explorer replaces none of the five (~5.0k lines with its server side). |
 | `Catalog.tsx`, `CatalogInstall.tsx` | REMOVE | "Add a compose block" covers installing. |
 | `Icons.tsx` | REMOVE | A picker page. Icon resolution stays; the page does not. |
@@ -57,9 +59,9 @@ Sizes are approximate lines of code, to show the scale of each removal.
 | `host.js`, `resources.js`, `providers/system.js` | KEEP | The host strip. Merge the first two. |
 | `monitoring/` | KEEP | Uptime. Docker, HTTP and TCP checks all stay. |
 | `events/`, `notifications/` (Telegram) | KEEP | The bell. |
-| `notifications/providers/webhook.js` | REMOVE | Telegram is the only required channel. See "Unsure". |
+| `notifications/providers/webhook.js` | REMOVE | Decided: Telegram is the only external channel. |
 | `alerts.js` | MERGE | Into the event stream behind the bell. |
-| `activity.js` | MERGE | Into the same stream, but keep the audit record. |
+| `activity.js` | MERGE | Into the same stream; feeds the bell's recent-activity list and keeps the audit record. |
 | `operations/`, `containers/`, `providers/dockerOperations.js`, `updates/recreateAdapter.js` | MERGE | One Docker write path and one confirm/audit pipeline. **High risk.** |
 | `stacks/` | KEEP | Backs "add a compose block". |
 | `registries/` | KEEP | Registry client for native update checking and private registries. |
@@ -71,38 +73,45 @@ Sizes are approximate lines of code, to show the scale of each removal.
 | `infrastructure/`, `infrastructureApi.js`, `providers/{zfs,storage,network,power,opnsense,opnsenseConfig}.js`, `proxy/provider.js` | REMOVE | ~4.3k lines with the page and components. |
 | `providers/{news,weather,market,background}.js`, `lib/feed.js` | REMOVE | Homepage widgets, not Homepage's core job. |
 | `widgets.js`, `layout.js`, `templates.js` | REMOVE | Widget composition goes. Stack order and group names move to `services.yaml`. |
-| `search.js` | REMOVE | A site this small needs no command palette. See "Unsure". |
+| `search.js`, `SearchOverlay.tsx` | KEEP | Decided: Ctrl+K stays. Trim its index to containers, stacks, monitors, settings. |
 | `providers/icons.js` | KEEP | Service icons on Home. |
-| `statsHistory.js` | REMOVE | Per-container charts. See "Unsure". |
+| `statsHistory.js` | REMOVE | Decided: container charts go. |
 | `homepageImport.js` | KEEP, then REMOVE | A one-time migration; delete once you have moved off Homepage. |
 | `configStore.js`, `configSchema.js`, `configHistory.js`, `configScope.js` | MERGE | Into two modules: store and history. |
-| `configExport.js`, `configImport.js` | REMOVE | Backup by copying `config/`. See "Unsure". |
+| `configExport.js`, `configImport.js` | REMOVE | Decided: back up by copying `config/`. |
 | `updateCheck.js`, `version.js` | MERGE | Into Settings ("about"). Small. |
 | `api.js` (1.9k), `model.js` (1.2k), `*Api.js` | MERGE | Split by domain: containers, uptime, bell, settings, auth. |
 
 Removal totals roughly 15k lines of source, plus about 4k lines of tests that pin removed
 features. The test suite is about 20k lines, so deleting those tests is part of each removal.
 
-## Unsure: confirm before deleting
+## Decisions
 
-1. **`Infrastructure` and OPNsense, ZFS, topology.** I cannot tell whether you rely on these for
-   your own host. They are self-contained, so removing them loses a feature, not correctness.
-2. **Audit trail.** Operations are audited today (`operations/audit.js`, `activity.js`). The new
-   product should keep an audit record even without an Activity page. Where should you read it?
-3. **Webhook notification channel.** If any of your alerts go to a non-Telegram webhook, keep it.
-4. **`statsHistory.js` and the container charts.** Removing them is fine unless you use them for
-   capacity checks.
-5. **`search.js` and the command overlay.** Easy to remove; also easy to miss if you use it daily.
-6. **`configExport.js` and `configImport.js`.** Check nothing in setup or restore depends on them.
-7. **`proxy/provider.js`.** A "write side" reverse-proxy abstraction. Nothing else I looked at
-   seems to use it, but I have not traced it.
-8. **Settings keys read by removed modules.** `settings.yaml` and `layout.json` may carry values
-   for removed features. The config loader must ignore unknown keys instead of failing.
-9. **Coupling between autoheal and updates.** `autoheal/observer.js` calls into
+Made:
+
+- **Audit trail** goes into the bell panel's recent-activity list. No Activity page.
+- **Telegram** is the only external channel. The generic webhook channel is dropped.
+- **Ctrl+K search** stays.
+- **Config export/import** and **container charts** are dropped.
+- **Updates stay manual.** Native checking only detects and badges; "Update" is a button you press.
+
+**Open: Infrastructure.** Choose one: (a) remove it all, including ZFS, or (b) remove it all but keep
+a one-line ZFS pool status on Home. Phase 4 waits on this. Option (b) means keeping a slice of
+`providers/zfs.js` and the `/proc` mount-to-pool join, roughly 400 lines.
+
+## Still unsure: confirm before deleting
+
+1. **`proxy/provider.js`.** A "write side" reverse-proxy abstraction. Nothing I looked at seems to
+   use it, but I have not traced it.
+2. **Settings keys read by removed modules.** `settings.yaml` and `layout.json` may carry values for
+   removed features. The config loader must ignore unknown keys instead of failing.
+3. **Coupling between autoheal and updates.** `autoheal/observer.js` calls into
    `updates/transaction.js` (`isContainerUpdating`). Native auto-heal must keep that "don't heal
    during an update" rule.
-10. **Routes in links and bookmarks.** `/services`, `/stacks`, `/monitoring`, `/system`: keep
-    redirects for one release so saved links survive.
+4. **Routes in links and bookmarks.** `/services`, `/stacks`, `/monitoring`, `/system`: keep
+   redirects for one release so saved links survive.
+5. **Setup and restore.** Check that first-run setup does not depend on `configImport.js` before
+   it is removed.
 
 ## Roadmap
 
@@ -111,13 +120,13 @@ Order: **remove, then split, then build.** Phases 1 and 2 (truth pass and dead c
 | # | Phase | Risk |
 |---|---|---|
 | 3 | **Remove Files.** Page, server module, API, tests, compose example, README and env vars. | Low |
-| 4 | **Remove Infrastructure** and its providers, `proxy/provider.js`, tests and settings keys. Config loader tolerates old keys. | Low |
-| 5 | **Remove Hub extras:** news, weather, market, background, widget composition, templates, search, Icons page. Home keeps the stack-grouped launcher. | Low |
+| 4 | **Remove Infrastructure** (blocked on the open decision above) and its providers, `proxy/provider.js`, tests and settings keys. Config loader tolerates old keys. | Low |
+| 5 | **Remove Hub extras:** news, weather, market, background, widget composition, templates, Icons page; container charts (`statsHistory.js`); config export/import; the webhook notification channel. Search stays. Home keeps the stack-grouped launcher. | Low |
 | 6 | **Remove Catalog** and its manifests. | Low |
 | 7 | **Merge pages:** Home, Containers (with "add compose block"), Uptime. Remove System, Host, Stacks, Activity pages. Redirect old routes. | Low |
 | 8 | **Split the monoliths:** `api.js`, `model.js`, `Settings.tsx` by domain. No behavior change. | Low |
 | 9 | **One write path.** Merge the Docker write adapters, planners and operations pipeline. The mechanical proof tests must still pass. | **High: Docker socket writes.** Disposable host first. |
-| 10 | **The bell.** One stream from events, alerts and the audit record; Telegram as the only external channel. | Low |
+| 10 | **The bell.** One stream from events, alerts and the audit record, with a recent-activity list in the panel; Telegram as the only external channel. | Low |
 | 11 | **Native update checking, read-only.** Scheduled digest comparison via `registries/client.js`, per-container toggle, badge on Home, bell entry. Applies nothing. Diun webhook stays as a fallback until results match for a few weeks. | Low (outbound registry GETs; mind Docker Hub rate limits) |
 | 12 | **Native auto-heal, dry-run.** Per-container toggle. Detects unhealthy containers and writes "would restart" entries to the bell. Restarts nothing. Honors the update-window rule. | Low (read-only) |
 | 13 | **Native auto-heal, live.** Restart unhealthy opted-in containers with backoff and a circuit breaker. Enable one container first. | **High: restarts containers.** |
