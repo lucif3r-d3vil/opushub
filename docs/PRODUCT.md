@@ -104,7 +104,9 @@ Made:
 1. **`proxy/provider.js`.** A "write side" reverse-proxy abstraction. Nothing I looked at seems to
    use it, but I have not traced it.
 2. **Settings keys read by removed modules.** `settings.yaml` and `layout.json` may carry values for
-   removed features. The config loader must ignore unknown keys instead of failing.
+   removed features. Resolved for Infrastructure: `infrastructure.opnsense` and `infrastructure.power`
+   are dropped on read, and an old file keeps loading. `infrastructure.hostAddress` and
+   `entrypointPorts` stay (URL resolution). Still to do for the Hub extras and Catalog.
 3. **Coupling between autoheal and updates.** `autoheal/observer.js` calls into
    `updates/transaction.js` (`isContainerUpdating`). Native auto-heal must keep that "don't heal
    during an update" rule.
@@ -115,7 +117,7 @@ Made:
 
 ## Roadmap
 
-Order: **remove, then split, then build.** Phases 1 and 2 (truth pass and dead code) are done; phase 3 (Files) is done on its own branch.
+Order: **remove, then split, then build.** Phases 1 and 2 (truth pass and dead code) are done; phases 3 (Files) and 4 (Infrastructure) are done on their own branches.
 
 | # | Phase | Risk |
 |---|---|---|
