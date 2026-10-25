@@ -1,7 +1,8 @@
 // What the Home page shows, derived from data OpusHub already has: the discovered inventory, the
 // container-update notices it received, the auto-heal recoveries it observed, and the monitors.
 // Pure functions only, so the "show only what exists" rules can be tested without a browser.
-import type { AutohealStatusDoc, ContainerUpdateRecord, Monitor, MonitoringOverview, Service, ServicesDoc, SystemSnapshot } from './types';
+import type { AutohealStatusDoc, ContainerUpdateRecord, Service, ServicesDoc, SystemSnapshot } from './types';
+import { sortRows, type RibbonMonitor, type RibbonsDoc } from './uptimeModel';
 
 /** A stable hue (0–359) from a name: stacks keep their colour from one visit to the next. */
 export function stackHue(name: string): number {
@@ -86,7 +87,7 @@ function recoveryFor(svc: Service, heal: AutohealStatusDoc | null) {
   return heal?.recentRecoveries?.find((r) => r.containerName === svc.name || r.service === svc.name || (!!svc.container?.id && r.containerId?.startsWith(svc.container.id))) ?? null;
 }
 
-export function buildAttention(doc: ServicesDoc | null, heal: AutohealStatusDoc | null, monitoring: MonitoringOverview | null, rel: (t: number) => string): AttentionItem[] {
+export function buildAttention(doc: ServicesDoc | null, heal: AutohealStatusDoc | null, monitors: ReturnType<typeof downMonitors>, rel: (t: number) => string): AttentionItem[] {
   const out: AttentionItem[] = [];
   const seen = new Set<string>();
   const apps = (doc?.groups ?? []).flatMap((g) => g.services).filter((s) => s.kind !== 'infrastructure' && !s.hidden);
@@ -101,8 +102,8 @@ export function buildAttention(doc: ServicesDoc | null, heal: AutohealStatusDoc 
     out.push({ key: `svc:${svc.name}`, name: svc.displayName, state: v.state, reason: bits.join(' · '), svc });
     seen.add(svc.name.toLowerCase()); seen.add(svc.displayName.toLowerCase());
   }
-  for (const m of monitoring?.monitors ?? []) {
-    if (m.status !== 'down' || !m.enabled || seen.has(m.name.toLowerCase())) continue;
+  for (const m of monitors) {
+    if (seen.has(m.name.toLowerCase())) continue;
     out.push({ key: `mon:${m.id}`, name: m.name, state: 'fail', reason: m.downSince ? `monitor down since ${rel(m.downSince)}` : 'monitor reports it down', svc: null, monitorId: m.id });
   }
   return out.sort((a, b) => (a.state === b.state ? a.name.localeCompare(b.name) : a.state === 'fail' ? -1 : 1));
@@ -125,19 +126,33 @@ export function buildUpdates(records: ContainerUpdateRecord[], doc: ServicesDoc 
   return { rows: rows.sort((a, b) => a.name.localeCompare(b.name)), checkedAt: checks.length ? Math.max(...checks) : null };
 }
 
-export interface UptimeSummary { pct: number | null; up: number; total: number; down: Monitor[] }
+export interface UptimeSummary { pct: number | null; up: number; total: number; since: number; rows: RibbonMonitor[] }
 
-/** Today's uptime across every enabled monitor that has been judged, and which ones are not up. */
-export function uptimeSummary(monitoring: MonitoringOverview | null): UptimeSummary | null {
-  const ms = (monitoring?.monitors ?? []).filter((m) => m.enabled);
-  if (!ms.length) return null;
-  let ok = 0; let judged = 0;
-  for (const m of ms) { const u = m.uptime; if (u && u.judged > 0) { ok += u.ok; judged += u.judged; } }
+const MINI_MS = 12 * 3_600_000;
+
+/**
+ * The Home uptime card, from the same ribbons document the Uptime page reads: the 24-hour figure across
+ * enabled monitors, and up to four monitors worth a look (not up, or with an incident in the last 12 hours)
+ * for the mini ribbons. Null when nothing is monitored.
+ */
+export function uptimeSummary(doc: RibbonsDoc | null): UptimeSummary | null {
+  const ms = (doc?.monitors ?? []).filter((m) => m.enabled);
+  if (!doc || !ms.length) return null;
+  const since = doc.to - MINI_MS;
+  const recent = (m: RibbonMonitor) => doc.incidents.some((i) => i.monitorId === m.id && (i.open || i.startedAt >= since));
   return {
-    pct: judged ? (100 * ok) / judged : null,
-    up: ms.filter((m) => m.status === 'up').length, total: ms.length,
-    down: ms.filter((m) => m.status === 'down' || m.status === 'degraded'),
+    pct: doc.summary.uptimePct,
+    up: ms.filter((m) => m.status === 'up').length, total: ms.length, since,
+    rows: sortRows(ms.filter((m) => m.status !== 'up' || recent(m))).slice(0, 4),
   };
+}
+
+/** Monitors that are down, in the shape the attention band reads: when it went down is the open incident's start. */
+export function downMonitors(doc: RibbonsDoc | null): { id: string; name: string; enabled: boolean; status: string; downSince: number | null }[] {
+  return (doc?.monitors ?? []).filter((m) => m.enabled && m.status === 'down').map((m) => ({
+    id: m.id, name: m.name, enabled: m.enabled, status: m.status,
+    downSince: doc!.incidents.find((i) => i.monitorId === m.id && i.open)?.startedAt ?? null,
+  }));
 }
 
 export type HostMetric = 'cpu' | 'memory' | 'network' | 'disk' | 'temp';

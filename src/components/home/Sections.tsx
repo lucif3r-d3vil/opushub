@@ -5,6 +5,8 @@ import { Link } from 'react-router-dom';
 import type { BookmarkGroup } from '../../lib/hubData';
 import { relTime } from '../../lib/format';
 import type { AttentionItem, UpdateRow, UptimeSummary } from '../../lib/homeModel';
+import { pctText, ribbonSummary, type RibbonsDoc } from '../../lib/uptimeModel';
+import { MiniRibbon } from '../uptime/Ribbon';
 import { requestOperation } from '../../lib/operations';
 import { Icon } from '../Icon';
 import type { OpsCaps } from './Tile';
@@ -59,18 +61,25 @@ export function UpdatesCard({ rows, checkedAt, index }: { rows: UpdateRow[]; che
   );
 }
 
-export function UptimeCard({ summary, index }: { summary: UptimeSummary | null; index: number }) {
-  if (!summary) return null;
+export function UptimeCard({ summary, doc, index }: { summary: UptimeSummary | null; doc: RibbonsDoc | null; index: number }) {
+  if (!summary || !doc) return null;
   return (
     <section className="hm-w glass rise" style={{ ['--i' as never]: index }}>
       <header><h2>Uptime</h2><Link className="hm-more-link" to="/monitoring">Open →</Link></header>
       <div className="hm-bignum">
-        {summary.pct != null ? <b>{summary.pct.toFixed(summary.pct >= 99.995 ? 0 : 2)}<span className="hm-pct">%</span></b> : <b>—</b>}
-        <span>today<br />{summary.up} of {summary.total} up now</span>
+        {summary.pct != null ? <b>{pctText(summary.pct)}<span className="hm-pct">%</span></b> : <b>—</b>}
+        <span>last 24 hours<br />{summary.up} of {summary.total} up now</span>
       </div>
-      {summary.down.slice(0, 4).map((m) => (
-        <Link key={m.id} to={`/monitoring/${m.id}`} className="hm-mrow"><i className={`hdot ${m.status === 'down' ? 'fail' : 'warn'}`} /><span>{m.name}</span><small>{m.status}</small></Link>
+      {summary.rows.map((m) => (
+        <Link key={m.id} to="/monitoring" className="hm-mrow" aria-label={`${m.name}: ${m.status}. Open the Uptime page.`}>
+          <span className="hm-mname"><i className={`hdot ${m.status === 'down' ? 'fail' : m.status === 'up' ? 'ok' : 'warn'}`} /><span>{m.name}</span></span>
+          <MiniRibbon
+            segments={m.segments.filter((s) => s.b > summary.since)} from={summary.since} to={doc.to} stepMs={doc.stepMs}
+            label={`${m.name}, last 12 hours: ${ribbonSummary(m, '24h', doc.incidents)}`}
+          />
+        </Link>
       ))}
+      {summary.rows.length > 0 && <div className="hm-foot">Last 12 hours · thickness is response time</div>}
     </section>
   );
 }

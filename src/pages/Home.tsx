@@ -11,14 +11,15 @@ import { useAuth } from '../lib/auth';
 import { useSharedQuery } from '../lib/api';
 import { relTime } from '../lib/format';
 import {
-  buildAttention, buildStacks, buildUpdates, greetingLead, uptimeSummary, type HostMetric,
+  buildAttention, buildStacks, buildUpdates, downMonitors, greetingLead, uptimeSummary, type HostMetric,
 } from '../lib/homeModel';
 import type { BookmarkDoc } from '../lib/hubData';
 import { useOperationsCapabilities } from '../lib/operations';
 import { useSettings } from '../lib/theme';
 import type {
-  AutohealStatusDoc, ContainerUpdatesDoc, HistoryPoint, MonitoringOverview, ServicesDoc, SystemSnapshot,
+  AutohealStatusDoc, ContainerUpdatesDoc, HistoryPoint, ServicesDoc, SystemSnapshot,
 } from '../lib/types';
+import type { RibbonsDoc } from '../lib/uptimeModel';
 
 function useClock(hour12: boolean) {
   const [now, setNow] = useState(() => new Date());
@@ -37,7 +38,8 @@ export default function Home() {
   const services = useSharedQuery<ServicesDoc>('/api/services', (refresh?.services ?? 30) * 1000);
   const system = useSharedQuery<SystemSnapshot>('/api/system', (refresh?.system ?? 5) * 1000);
   const spark = useSharedQuery<{ points: HistoryPoint[] }>('/api/system/history?window=3600000', 10_000);
-  const monitoring = useSharedQuery<MonitoringOverview>('/api/monitoring?include=uptime', 30_000);
+  // the same document the Uptime page reads, so the card and the page can never disagree
+  const ribbons = useSharedQuery<RibbonsDoc>('/api/monitoring/ribbons?range=24h', 30_000);
   const updates = useSharedQuery<ContainerUpdatesDoc>('/api/container-updates', 60_000);
   const heal = useSharedQuery<AutohealStatusDoc>('/api/autoheal/status', 30_000);
   const bookmarks = useSharedQuery<BookmarkDoc>('/api/bookmarks', 0);
@@ -62,9 +64,9 @@ export default function Home() {
 
   const records = updates.data?.updates ?? [];
   const stacks = useMemo(() => buildStacks(services.data, records), [services.data, records]);
-  const attention = useMemo(() => buildAttention(services.data, heal.data, monitoring.data, (t) => relTime(t)), [services.data, heal.data, monitoring.data]);
+  const attention = useMemo(() => buildAttention(services.data, heal.data, downMonitors(ribbons.data), (t) => relTime(t)), [services.data, heal.data, ribbons.data]);
   const upd = useMemo(() => buildUpdates(records, services.data), [records, services.data]);
-  const uptime = useMemo(() => uptimeSummary(monitoring.data), [monitoring.data]);
+  const uptime = useMemo(() => uptimeSummary(ribbons.data), [ribbons.data]);
   const all = stacks.flatMap((s) => s.tiles);
   const running = all.filter((t) => t.view.state === 'ok').length;
   const groups = bookmarks.data?.groups ?? [];
@@ -118,7 +120,7 @@ export default function Home() {
         </div>
         <aside className="hm-rail">
           <UpdatesCard rows={upd.rows} checkedAt={upd.checkedAt} index={4} />
-          <UptimeCard summary={uptime} index={5} />
+          <UptimeCard summary={uptime} doc={ribbons.data} index={5} />
           <BookmarksCard groups={groups} index={6} />
         </aside>
       </div>

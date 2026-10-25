@@ -24,7 +24,7 @@ import type { LayoutDoc, Monitor, UptimeWindow, WidgetInstance } from '../../src
 import type { HubData } from '../../src/lib/hubData';
 import App from '../../src/App';
 import {
-  buildAttention, buildStacks, buildUpdates, hostNow, stackHue, stateOf, updateFor, uptimeSummary,
+  buildAttention, buildStacks, buildUpdates, downMonitors, hostNow, stackHue, stateOf, updateFor, uptimeSummary,
 } from '../../src/lib/homeModel';
 import { resetSharedCache } from '../../src/lib/api';
 import { classifyTarget, defaultName, monitorDraft, typesFor, validateDefaults, toForm } from '../../src/lib/monitorForm';
@@ -2389,14 +2389,15 @@ export async function runWebTests(): Promise<WebResult> {
     const rel = () => 'just now';
     const doc = docOf([{ name: 'g', services: [mkSvc('fine', { status: 'up' }), mkSvc('sick', { status: 'unhealthy', statusReason: null }), mkSvc('dead', { status: 'down', container: { ...svcBase.container, name: 'dead', id: 'cid-dead', status: 'Exited (137) 3 hours ago' } })] }]);
     const heal = { available: true, running: true, monitoredCount: 1, optedInCount: 1, unhealthyCount: 0, monitoredContainers: [], unhealthyContainers: [], recentRecoveries: [{ id: 'r', t: 1, containerId: 'cid-sick', containerName: 'sick', service: 'sick', success: true, message: 'restarted' }] } as never;
-    const mon = { at: 1, counts: {}, engine: {}, monitors: [{ id: 'm1', name: 'Router', enabled: true, status: 'down', downSince: 1 }, { id: 'm2', name: 'Fine', enabled: true, status: 'up' }, { id: 'm3', name: 'Sick', enabled: true, status: 'down' }] } as never;
+    const mon = [{ id: 'm1', name: 'Router', enabled: true, status: 'down', downSince: 1 }, { id: 'm3', name: 'Sick', enabled: true, status: 'down', downSince: null }];
     const items = buildAttention(doc, heal, mon, rel);
     expect(items.map((i) => i.name).join(',') === 'Dead,Router,Sick', `attention order: ${items.map((i) => i.name).join(',')}`);
     expect(items[0].state === 'fail' && items[0].reason.includes('Exited (137)'), `the stopped container reason is not Docker's own: ${items[0].reason}`);
     expect(items[2].reason.includes('auto-heal restarted it'), `the auto-heal note is missing: ${items[2].reason}`);
     expect(items.filter((i) => i.name === 'Sick').length === 1, 'a monitor for a container already listed was counted twice');
-    expect(buildAttention(docOf([{ name: 'g', services: [mkSvc('fine')] }]), null, null, rel).length === 0, 'something was reported when everything is up');
-    expect(uptimeSummary(null) === null && uptimeSummary({ monitors: [] } as never) === null, 'an uptime figure was invented without monitors');
+    expect(buildAttention(docOf([{ name: 'g', services: [mkSvc('fine')] }]), null, [], rel).length === 0, 'something was reported when everything is up');
+    expect(uptimeSummary(null) === null && uptimeSummary({ monitors: [], incidents: [] } as never) === null, 'an uptime figure was invented without monitors');
+    expect(downMonitors({ monitors: [{ id: 'a', name: 'A', enabled: true, status: 'down' }, { id: 'b', name: 'B', enabled: true, status: 'up' }, { id: 'c', name: 'C', enabled: false, status: 'down' }], incidents: [{ monitorId: 'a', open: true, startedAt: 77 }] } as never).map((m) => `${m.id}:${m.downSince}`).join() === 'a:77', 'only enabled, down monitors, with the open incident as the time they went down');
     const hn = hostNow(null);
     expect(Object.values(hn).every((r) => r.value === null), 'the host strip shows numbers without a snapshot');
   });
@@ -2415,7 +2416,7 @@ export async function runWebTests(): Promise<WebResult> {
     ...stubRoutes(), ...AUTH_ROUTES,
     '/api/container-updates': { updates: [], count: 0, availableCount: 0 },
     '/api/autoheal/status': { available: false, running: false, monitoredCount: 0, optedInCount: 0, unhealthyCount: 0, monitoredContainers: [], unhealthyContainers: [], recentRecoveries: [] },
-    '/api/monitoring': { at: 1, counts: {}, engine: {}, monitors: [] },
+    '/api/monitoring/ribbons': { at: 1, range: '24h', from: 0, to: Date.now(), stepMs: 300000, slowMs: 1000, summary: { uptimePct: null, avgMs: null, monitors: 0, up: 0, slow: 0, down: 0, incidents: 0, downtimeMs: 0 }, monitors: [], incidents: [] },
     '/api/system/history': { window: 3600000, stepMs: 5000, points: Array.from({ length: 30 }, (_, i) => ({ t: Date.now() - (30 - i) * 5000, cpu: 10 + i % 7, memUsedPct: 40, load: 1, rx: 1000 * i, tx: 1, temp: 40, procs: 100, diskUsedPct: 20 })) },
     '/api/operations': { docker: { operations: false }, actions: [] },
     ...extra,
@@ -2451,7 +2452,13 @@ export async function runWebTests(): Promise<WebResult> {
     h.setRoutes(homeRoutes({
       '/api/services': docOf([{ name: 'Media', services: [sick, dead, mkSvc('ok1', { stackDisplayName: 'Media', stack: 'media', group: 'Media' })] }]),
       '/api/container-updates': { updates: [upd('cid-ok1', { currentTag: '1.0', availableTag: '1.1' })], count: 1, availableCount: 1 },
-      '/api/monitoring': { at: 1, counts: {}, engine: {}, monitors: [{ id: 'm1', name: 'Router', enabled: true, status: 'down', downSince: Date.now() - 600_000, uptime: { ok: 90, judged: 100 } }, { id: 'm2', name: 'NAS', enabled: true, status: 'up', uptime: { ok: 100, judged: 100 } }] },
+      '/api/monitoring/ribbons': (() => {
+        const end = Date.now(); const segs = (kinds: ('ok' | 'fail')[]) => kinds.map((k, i) => ({ a: end - (kinds.length - i) * 300_000, b: end - (kinds.length - i - 1) * 300_000, k, slow: false, ms: k === 'ok' ? 40 : null, n: 5, ok: k === 'ok' ? 5 : 0, degraded: 0, fail: k === 'fail' ? 5 : 0, unknown: 0 }));
+        const mon = (id: string, name: string, status: string, kinds: ('ok' | 'fail')[]) => ({ id, name, type: 'tcp', status, enabled: true, latencyMs: null, service: null, intervalMs: 60000, checks: 50, judged: 50, uptimePct: 90, avgMs: 40, p95Ms: null, coverageFrom: end - kinds.length * 300_000, segments: segs(kinds) });
+        return { at: end, range: '24h', from: end - 86_400_000, to: end, stepMs: 300_000, slowMs: 1000, summary: { uptimePct: 95, avgMs: 40, monitors: 2, up: 1, slow: 0, down: 1, incidents: 1, downtimeMs: 600_000 },
+          monitors: [mon('m1', 'Router', 'down', ['ok', 'ok', 'ok', 'ok', 'fail', 'fail']), mon('m2', 'NAS', 'up', ['ok', 'ok', 'ok', 'ok', 'ok', 'ok'])],
+          incidents: [{ id: 'i1', monitorId: 'm1', monitorName: 'Router', startedAt: end - 600_000, recoveredAt: null, durationMs: 600_000, open: true, reason: 'down' }] };
+      })(),
       '/api/operations': { docker: { operations: true }, actions: [{ id: 'container.restart', permitted: true }, { id: 'container.start', permitted: true }] },
     }));
     await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
@@ -2463,7 +2470,10 @@ export async function runWebTests(): Promise<WebResult> {
     expect(acts.sort().join(',') === 'Restart →,Start →', `actions: ${acts.join(',')} (a stopped container is started, an unhealthy one restarted, a monitor has none)`);
     const rail = text(q('.hm-rail')!);
     expect(rail.includes('Updates available') && rail.includes('1.0 → 1.1') && rail.includes('nothing is applied automatically'), `updates card: ${rail}`);
-    expect(rail.includes('95') && rail.includes('1 of 2 up now'), `uptime card: ${rail}`);
+    expect(rail.includes('95') && rail.includes('last 24 hours') && rail.includes('1 of 2 up now'), `uptime card: ${rail}`);
+    const mini = qa('.hm-mrow');
+    expect(mini.length === 1 && text(mini[0]).includes('Router') && mini[0].querySelectorAll('polygon').length > 0, `the mini ribbon is only for the monitor worth a look (an up monitor with no recent incident is left out): ${mini.map((m) => text(m)).join('|')}`);
+    expect((mini[0].querySelector('[role="img"]')?.getAttribute('aria-label') || '').includes('Router'), 'the mini ribbon has no text summary');
     expect(text(q('.hm-hero')!).includes('1 update available') && text(q('.hm-hero')!).includes('3 need attention'), 'the greeting counts are not the same as the bands');
     expect(qa('.hm-upd').length === 1 && text(qa('.hm-upd')[0]).includes('1.1'), 'the update chip is missing from the tile');
   });

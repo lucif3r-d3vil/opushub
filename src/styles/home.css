@@ -114,8 +114,9 @@
 .hm-bignum b { font-size: 40px; font-weight: 300; letter-spacing: -0.035em; }
 .hm-pct { font-size: 20px; }
 .hm-bignum span:not(.hm-pct) { color: var(--ink-2); font-size: 12.5px; }
-.hm-mrow { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: center; padding: 6px 0; font-size: 13px; color: var(--ink-2); }
-.hm-mrow:hover { color: var(--ink); } .hm-mrow small { color: var(--ink-3); text-transform: capitalize; }
+.hm-mrow { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: center; padding: 5px 0; font-size: 12.5px; color: var(--ink-2); }
+.hm-mrow:hover { color: var(--ink); }
+.hm-mname { display: flex; align-items: center; gap: 8px; min-width: 0; } .hm-mname span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .hm-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .hm-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 999px; border: 1px solid var(--hair); background: color-mix(in srgb, var(--ink) 5%, transparent); font-size: 13px; color: var(--ink-2); transition: all var(--t-fast) var(--ease); }
 .hm-chip:hover { color: var(--ink); border-color: var(--hair-strong); background: color-mix(in srgb, var(--ink) 9%, transparent); transform: translateY(-1px); }
