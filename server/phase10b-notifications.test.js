@@ -53,13 +53,16 @@ function resetNotifications() {
 /* policy: one model, strictest wins                                    */
 /* ------------------------------------------------------------------ */
 
-test('the default policy ships every channel, Telegram included and off', () => {
+test('the default policy ships the in-app and Telegram channels, Telegram off', () => {
   resetNotifications();
   const p = policy.getPolicy();
   assert.equal(p.enabled, true);
   assert.equal(p.minSeverity, 'info');
-  for (const ch of ['browser', 'webhook', 'telegram', 'inApp']) {
+  for (const ch of ['telegram', 'inApp']) {
     assert.ok(p[ch], `channel ${ch} exists`);
+  }
+  for (const gone of ['browser', 'webhook']) {
+    assert.equal(p[gone], undefined, `the ${gone} channel was removed`);
   }
   assert.equal(p.telegram.enabled, false);
   assert.equal(p.telegram.minSeverity, 'warning');
@@ -116,7 +119,7 @@ test('policy writes merge per channel, ignore invalid severities and stay bounde
   assert.equal(next.minSeverity, 'info');
   assert.deepEqual(next.allowedTypes, ['a']);
   assert.equal(next.telegram.minSeverity, 'critical');
-  assert.equal(next.webhook.minSeverity, 'warning', 'untouched channels keep their values');
+  assert.equal(next.inApp.minSeverity, 'info', 'untouched channels keep their values');
   // an explicit empty list clears the filter rather than keeping the old one
   policy.putPolicy({ allowedTypes: ['monitor.state_changed'] });
   assert.deepEqual(policy.putPolicy({ allowedTypes: [] }).allowedTypes, []);
@@ -125,6 +128,23 @@ test('policy writes merge per channel, ignore invalid severities and stay bounde
 /* ------------------------------------------------------------------ */
 /* model + store: stable ids, sanitized reads, restart persistence      */
 /* ------------------------------------------------------------------ */
+
+test('a policy file written before the webhook and browser channels were removed still loads', () => {
+  resetNotifications();
+  fs.mkdirSync(path.dirname(policy.POLICY_FILE), { recursive: true });
+  fs.writeFileSync(policy.POLICY_FILE, JSON.stringify({
+    enabled: true, minSeverity: 'info',
+    browser: { enabled: true, minSeverity: 'critical' },
+    webhook: { enabled: true, minSeverity: 'critical' },
+    telegram: { enabled: true, minSeverity: 'critical' },
+  }));
+  const p = policy.getPolicy();
+  assert.equal(p.telegram.enabled, true);
+  assert.equal(p.telegram.minSeverity, 'critical');
+  assert.equal(p.webhook, undefined);
+  assert.equal(p.browser, undefined);
+  assert.equal(p.inApp.enabled, true, 'channels the old file never mentioned get their defaults');
+});
 
 test('operation notifications link to the services page, which exists', () => {
   const n = model.makeNotificationFromEvent(evt({ type: 'operation.failed', subject: null }));

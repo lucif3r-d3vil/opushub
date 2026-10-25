@@ -1752,7 +1752,7 @@ const V1_ROUTES = new Set([
   // Phase 10B — events & notifications
   '/events', '/events/stream', '/events/stats',
   '/notifications', '/notifications/unread-count', '/notifications/stats',
-  '/notifications/policy', '/notifications/providers', '/notifications/webhook',
+  '/notifications/policy', '/notifications/providers',
   '/notifications/telegram',
   // Phase 10D — containers (the /:ref forms are patterns, matched by the handler itself)
   '/containers/spec-fields',

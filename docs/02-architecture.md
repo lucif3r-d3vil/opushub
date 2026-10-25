@@ -270,7 +270,7 @@ The V1 text above predates these; each is a module family under `server/` with a
 | Area | Where | What it does |
 | --- | --- | --- |
 | Monitoring | `monitoring/` | Own uptime engine: HTTP, TCP and Docker-state checks, scheduler, incidents with real durations, state persisted under `data/monitoring/` |
-| Events and notifications | `events/`, `notifications/` | Event bus with SSE to the browser; notification center (in-app), Telegram and generic-webhook channels, allow-list policy (`notifications/policy.js`) |
+| Events and notifications | `events/`, `notifications/` | Event bus with SSE to the browser; notification center (in-app) and Telegram, allow-list policy (`notifications/policy.js`) |
 | Operations | `operations/`, `containers/`, `stacks/`, `catalog/` | The audited write pipeline: registry of actions, permissions, confirmation tokens, per-target locks and rate limits, audit log. Containers, stacks and catalog installs are planners/runners on top of it |
 | Updates and recovery | `updates/`, `autoheal/`, `registries/` | Update-available state from Diun webhooks, "Update now" with rollback transactions, Autoheal webhook observer, a minimal OCI registry client. OpusHub does not run its own update detector or heal loop yet |
 | Auth | `auth.js` | Single local administrator, sessions, CSRF defence (`06-auth.md`) |

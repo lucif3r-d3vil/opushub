@@ -2031,11 +2031,14 @@ export async function runWebTests(): Promise<WebResult> {
 
   /* 7E/10B — the notifications tab is the canonical provider UI: no legacy channel list,
      no "coming later" anywhere, and the active-alert count survives */
-  await test('settings notifications shows the canonical providers and no legacy channels', async (h) => {
+  await test('settings notifications shows the in-app and Telegram providers and no other channels', async (h) => {
     await h.mount(<TestApp entry="/settings/notifications"><Hub /></TestApp>);
     await h.waitFor(() => text().includes('Telegram provider'), 'the canonical provider blocks');
-    for (const name of ['Notification Center', 'Browser notifications', 'Webhook provider', 'Telegram provider']) {
+    for (const name of ['Notification Center', 'Telegram provider']) {
       expect(text().includes(name), `${name} block is missing`);
+    }
+    for (const gone of ['Browser notifications', 'Webhook provider']) {
+      expect(!text().includes(gone), `the removed ${gone} block is still shown`);
     }
     expect(!text().includes('Coming later'), 'a legacy "coming later" channel is still shown');
     expect(!text().includes('Alert channels'), 'the legacy alert-channels block is still shown');
@@ -2632,8 +2635,6 @@ export async function runWebTests(): Promise<WebResult> {
     let saved = { enabled: false, chatId: '123456789', configured: true, hasToken: true, tokenMasked: '••••••••Dsaw' };
     const policyDoc = {
       enabled: true, minSeverity: 'info', allowedTypes: [], allowedSources: [],
-      browser: { enabled: false, minSeverity: 'warning', allowedTypes: [], allowedSources: [] },
-      webhook: { enabled: false, minSeverity: 'warning', allowedTypes: [], allowedSources: [] },
       telegram: { enabled: false, minSeverity: 'warning', allowedTypes: [], allowedSources: [] },
       inApp: { enabled: true, minSeverity: 'info', allowedTypes: [], allowedSources: [] },
     };
@@ -2643,7 +2644,6 @@ export async function runWebTests(): Promise<WebResult> {
         if (body && typeof body === 'object') Object.assign(policyDoc.telegram, (body as { telegram?: object }).telegram || {});
         return { policy: policyDoc };
       },
-      '/api/notifications/webhook': { webhook: { url: null, hasSecret: false, enabled: false, allowInternal: false, allowInsecure: false } },
       '/api/notifications/telegram': (body: unknown) => {
         if (body && typeof body === 'object') {
           const b = body as { botToken?: string | null; chatId?: string | null; enabled?: boolean };

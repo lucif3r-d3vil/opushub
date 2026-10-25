@@ -1,19 +1,15 @@
 // Phase 10B — /api/notifications routes
 //
 // All routes sit behind the session + CSRF gate in server/api.js: reads require a session,
-// writes additionally require a same-origin request. Secrets (webhook secret, Telegram bot
+// writes additionally require a same-origin request. Secrets (the Telegram bot
 // token) are write-only — GET responses carry masked forms and booleans, never the value.
 
 import { listNotifications, unreadCount, markRead, markAllRead, getNotification, stats as notifStats } from './notifications/store.js';
 import { getPolicy, putPolicy } from './notifications/policy.js';
-import { getWebhookConfig, putWebhookConfig, sendWebhook, validateWebhookUrl, webhookProvider } from './notifications/providers/webhook.js';
 import { getTelegramConfig, putTelegramConfig, sendTestMessage, telegramProvider } from './notifications/providers/telegram.js';
 import { listProviders, registerProvider } from './notifications/providers/registry.js';
 
 // Ensure providers are registered (init.js also registers; registration is idempotent)
-try {
-  registerProvider('webhook', webhookProvider);
-} catch {}
 try {
   registerProvider('telegram', telegramProvider);
 } catch {}
@@ -80,55 +76,6 @@ export async function handleNotifications({ p, method, send, jsonBody, query }) 
   // GET /api/notifications/providers
   if (p === '/api/notifications/providers' && method === 'GET') {
     return send(200, { providers: listProviders() });
-  }
-
-  // GET /api/notifications/webhook — config (masked)
-  if (p === '/api/notifications/webhook' && method === 'GET') {
-    return send(200, { webhook: getWebhookConfig() });
-  }
-
-  // PUT /api/notifications/webhook
-  if (p === '/api/notifications/webhook' && method === 'PUT') {
-    const body = await jsonBody();
-    try {
-      const next = putWebhookConfig({
-        url: body?.url,
-        secret: body?.secret,
-        enabled: body?.enabled,
-        allowInternal: body?.allowInternal,
-        allowInsecure: body?.allowInsecure,
-      });
-      return send(200, { ok: true, webhook: next });
-    } catch (err) {
-      return send(err.status || 400, { error: err.message, code: err.code || 'invalid_webhook' });
-    }
-  }
-
-  // POST /api/notifications/webhook/test — send test event
-  if (p === '/api/notifications/webhook/test' && method === 'POST') {
-    const body = await jsonBody();
-    // Validate URL if provided in body, else use stored
-    let urlToTest = body?.url;
-    if (!urlToTest) {
-      const testEvent = {
-        id: `evt-test-${Date.now()}`,
-        t: Date.now(),
-        type: 'system.boot',
-        severity: 'info',
-        source: 'system',
-        message: 'Test notification from OpusHub',
-        subject: { kind: 'test', id: 'test', label: 'Test event', href: '/' },
-        correlation: null,
-        payload: { test: true },
-      };
-      const result = await sendWebhook(testEvent, null);
-      return send(result.ok ? 200 : 400, { ok: result.ok, result });
-    } else {
-      // Validate provided URL without saving
-      const validation = validateWebhookUrl(urlToTest, { allowInternal: !!body?.allowInternal, allowInsecure: !!body?.allowInsecure });
-      if (!validation.ok) return send(400, { error: validation.reason, code: 'invalid_url' });
-      return send(200, { ok: true, message: 'URL appears valid', url: validation.url });
-    }
   }
 
   // GET /api/notifications/telegram — config (token masked, never returned)

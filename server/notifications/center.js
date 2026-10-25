@@ -2,7 +2,7 @@
 //
 // The dispatcher: one event in, one persisted in-app notification out (idempotent by
 // eventId), plus fire-and-forget fan-out to each enabled outbound provider. Every
-// provider send is failure-isolated — a broken webhook or Telegram configuration is
+// provider send is failure-isolated — a broken Telegram configuration is
 // recorded by that provider as a delivery failure and can never break event publication,
 // the notification center, the other providers, monitoring or the scheduler.
 
@@ -12,18 +12,7 @@ import * as policy from './policy.js';
 import { getProvider } from './providers/registry.js';
 
 function fanOut(evt, saved) {
-  // Webhook
-  if (policy.shouldSendWebhook(evt)) {
-    const webhook = getProvider('webhook');
-    if (webhook && webhook.isEnabled && webhook.isEnabled()) {
-      // fire and forget, but caught and recorded by the provider itself
-      webhook.send(evt, saved).catch((err) => {
-        console.warn(`[notifications] webhook send failed: ${String(err?.message || err).slice(0, 160)}`);
-      });
-    }
-  }
-
-  // Telegram (outbound only — same gates, same isolation, independent of webhook)
+  // Telegram (outbound only — same gates, same isolation)
   if (policy.shouldSendTelegram(evt)) {
     const telegram = getProvider('telegram');
     if (telegram && telegram.isEnabled && telegram.isEnabled()) {
@@ -33,12 +22,6 @@ function fanOut(evt, saved) {
       });
     }
   }
-
-  // Browser notifications are handled client-side via SSE + Notification API.
-  // Server only decides if event qualifies (policy.shouldSendBrowser), and includes a flag
-  // in the SSE payload? Actually we let client decide based on its own policy fetch, but we
-  // can include a hint in notification record. For now, nothing server-side to push for browser
-  // beyond the event itself (SSE).
 }
 
 export function createFromEvent(evt) {

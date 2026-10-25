@@ -30,7 +30,7 @@ You do **not** need to be a developer or know React/Node to use it.
 | **System** | Honest host metrics — CPU, memory, storage, network — read directly from the Linux kernel (`/proc` and `/sys`) |
 | **Operations** | Confirmation-gated, audited actions on containers (start, stop, restart, pause, kill, rename, recreate, edit, update, remove), stacks (deploy, start, stop, remove), images (pull) and a small service catalog. Each action shows its consequence and needs a server-minted confirmation token |
 | **Updates & recovery** | Update-available state and "Update now" (pull, recreate, health-check, rollback) for containers, fed today by [Diun](https://crazymax.dev/diun/) webhooks; recovery events from [Docker Autoheal](https://github.com/willfarrell/docker-autoheal) webhooks. Both are external tools OpusHub *observes*; it does not yet replace them. Webhooks are authenticated with `OPUSHUB_WEBHOOK_SECRET` |
-| **Notifications** | An in-app notification center plus Telegram and generic-webhook channels, driven by an event bus (container state, monitor incidents, updates, operations, alerts) and a simple allow-list policy |
+| **Notifications** | An in-app notification center plus Telegram, driven by an event bus (container state, monitor incidents, updates, operations, alerts) and a simple allow-list policy |
 | **Activity** | A clean timeline of things that actually happened: config changes, container state changes, operations, etc. |
 | **Settings** | Appearance, Hub layout (drag & drop), widgets, icons, integrations, monitoring defaults, and more — all written to real files on disk |
 

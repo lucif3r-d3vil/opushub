@@ -101,46 +101,7 @@ export function useUnreadCount() {
   return { unread: q.data?.unread ?? 0, total: q.data?.total ?? 0, loading: q.loading, refresh: q.refresh };
 }
 
-// Browser notifications
-export function canUseBrowserNotifications() {
-  return typeof window !== 'undefined' && 'Notification' in window;
-}
-
-export function browserPermission(): NotificationPermission | 'unsupported' {
-  if (!canUseBrowserNotifications()) return 'unsupported';
-  return Notification.permission;
-}
-
-export async function requestBrowserPermission(): Promise<NotificationPermission | 'unsupported'> {
-  if (!canUseBrowserNotifications()) return 'unsupported';
-  if (Notification.permission === 'granted') return 'granted';
-  if (Notification.permission === 'denied') return 'denied';
-  try {
-    const perm = await Notification.requestPermission();
-    return perm;
-  } catch {
-    return Notification.permission as NotificationPermission;
-  }
-}
-
-export function showBrowserNotification(title: string, opts: { body?: string; tag?: string; icon?: string } = {}) {
-  if (!canUseBrowserNotifications()) return null;
-  if (Notification.permission !== 'granted') return null;
-  try {
-    const n = new Notification(title, {
-      body: opts.body,
-      tag: opts.tag,
-      icon: opts.icon || '/favicon.svg',
-    });
-    // auto close after 8s
-    setTimeout(() => { try { n.close(); } catch {} }, 8000);
-    return n;
-  } catch {
-    return null;
-  }
-}
-
-// Policy & webhook hooks
+// Policy hook
 export function useNotificationPolicy() {
   const q = useSharedQuery<{ policy: any }>('/api/notifications/policy', 30000);
   const save = useCallback(async (policy: any) => {
@@ -150,20 +111,6 @@ export function useNotificationPolicy() {
     return res.policy;
   }, []);
   return { policy: q.data?.policy || null, loading: q.loading, error: q.error, refresh: q.refresh, save };
-}
-
-export function useWebhookConfig() {
-  const q = useSharedQuery<{ webhook: any }>('/api/notifications/webhook', 30000);
-  const save = useCallback(async (cfg: any) => {
-    const res = await put<{ webhook: any }>('/api/notifications/webhook', cfg);
-    invalidateShared('/api/notifications/webhook');
-    return res.webhook;
-  }, []);
-  const test = useCallback(async (url?: string) => {
-    const res = await post<{ ok: boolean; result: any }>('/api/notifications/webhook/test', url ? { url } : {});
-    return res;
-  }, []);
-  return { webhook: q.data?.webhook || null, loading: q.loading, error: q.error, refresh: q.refresh, save, test };
 }
 
 export interface TelegramConfig {

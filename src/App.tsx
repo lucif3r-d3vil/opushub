@@ -10,7 +10,6 @@ import { LogoMark } from './components/Logo';
 import { BackgroundImage } from './components/BackgroundImage';
 import { NotificationBell } from './components/Notifications';
 import { useLiveEvents } from './lib/sse';
-import { useNotificationPolicy, canUseBrowserNotifications, browserPermission, showBrowserNotification } from './lib/notifications';
 
 const Hub = lazy(() => import('./pages/Hub'));
 const Services = lazy(() => import('./pages/Services'));
@@ -97,30 +96,8 @@ function Shell() {
     return () => window.removeEventListener('opushub:open-search', open);
   }, []);
 
-  // Phase 10B — live events via SSE, with optional browser notifications
-  const { policy } = useNotificationPolicy();
-  useLiveEvents({
-    enabled: true,
-    onEvent: (evt) => {
-      // Browser notification if policy allows and permission granted
-      try {
-        if (!policy) return;
-        if (!policy.browser?.enabled) return;
-        const order = { info: 0, notice: 1, warning: 2, critical: 3 };
-        const min = order[policy.browser.minSeverity as keyof typeof order] ?? 2;
-        const sev = order[evt.severity as keyof typeof order] ?? 0;
-        if (sev < min) return;
-        if (policy.allowedTypes?.length && !policy.allowedTypes.includes(evt.type)) return;
-        if (policy.allowedSources?.length && !policy.allowedSources.includes(evt.source)) return;
-        if (!canUseBrowserNotifications()) return;
-        if (browserPermission() !== 'granted') return;
-        showBrowserNotification(evt.subject?.label ? `${evt.type}: ${evt.subject.label}` : evt.message || evt.type, {
-          body: evt.message,
-          tag: evt.id,
-        });
-      } catch {}
-    },
-  });
+  // Phase 10B — the shell's one SSE connection: it keeps the bell and its unread count live.
+  useLiveEvents({ enabled: true });
   const location = useLocation();
   return (
     <>

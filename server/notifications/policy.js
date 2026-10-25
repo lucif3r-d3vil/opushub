@@ -5,8 +5,7 @@
 // enabled flag, its own minimum severity, and its own type/source allow-lists. Both
 // levels must pass — the effective severity threshold is the STRICTER of the global
 // and the channel minimum, and a type/source must be allowed by both levels. There is
-// no separate per-provider filtering system; Telegram, webhook, browser and in-app all
-// share this model.
+// no separate per-provider filtering system; Telegram and in-app share this model.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,20 +30,7 @@ const DEFAULT_POLICY = Object.freeze({
   minSeverity: 'info', // info, notice, warning, critical
   allowedTypes: [], // empty = all
   allowedSources: [], // empty = all
-  browser: {
-    enabled: false,
-    minSeverity: 'warning',
-    allowedTypes: [],
-    allowedSources: [],
-  },
-  webhook: {
-    enabled: false,
-    minSeverity: 'warning',
-    allowedTypes: [],
-    allowedSources: [],
-  },
-  // Phase 10B completion — Telegram is an outbound provider like webhook: same model,
-  // same gates, no private filtering language.
+  // Telegram is an outbound provider: same model, same gates, no private filtering language.
   telegram: {
     enabled: false,
     minSeverity: 'warning',
@@ -59,7 +45,7 @@ const DEFAULT_POLICY = Object.freeze({
   },
 });
 
-const CHANNELS = ['browser', 'webhook', 'telegram', 'inApp'];
+const CHANNELS = ['telegram', 'inApp'];
 
 function ensureDir() {
   try { fs.mkdirSync(DIR, { recursive: true }); } catch {}
@@ -174,16 +160,8 @@ export function shouldCreateInApp(event) {
   return shouldNotify(event, 'inApp');
 }
 
-export function shouldSendWebhook(event) {
-  return shouldNotify(event, 'webhook');
-}
-
 export function shouldSendTelegram(event) {
   return shouldNotify(event, 'telegram');
-}
-
-export function shouldSendBrowser(event) {
-  return shouldNotify(event, 'browser');
 }
 
 export const POLICY_FILE = FILE;
