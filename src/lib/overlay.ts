@@ -6,7 +6,7 @@
 // container is gone are reported by the server as unmatched rather than rendered.
 import { invalidateShared, put } from './api';
 import { renameGroupAt } from './groupName';
-import type { Service, ServicesDoc, StacksDoc } from './types';
+import type { Service, ServicesDoc } from './types';
 
 export interface DraftService {
   name: string;
@@ -223,33 +223,6 @@ export function overlayPayload(groups: DraftGroup[]) {
       })),
     })),
   };
-}
-
-/** Set an icon on a stack overlay (stacks.yaml). Existing entries are preserved. */
-export async function saveStackIcon(doc: StacksDoc, stackId: string, icon: string | null): Promise<void> {
-  const target = doc.stacks.find((s) => s.id === stackId);
-  if (!target) throw new Error(`stack not found: ${stackId}`);
-  const entries = doc.stacks
-    .filter((s) => s.configured || s.id === stackId)
-    .map((s) => ({
-      name: s.name,
-      project: s.project || s.id,
-      displayName: s.name,
-      description: s.description,
-      icon: s.id === stackId ? icon : s.icon,
-      notes: s.notes,
-    }));
-  await put('/api/stacks', { stacks: entries });
-  invalidateShared('/api/stacks');
-  invalidateShared('/api/services');
-}
-
-/** Set an icon on a discovered service (services.yaml) in one call. */
-export async function applyServiceIcon(doc: ServicesDoc, container: string, icon: string | null): Promise<void> {
-  const svc = (doc.services ?? []).find((s) => s.name === container);
-  if (!svc) throw new Error(`no container named ${container}`);
-  const base = overlayFromInventory(doc);
-  await saveOverlay(setIcon(base, container, icon));
 }
 
 /** Persist the overlay and refresh every cached view of the inventory. */

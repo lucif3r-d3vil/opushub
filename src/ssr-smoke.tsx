@@ -9,8 +9,8 @@ const routes = [
   // under SSR, so smoke the canonical mount, not the shims).
   '/system/host',
   '/settings/appearance', '/settings/hub', '/settings/widgets', '/settings/templates',
-  '/settings/general', '/settings/services', '/settings/groups', '/settings/bookmarks', '/settings/integrations', '/settings/authentication', '/settings/environment',
-  '/icons', '/nope',
+  '/settings/general', '/settings/services', '/settings/groups', '/settings/bookmarks', '/settings/authentication', '/settings/environment',
+  '/nope',
 ];
 let failed = 0;
 for (const route of routes) {

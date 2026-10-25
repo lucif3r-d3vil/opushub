@@ -12,7 +12,6 @@ import { HubSurface } from '../../src/components/hub/HubSurface';
 import { SearchOverlay, useGlobalSearchHotkey } from '../../src/components/SearchOverlay';
 import Hub from '../../src/pages/Hub';
 import Settings from '../../src/pages/Settings';
-import IconsPage from '../../src/pages/Icons';
 import ServiceDetail from '../../src/pages/ServiceDetail';
 import StackDetail from '../../src/pages/StackDetail';
 import SystemPage from '../../src/pages/System';
@@ -542,7 +541,6 @@ function TestApp({ children, entry = '/' }: { children: ReactNode; entry?: strin
             <Route path="/" element={children} />
             <Route path="/settings/:tab" element={<Settings />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/icons" element={<IconsPage />} />
             <Route path="/catalog" element={<CatalogPage />} />
             <Route path="/catalog/:id" element={<CatalogInstallPage />} />
             <Route path="/activity" element={<div data-test="activity">activity</div>} />
@@ -975,23 +973,6 @@ export async function runWebTests(): Promise<WebResult> {
       }
     }
     void h;
-  });
-
-  /* 13 — the icon browser can apply an icon to a real target */
-  await test('icon browser lists discovered targets and searches the icon sets', async (h) => {
-    const routes = { ...stubRoutes(), '/api/icons/search': { results: [{ ref: 'mdi:movie-open', collection: 'mdi' }], local: [] }, '/api/icons/local': { files: [] } };
-    delete (routes as Record<string, unknown>)['/api/services/Music/wave'];
-    const h2 = await createHarness({ routes, fallback: () => ({}) });
-    try {
-      await h2.mount(<TestApp entry="/icons"><Hub /></TestApp>);
-      await h2.waitFor(() => h2.calls.some((c) => c.path.startsWith('/api/icons/search')), 'the icon collections to be searched');
-      expect(/icon/i.test(text()), 'the icon browser did not render');
-      expect(text().includes('Wave'), 'the discovered service is not offered as a target');
-      expect(text().includes('Media'), 'the discovered stack is not offered as a target');
-      expect(h2.calls.some((c) => c.path.startsWith('/api/icons/search')), 'the icon browser never searched the collections');
-    } finally {
-      await h2.unmount();
-    }
   });
 
   /* 14 — the detail pages still render the canonical record */

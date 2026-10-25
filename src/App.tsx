@@ -24,7 +24,6 @@ const Host = lazy(() => import('./pages/Host'));
 const SystemPage = lazy(() => import('./pages/System'));
 const Activity = lazy(() => import('./pages/Activity'));
 const Settings = lazy(() => import('./pages/Settings'));
-const IconsPage = lazy(() => import('./pages/Icons'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Setup = lazy(() => import('./pages/Setup'));
 const Login = lazy(() => import('./pages/Login'));
@@ -240,7 +239,6 @@ function ShellWithRoutes() {
             <Route path="settings" element={<Settings />} />
             <Route path="settings/:tab" element={<Settings />} />
             <Route path="settings/:tab/:item" element={<Settings />} />
-            <Route path="icons" element={<IconsPage />} />
             <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

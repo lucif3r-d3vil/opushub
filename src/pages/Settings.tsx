@@ -100,7 +100,6 @@ export default function SettingsPage() {
               ))}
             </div>
           ))}
-          <Link to="/icons" style={{ marginTop: 'var(--sp-4)' }}>Icon browser</Link>
         </nav>
         <div className="settings-pane">
           {showPreview && (

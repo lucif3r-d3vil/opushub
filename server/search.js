@@ -23,7 +23,6 @@ const PAGES = [
   { title: 'Host', href: '/host', hint: 'The machine OpusGrid runs on', kind: 'page', keywords: ['machine', 'server', 'node', 'cpu', 'memory', 'kernel', 'os', 'provider'] },
   { title: 'System', href: '/system', hint: 'Host vitals', kind: 'page', keywords: ['cpu', 'memory', 'disk', 'network', 'uptime'] },
   { title: 'Activity', href: '/activity', hint: 'What happened, when', kind: 'page', keywords: ['events', 'history', 'log'] },
-  { title: 'Icon browser', href: '/icons', hint: 'Find an icon and apply it', kind: 'page', keywords: ['logo', 'glyph', 'symbol'] },
   { title: 'Settings', href: '/settings/appearance', hint: 'Everything you can change', kind: 'page', keywords: ['config', 'preferences'] },
 ];
 

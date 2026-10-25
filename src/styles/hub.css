@@ -242,13 +242,6 @@
 .group-svc { display: flex; align-items: center; gap: var(--sp-3); padding: 6px 0; border-top: 1px solid var(--hair); font-size: var(--fs-meta); }
 .group-svc .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.icon-apply-list { display: flex; flex-direction: column; }
-.icon-apply-list > li { display: flex; align-items: center; gap: var(--sp-3); padding: 9px 0; border-top: 1px solid var(--hair); }
-.icon-apply-list > li:first-child { border-top: 0; }
-.icon-apply-list .grow { min-width: 0; display: flex; flex-direction: column; }
-.icon-apply-list .title { font-weight: 560; }
-.icon-apply-list .sub { color: var(--ink-3); font-size: var(--fs-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {
   .hub-zones { grid-template-columns: 1fr; gap: var(--hub-gap); }

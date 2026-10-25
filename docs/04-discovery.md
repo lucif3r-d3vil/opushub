@@ -132,7 +132,7 @@ Icon resolution: explicit `icon:` → `opushub.icon` label → derived by probin
 collections with slugs taken from the image reference (`ghcr.io/jellyfin/jellyfin:10.9.7` →
 `si:jellyfin`) → monogram. There is no application→icon table, and no network call: the probe reads
 `@iconify-json/{lucide,mdi,simple-icons}` locally, so it works on an air-gapped host. `iconSource`
-says which tier answered and `iconSuggestion` carries the guess into the Icon Browser. Groups are
+says which tier answered and `iconSuggestion` carries the guess into the icon picker in the service editor. Groups are
 presentation only: a group heading exists because containers are in it (from `group:` or
 `opushub.group`), never because `services.yaml` declared it.
 

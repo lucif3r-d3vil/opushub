@@ -140,7 +140,7 @@ socket's `:ro` mount does not restrict API writes; see `OPUSHUB_OPERATIONS_SOCKE
 
 - **Routing**: React Router with pages per §6 of the brief; hub is `/`, not a dashboard island.
   Pages: `/`, `/services`, `/services/:group/:name`, `/stacks`, `/stacks/:id`, `/system`,
-  `/activity`, `/settings/:tab`, `/icons`.
+  `/activity`, `/settings/:tab`.
 - **Data**: tiny typed fetch client + `useSharedQuery(path, ttl)` (stale-while-revalidate,
   visibility-paused, **one poller per path shared by every consumer** — the Hub and its live preview
   are two subscribers of one request, not two requests). `useHubData` decides what a page needs from

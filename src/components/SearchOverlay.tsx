@@ -87,7 +87,6 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     { title: 'Go System', subtitle: 'Host vitals', kind: 'action', href: '/system', keywords: ['cpu', 'memory', 'host'] },
     { title: 'Go Activity', subtitle: 'What happened, when', kind: 'action', href: '/activity', keywords: ['events', 'timeline', 'history', 'log'] },
     { title: 'Go Settings', subtitle: 'Everything you can change', kind: 'action', href: '/settings', keywords: ['preferences', 'config'] },
-    { title: 'Go Icons', subtitle: 'Icon browser', kind: 'action', href: '/icons', keywords: ['glyphs', 'logos'] },
     { title: 'Open Host', subtitle: 'The machine OpusGrid runs on', kind: 'action', href: '/system/host', keywords: ['machine', 'server', 'node', 'identity'] },
     { title: 'Open Connections', subtitle: 'Docker connection status', kind: 'action', href: '/settings/connections', keywords: ['docker', 'engine', 'socket', 'status'] },
     // presentation — no infrastructure mutation, ever
@@ -103,7 +102,6 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     { title: 'Open templates', subtitle: 'Hub composition presets', kind: 'action', href: '/settings/templates', keywords: ['preset', 'composition'] },
     { title: 'Arrange Hub widgets', subtitle: 'Add, hide, resize, reorder', kind: 'action', href: '/settings/widgets' },
     { title: 'Customize a service', subtitle: 'Name, icon, group, URL', kind: 'action', href: '/settings/services' },
-    { title: 'Browse icons', subtitle: 'Find one and apply it to a service', kind: 'action', href: '/icons' },
     { title: 'Account & sessions', subtitle: 'Password and signed-in browsers', kind: 'action', href: '/settings/authentication', keywords: ['password', 'security', 'sessions', 'sign out', 'revoke'] },
     { title: 'Install identity', subtitle: 'Name and greeting', kind: 'action', href: '/settings/general', keywords: ['name', 'title', 'about'] },
     { title: 'Environment', subtitle: 'Engine status and URL sources', kind: 'action', href: '/settings/environment', keywords: ['docker', 'engine', 'socket', 'discovery', 'homepage'] },
