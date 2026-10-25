@@ -59,7 +59,7 @@ const TABS = [
   { id: 'bookmarks', label: 'Bookmarks', section: 'Content' },
   { id: 'integrations', label: 'Integrations', section: 'Connections' },
   { id: 'notifications', label: 'Notifications', section: 'Connections' },
-  // Phase 9 — the OpusGrid providers: what is connected, what it can do, and what it cannot
+  // the Docker connection: whether the engine answers and lets OpusHub list containers
   { id: 'connections', label: 'Connections', section: 'Connections' },
   { id: 'import', label: 'Import & migration', section: 'Configuration' },
   { id: 'history', label: 'History', section: 'Configuration' },
@@ -1782,7 +1782,7 @@ function NotificationsTab() {
   return (
     <>
       <p className="lede">
-        Live events from monitoring, alerts, operations and infrastructure flow through the Event Bus, into the
+        Live events from monitoring, alerts and operations flow through the Event Bus, into the
         Notification Center, and optionally out via Webhooks or browser notifications. All of it is bounded, sanitized,
         and authenticated — the browser can never publish arbitrary events.
       </p>

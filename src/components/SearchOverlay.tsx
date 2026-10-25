@@ -26,17 +26,17 @@ const KIND_LABEL: Record<string, string> = {
   // result from a page about configuring things — it opens the editor on that row.
   config: 'Configuration', activity: 'Recent activity', bookmark: 'Bookmarks', news: 'News',
   // Phase 8: operations are destinations, not triggers — selecting one opens the confirmation.
-  alert: 'Alerts', infra: 'Infrastructure', operation: 'Operations',
+  alert: 'Alerts', operation: 'Operations',
   // Phase 10A: a monitor and an incident are different kinds of result — one is a thing being
   // watched, the other is a thing that went wrong — and both are destinations.
   monitor: 'Monitors', incident: 'Incidents',
 };
-const ORDER = ['Actions', 'Operations', 'Alerts', 'Incidents', 'Monitors', 'Services', 'Stacks', 'Infrastructure', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
+const ORDER = ['Actions', 'Operations', 'Alerts', 'Incidents', 'Monitors', 'Services', 'Stacks', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
 
 const KIND_ICON: Record<string, string> = {
   page: 'lucide:house', stack: 'lucide:layers', bookmark: 'lucide:bookmark', news: 'lucide:newspaper',
   action: 'lucide:command', setting: 'lucide:sliders-horizontal', activity: 'lucide:activity',
-  config: 'lucide:settings-2', alert: 'lucide:triangle-alert', infra: 'lucide:server',
+  config: 'lucide:settings-2', alert: 'lucide:triangle-alert',
   operation: 'lucide:power', monitor: 'lucide:activity', incident: 'lucide:triangle-alert',
 };
 
@@ -88,15 +88,8 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     { title: 'Go Activity', subtitle: 'What happened, when', kind: 'action', href: '/activity', keywords: ['events', 'timeline', 'history', 'log'] },
     { title: 'Go Settings', subtitle: 'Everything you can change', kind: 'action', href: '/settings', keywords: ['preferences', 'config'] },
     { title: 'Go Icons', subtitle: 'Icon browser', kind: 'action', href: '/icons', keywords: ['glyphs', 'logos'] },
-    // Phase 9 — infrastructure navigation. Destinations only: the palette opens a page, it never
-    // operates on anything.
-    { title: 'Open Infrastructure', subtitle: 'Engine, storage, network, power, topology', kind: 'action', href: '/system/infrastructure', keywords: ['docker', 'engine', 'infrastructure', 'opusgrid'] },
-    { title: 'Open Host', subtitle: 'The machine OpusGrid runs on', kind: 'action', href: '/system/host', keywords: ['machine', 'server', 'node', 'identity', 'providers'] },
-    { title: 'Open Storage', subtitle: 'Filesystems, ZFS pools and datasets', kind: 'action', href: '/system/infrastructure?tab=storage', keywords: ['disk', 'zfs', 'pool', 'dataset', 'mount', 'capacity'] },
-    { title: 'Open Network', subtitle: 'Interfaces, routing, DNS, OPNsense', kind: 'action', href: '/system/infrastructure?tab=network', keywords: ['interface', 'route', 'gateway', 'dns', 'opnsense'] },
-    { title: 'Open Power', subtitle: 'UPS and PDU', kind: 'action', href: '/system/infrastructure?tab=power', keywords: ['ups', 'pdu', 'battery', 'outlet'] },
-    { title: 'Open Topology', subtitle: 'How the OpusGrid fits together', kind: 'action', href: '/system/infrastructure?tab=topology', keywords: ['graph', 'map', 'layers', 'physical'] },
-    { title: 'Open Connections', subtitle: 'Provider status and capabilities', kind: 'action', href: '/settings/connections', keywords: ['provider', 'opnsense', 'ups', 'pdu', 'zfs', 'capability'] },
+    { title: 'Open Host', subtitle: 'The machine OpusGrid runs on', kind: 'action', href: '/system/host', keywords: ['machine', 'server', 'node', 'identity'] },
+    { title: 'Open Connections', subtitle: 'Docker connection status', kind: 'action', href: '/settings/connections', keywords: ['docker', 'engine', 'socket', 'status'] },
     // presentation — no infrastructure mutation, ever
     {
       title: settings?.appearance.theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode',

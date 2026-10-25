@@ -214,7 +214,7 @@ export function NotificationPanel({ anchor, onClose }: { anchor?: HTMLElement | 
           </div>
         )}
         {!loading && !error && notifications.length === 0 && (
-          <p className="stale-note notif-state">You're all caught up — new monitoring, alert, operation and infrastructure events will appear here.</p>
+          <p className="stale-note notif-state">You're all caught up — new monitoring, alert and operation events will appear here.</p>
         )}
         {notifications.map((n) => (
           <NotificationRow key={n.id} n={n} busy={busyId === n.id} onRead={(id) => void doRead(id)} onNavigate={onClose} />

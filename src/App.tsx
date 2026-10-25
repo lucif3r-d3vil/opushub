@@ -22,7 +22,6 @@ const Catalog = lazy(() => import('./pages/Catalog'));
 const CatalogInstall = lazy(() => import('./pages/CatalogInstall'));
 const StackDetail = lazy(() => import('./pages/StackDetail'));
 const ManagedStack = lazy(() => import('./pages/ManagedStack'));
-const Infrastructure = lazy(() => import('./pages/Infrastructure'));
 const Host = lazy(() => import('./pages/Host'));
 const SystemPage = lazy(() => import('./pages/System'));
 const Activity = lazy(() => import('./pages/Activity'));
@@ -290,15 +289,14 @@ function ShellWithRoutes() {
             <Route path="stacks/:name" element={<StackDetail />} />
             <Route path="catalog" element={<Catalog />} />
             <Route path="catalog/:id" element={<CatalogInstall />} />
-            {/* System is the parent for the machine: live vitals, the host itself, and the
-                infrastructure views (engine, storage/ZFS, network, power, topology). */}
+            {/* System is the parent for the machine: live vitals and the host itself. */}
             <Route path="system" element={<SystemPage />} />
             <Route path="system/host" element={<Host />} />
-            <Route path="system/infrastructure" element={<Infrastructure />} />
             {/* Legacy mounts redirect, never 404: stored notifications, alert links and
                 bookmarks still carry these paths, and they keep arriving where they meant to. */}
             <Route path="host" element={<LegacyRedirect to="/system/host" />} />
-            <Route path="infrastructure" element={<LegacyRedirect to="/system/infrastructure" />} />
+            <Route path="infrastructure" element={<LegacyRedirect to="/system" />} />
+            <Route path="system/infrastructure" element={<LegacyRedirect to="/system" />} />
             <Route path="activity" element={<Activity />} />
             <Route path="settings" element={<Settings />} />
             <Route path="settings/:tab" element={<Settings />} />

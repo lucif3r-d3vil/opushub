@@ -123,7 +123,7 @@ export function useLiveEvents({
     const knownTypes = [
       'monitor.state_changed', 'monitor.incident.opened', 'monitor.incident.recovered',
       'alert.created', 'alert.resolved', 'operation.completed', 'operation.failed',
-      'infrastructure.health_changed', 'service.down', 'service.up',
+      'service.down', 'service.up',
     ];
     for (const t of knownTypes) {
       es.addEventListener(t, handleMessage as EventListener);

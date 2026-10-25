@@ -1,5 +1,5 @@
-// System view switcher — the rail's single System entry has three views: live vitals, the host
-// itself, and the infrastructure surface (engine, storage/ZFS, network, power, topology).
+// System view switcher — the rail's single System entry has two views: live vitals and the host
+// itself.
 // Same pattern the Monitoring page uses for Monitors/Incidents: chips that are real links, so
 // every view is deep-linkable and the active one is announced.
 import { NavLink } from 'react-router-dom';
@@ -7,7 +7,6 @@ import { NavLink } from 'react-router-dom';
 const VIEWS = [
   { to: '/system', label: 'Vitals', end: true, keywords: 'host vitals, resources, charts' },
   { to: '/system/host', label: 'Host', end: false, keywords: 'the machine OpusGrid runs on' },
-  { to: '/system/infrastructure', label: 'Infrastructure', end: false, keywords: 'engine, storage, network, power, topology' },
 ] as const;
 
 export function SystemNav() {

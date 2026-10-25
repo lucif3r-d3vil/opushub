@@ -10,10 +10,12 @@ import { Link } from 'react-router-dom';
 
 export interface DockerStatus {
   ok: boolean;
-  state?: 'connected' | 'no-socket' | 'socket-missing' | 'invalid-endpoint' | 'unreachable';
+  state?: 'connected' | 'no-socket' | 'socket-missing' | 'invalid-endpoint' | 'unreachable' | 'not-permitted';
   reason?: string;
   version?: string;
   api?: string;
+  /** how many containers the engine listed — the proof OpusHub may use it, not just reach it */
+  containers?: number;
 }
 
 export function useDockerStatus(refreshMs = 60_000) {

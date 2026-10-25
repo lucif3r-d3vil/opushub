@@ -5,9 +5,9 @@ import App from './App';
 
 const routes = [
   '/', '/services', '/services/Media/Stream', '/stacks', '/stacks/Media', '/monitoring', '/system', '/activity',
-  // Host and Infrastructure live under System now (legacy /host and /infrastructure redirect and
-  // render an empty shell under SSR, so smoke the canonical mounts, not the shims).
-  '/system/host', '/system/infrastructure',
+  // Host lives under System (legacy /host and /infrastructure redirect and render an empty shell
+  // under SSR, so smoke the canonical mount, not the shims).
+  '/system/host',
   '/settings/appearance', '/settings/background', '/settings/hub', '/settings/widgets', '/settings/templates',
   '/settings/general', '/settings/services', '/settings/groups', '/settings/bookmarks', '/settings/integrations', '/settings/authentication', '/settings/environment',
   '/settings/advanced',
