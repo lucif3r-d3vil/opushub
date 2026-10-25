@@ -4,7 +4,7 @@
 // interprets raw provider output. That is what makes the model canonical: there is exactly one
 // place where "what does OpusHub know about storage?" is answered.
 //
-// Cost control (see docs/11-phase-9.md §performance):
+// Cost control (see docs/archive/11-phase-9.md §performance):
 //   • provider answers are cached and single-flighted by the registry, so five panels asking for
 //     storage at once run `zpool list` once per window
 //   • this module never polls; it answers what it is asked, when it is asked

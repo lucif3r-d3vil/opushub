@@ -31,7 +31,7 @@
 //   2. BOUNDED WORK    one in-flight check per provider (single-flight) and a TTL cache, so a page
 //                      with five widgets asking for storage at once runs zpool exactly once
 //   3. HONEST STATUS   an unconfigured optional provider is `not-configured`, never `unhealthy`,
-//                      and never `available` (see docs/11-phase-9.md §health)
+//                      and never `available` (see docs/archive/11-phase-9.md §health)
 //   4. NO SECRETS      the public document carries status, capabilities, version and a safe error
 //                      sentence. Credentials, paths and upstream bodies are not fields here.
 import { logEvent } from '../activity.js';
@@ -135,7 +135,7 @@ export function registerProvider(def) {
     ttlMs: Number.isFinite(def.ttlMs) && def.ttlMs > 0 ? def.ttlMs : 60_000,
     check: def.check,
     // capabilities this provider recognises but does not implement yet — declared so the UI can
-    // say "planned" instead of leaving a silent gap (see docs/11-phase-9.md §future)
+    // say "planned" instead of leaving a silent gap (see docs/archive/11-phase-9.md §future)
     planned: Object.freeze([...(Array.isArray(def.planned) ? def.planned : [])]),
     description: typeof def.description === 'string' ? def.description : null,
   });
@@ -206,7 +206,7 @@ export function invalidateAll() { cache.clear(); }
 /**
  * The status document for one provider — the ONLY shape allowed across the API boundary.
  * `data` is deliberately stripped: domain payloads come from their own routes, which is also
- * what makes lazy detail fetching possible (see docs/11-phase-9.md §performance).
+ * what makes lazy detail fetching possible (see docs/archive/11-phase-9.md §performance).
  */
 export function providerStatusDoc(id) {
   const p = registry.get(id);

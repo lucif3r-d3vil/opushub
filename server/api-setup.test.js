@@ -1,6 +1,6 @@
 // The first-run contract, over real HTTP against the mock engine.
 //
-// What this file pins down (docs/06-auth.md § Setup lifecycle, docs/08-phase-5-plan.md § 2):
+// What this file pins down (docs/06-auth.md § Setup lifecycle, docs/archive/08-phase-5-plan.md § 2):
 //   · a fresh install is *useful*: the wizard learns the engine, its API version, the inventory
 //     counts and — in categories — why each service does or does not have a URL;
 //   · it is nevertheless *closed*: no container name, image, hostname, URL or path crosses the

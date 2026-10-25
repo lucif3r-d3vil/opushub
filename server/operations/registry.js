@@ -18,7 +18,7 @@
 // the controlled container lifecycle, stack deployment and catalog installation. What is still
 // deliberately NOT here: exec, attach, logs-follow as a mutation, image/volume/network removal
 // outside a stack's own resources, prune, commit, copy, arbitrary compose commands, arbitrary
-// shell. See docs/16-phase-10d.md.
+// shell. See docs/archive/16-phase-10d.md.
 
 /**
  * A timeout the operator may tune, clamped so it can only ever be a timeout: never zero

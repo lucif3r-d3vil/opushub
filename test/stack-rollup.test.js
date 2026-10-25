@@ -1,6 +1,6 @@
 // Stack rollups and aggregate history — the arithmetic behind the Stack page.
 //
-// The rules worth pinning down (docs/08-phase-5-plan.md § 4):
+// The rules worth pinning down (docs/archive/08-phase-5-plan.md § 4):
 //   · a total only sums what actually answered; a silent container is never counted as zero;
 //   · `reporting` says how many containers answered, so the UI can qualify its own aggregate;
 //   · stack uptime is the *oldest running member* — a stack cannot have been up longer than the
@@ -120,7 +120,7 @@ test('the sampler is still demand-driven: a ref with no buffer makes no Docker c
   void statsWithHistory; // the only way to add a sample is still to ask for one
 });
 
-// ── the route's Docker budget (docs/08-phase-5-plan.md § 4) ───────────────────
+// ── the route's Docker budget (docs/archive/08-phase-5-plan.md § 4) ───────────────────
 //
 // A stack page is *polled*, so what it costs has to be bounded and predictable. These assertions
 // run the real HTTP route against the mock engine and count the Docker calls it made.
