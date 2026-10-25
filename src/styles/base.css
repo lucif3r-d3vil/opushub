@@ -3,13 +3,13 @@
 * { margin: 0; }
 
 html, body { height: 100%; }
-html { scrollbar-gutter: stable; }
+html { scrollbar-gutter: stable; background: var(--bg); }
 body {
   font-family: var(--font-ui);
   font-size: var(--fs-body);
   line-height: var(--lh-body);
   color: var(--ink);
-  background: var(--bg);
+  background: transparent;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   font-variant-numeric: tabular-nums;
@@ -35,65 +35,7 @@ code, pre, kbd { font-family: var(--font-mono); font-size: 0.92em; }
 }
 :focus:not(:focus-visible) { outline: none; }
 
-/* ---------- background layer ---------- */
-/* The background is a fixed viewport layer behind the app shell. It must be
-   z-index 0 (not -2) because body has an opaque background (var(--bg)) that
-   would paint over any negative z-index child per CSS spec, making the image
-   invisible. With z-index 0 it sits above the body background but below the
-   shell (z-index 1) and rail (z-index 40). The structure is:
-     root
-     ├── bg-layer (fixed, plain)
-     └── app-shell (relative, z-index 1, scrollable content)
-   This ensures full-viewport coverage regardless of widget height or content
-   length, no layout shift, no pointer-events, and correct stacking on desktop
-   and mobile. */
-.bg-layer { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-.bg-layer::after { content: ''; position: absolute; inset: 0; }
-.bg-quiet::after { background: var(--bg); }
-
-/* ---------- app shell ---------- */
-.app-shell { display: flex; min-height: 100dvh; position: relative; z-index: 1; }
-
-.rail {
-  position: fixed; left: 0; top: 0; bottom: 0; width: var(--rail-w);
-  display: flex; flex-direction: column; align-items: center;
-  padding: var(--sp-5) 0 var(--sp-4);
-  z-index: 40;
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
-  backdrop-filter: blur(18px) saturate(1.3);
-  -webkit-backdrop-filter: blur(18px) saturate(1.3);
-  border-right: 1px solid var(--hair);
-}
-.rail-mark { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; margin-bottom: var(--sp-6); }
-.rail-mark svg { width: 34px; height: 34px; }
-.rail-nav { display: flex; flex-direction: column; gap: 2px; width: 100%; align-items: center; flex: 1; }
-.rail-item {
-  position: relative; width: 56px; height: 46px; border-radius: var(--r-md);
-  display: grid; place-items: center; color: var(--ink-2);
-  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
-}
-.rail-item svg { width: 21px; height: 21px; stroke-width: 1.7; }
-.rail-item:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
-.rail-item.active { color: var(--ink); background: color-mix(in srgb, var(--ink) 9%, transparent); }
-.rail-item.active::before {
-  content: ''; position: absolute; left: -10px; top: 50%; translate: 0 -50%;
-  width: 3px; height: 18px; border-radius: 2px; background: var(--accent);
-}
-.rail-item .tip {
-  position: absolute; left: calc(100% + 12px); top: 50%; translate: 0 -50%;
-  background: var(--surface); color: var(--ink); border: 1px solid var(--hair);
-  padding: 4px 9px; border-radius: 7px; font-size: var(--fs-meta); white-space: nowrap;
-  opacity: 0; pointer-events: none; transition: opacity var(--t-fast) var(--ease);
-  box-shadow: var(--shadow-1); z-index: 5;
-}
-.rail-item:hover .tip, .rail-item:focus-visible .tip, .rail-item:focus-within .tip { opacity: 1; }
-.rail-foot { display: flex; flex-direction: column; gap: var(--sp-2); align-items: center; }
-/* Global actions sit slightly tighter than primary nav — same rail, one rhythm, lower tier. */
-.rail-foot .rail-item { height: 40px; }
-/* The bell carries its own button; the wrapper is the rail cell and the tooltip anchor. */
-.rail-notifications { position: relative; }
-
-.main-wrap { flex: 1; min-width: 0; padding-left: var(--rail-w); display: flex; flex-direction: column; }
+.main-wrap { min-width: 0; display: flex; flex-direction: column; }
 .page {
   width: 100%; max-width: var(--content-max);
   margin: 0 auto; padding: var(--sp-10) var(--gutter) var(--sp-16);
@@ -104,9 +46,6 @@ code, pre, kbd { font-family: var(--font-mono); font-size: 0.92em; }
 /* page transition: quiet rise, no theatrics */
 .page-anim { animation: pageIn var(--t-med) var(--ease-out) both; }
 @keyframes pageIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
-
-/* mobile top bar (rail becomes a bottom bar at ≤680px) */
-.mobile-bar { display: none; }
 
 /* ---------- typography blocks ---------- */
 .page-hero { padding: var(--sp-12) 0 var(--sp-5); border-bottom: 1px solid var(--hair); margin-bottom: var(--sp-8); }
@@ -137,7 +76,6 @@ code, pre, kbd { font-family: var(--font-mono); font-size: 0.92em; }
 *::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--ink) 30%, transparent); }
 
 /* translucent surfaces honour the transparency setting */
-html[data-transparency='off'] .rail { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg); }
 html[data-transparency='off'] .glass { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--surface); }
 
 @media (prefers-reduced-motion: reduce) {
@@ -148,25 +86,6 @@ html[data-transparency='off'] .glass { backdrop-filter: none; -webkit-backdrop-f
 /* ---------- responsive shell ---------- */
 @media (max-width: 1080px) { :root { --gutter: var(--sp-5); } }
 @media (max-width: 860px) {
-  .rail { display: none; }
-  .main-wrap { padding-left: 0; }
-  .page { padding: var(--sp-6) var(--sp-4) 96px; }
+  .page { padding: var(--sp-6) var(--sp-4) 64px; }
   .page-hero { padding-top: var(--sp-8); }
-  .mobile-bar {
-    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
-    background: color-mix(in srgb, var(--bg) 84%, transparent);
-    backdrop-filter: blur(18px) saturate(1.3);
-    border-top: 1px solid var(--hair);
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-    justify-content: space-around;
-    overflow-x: auto; scrollbar-width: none;
-  }
-  html[data-transparency='off'] .mobile-bar { background: var(--bg); backdrop-filter: none; }
-  /* Seven destinations plus Search and the bell share the bar: on wide phones they sit at a
-     comfortable 58px, on a narrow (≈360px) phone they contract evenly instead of one item
-     clipping mid-icon off the edge. */
-  .mobile-bar .rail-item { flex: 1 1 0; width: auto; min-width: 36px; max-width: 58px; }
-  .mobile-bar .rail-item.active::before { left: 50%; top: -7px; translate: -50% 0; width: 18px; height: 3px; }
-  .mobile-bar .rail-item .tip { display: none; }
 }
-@media (min-width: 861px) { .mobile-cta { display: none !important; } }

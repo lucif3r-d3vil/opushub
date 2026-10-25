@@ -2,6 +2,7 @@
 // preview) and persist to config/settings.yaml via a debounced PUT.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { BACKGROUND_IDS } from './types';
 import type { LayoutDoc, SettingsDoc } from './types';
 import { api, post, put } from './api';
 
@@ -39,6 +40,9 @@ export function applyTheme(s: SettingsDoc | null, media: MediaQueryList | null) 
   el.setAttribute('data-theme', resolved);
   el.setAttribute('data-accent', s?.appearance?.accent ?? 'sage');
   el.setAttribute('data-density', s?.appearance?.density ?? 'comfortable');
+  // backgrounds belong to the dark theme; the light theme keeps its flat paper (DESIGN.md §4)
+  const bg = s?.appearance?.background;
+  el.setAttribute('data-bg', resolved === 'light' ? 'flat' : bg && BACKGROUND_IDS.includes(bg) ? bg : 'graphite');
   el.setAttribute('data-transparency', s?.appearance?.transparency ? 'on' : 'off');
   el.style.setProperty('--font-scale', String(s?.appearance?.fontScale ?? 1));
   el.style.setProperty('--page-bg', 'transparent');
@@ -122,7 +126,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
 const FALLBACK: SettingsDoc = {
   app: { name: 'OpusHub', tagline: 'The OpusGrid homelab, at a glance.' },
-  appearance: { theme: 'system', accent: 'sage', density: 'comfortable', transparency: true, fontScale: 1 },
+  appearance: { theme: 'system', accent: 'sage', density: 'comfortable', transparency: true, fontScale: 1, background: 'graphite' },
   hub: { greetingName: null, clock24h: false, showSeconds: false },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
   infrastructure: { hostAddress: null, entrypointPorts: {} },

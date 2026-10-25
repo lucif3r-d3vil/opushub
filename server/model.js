@@ -5,7 +5,9 @@
 // overlays that enrich discovered containers, and they can never create an infrastructure object.
 // A configured entry whose container is gone is reported as an unmatched overlay (Settings →
 // System, and a quiet banner on Services) instead of being rendered as if it were installed.
-import { readYaml, readJson, writeYaml, writeJson } from './configStore.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { CONFIG_DIR, readYaml, readJson, writeYaml, writeJson } from './configStore.js';
 import * as docker from './providers/docker.js';
 import { containerStatsShared } from './containerStats.js';
 import { discover } from './discovery.js';
@@ -15,6 +17,25 @@ import { normalizeLayout, describeLayoutPatch } from './layout.js';
 import { applyTemplate, hasTemplate, templateList } from './templates.js';
 import { WIDGET_CATEGORIES, WIDGET_TYPES, widgetCatalogue } from './widgets.js';
 
+/** The built-in backgrounds: gradients drawn in CSS. `photo` is config/background.jpg, offered only when that file exists. */
+export const BACKGROUND_IDS = Object.freeze(['graphite', 'dusk', 'forest', 'ember', 'photo']);
+const PHOTO_MAX_BYTES = 6 * 1024 * 1024;
+
+/** The one background photo OpusHub will serve: a fixed name in config/, never a user-supplied path. */
+export function backgroundPhoto() {
+  const file = path.join(CONFIG_DIR, 'background.jpg');
+  try {
+    const st = fs.statSync(file);
+    return st.isFile() && st.size > 0 && st.size <= PHOTO_MAX_BYTES ? { file, size: st.size, mtimeMs: st.mtimeMs } : null;
+  } catch { return null; }
+}
+
+/** Anything that is not a known id (including the object an older build stored) is unset. */
+function cleanBackground(v, photo) {
+  if (typeof v !== 'string' || !BACKGROUND_IDS.includes(v)) return 'graphite';
+  return v === 'photo' && !photo ? 'graphite' : v;
+}
+
 export const DEFAULT_SETTINGS = {
   app: { name: 'OpusHub', tagline: 'The homelab, at a glance.' },
   appearance: {
@@ -23,6 +44,7 @@ export const DEFAULT_SETTINGS = {
     density: 'comfortable',
     transparency: true,
     fontScale: 1,
+    background: 'graphite',
   },
   hub: { greetingName: null, clock24h: false, showSeconds: false },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
@@ -614,8 +636,11 @@ export function getSettings() {
   // News, weather and market settings were removed with those widgets. An older settings.yaml may
   // still carry them; they are ignored rather than rejected, so the file keeps loading.
   delete merged.integrations;
-  // The background image and custom CSS/JS were removed too: those sections are ignored on read.
-  delete merged.appearance.background;
+  // Custom CSS/JS were removed: that section is ignored on read. The background is one of a fixed
+  // list of ids; the object an older build stored there reads as the default.
+  const photo = backgroundPhoto();
+  merged.appearance.background = cleanBackground(merged.appearance.background, photo);
+  merged.appearance.photoAvailable = !!photo;
   delete merged.advanced;
   merged._raw = raw || {}; // raw file content (for the YAML view)
   return merged;
@@ -636,6 +661,13 @@ function sanitizeSettings(s) {
   const out = structuredClone(s);
   const rejected = [];
   delete out._raw;
+  if (out.appearance && typeof out.appearance === 'object') {
+    delete out.appearance.photoAvailable; // computed on read, never stored
+    if ('background' in out.appearance) {
+      if (typeof out.appearance.background === 'string' && BACKGROUND_IDS.includes(out.appearance.background)) { /* keep */ }
+      else delete out.appearance.background;
+    }
+  }
   // infrastructure knobs are validated, never silently accepted: a typo'd host would otherwise
   // show up as wrong URLs everywhere with no clue why.
   const infra = out.infrastructure;

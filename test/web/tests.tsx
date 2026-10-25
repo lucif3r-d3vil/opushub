@@ -40,7 +40,7 @@ export interface WebResult { passed: number; failed: number; failures: string[] 
 
 const settings = {
   app: { name: 'OpusHub', tagline: 'The OpusGrid homelab, at a glance.' },
-  appearance: { theme: 'dark', accent: 'sage', density: 'comfortable', transparency: true, fontScale: 1, background: { mode: 'quiet', photo: null, blur: 24, scrim: 62 } },
+  appearance: { theme: 'dark', accent: 'sage', density: 'comfortable', transparency: true, fontScale: 1, background: 'graphite' },
   hub: { greetingName: 'Nora', clock24h: true, showSeconds: false },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
 };
@@ -683,63 +683,46 @@ export async function runWebTests(): Promise<WebResult> {
     trigger.remove();
   });
 
-  /* 4N — the shell's navigation contract: seven destinations above, global utilities below */
+  /* 4N — the shell's navigation contract: a top bar with three destinations and the account menu */
   const AUTH_ROUTES = {
     '/api/setup/status': { required: false, complete: true, hasAccount: true, version: '0.1.0' },
     '/api/auth/me': { authenticated: true, user: { username: 'admin' }, setupComplete: true },
   };
-  await test('nav: exactly seven primary items, in order, with utilities separated below', async (h) => {
+  await test('nav: the top bar holds Home, Containers and Uptime, then search, the bell and the account menu', async (h) => {
     h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
     await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
-    await h.waitFor(() => !!q('.rail-nav'), 'the primary rail');
-    const items = qa('.rail-nav .rail-item').map((el) => el.getAttribute('aria-label'));
-    expect(items.length === 7,
-      `the primary rail must hold exactly seven destinations, saw ${items.length}: ${items.join(', ')}`);
-    const expected = ['Hub', 'Services / Containers', 'Stacks', 'Monitoring', 'System', 'Activity', 'Settings'];
-    for (let i = 0; i < expected.length; i++) {
-      expect(items[i] === expected[i], `primary slot ${i} must be "${expected[i]}", saw "${items[i]}"`);
-    }
-    // seven destinations, seven distinct icons — phase 6 collapsed the rail because Monitoring and
-    // Activity briefly drew the same glyph
-    const paths = qa('.rail-nav .rail-item svg path').map((el) => el.getAttribute('d'));
-    expect(new Set(paths).size === paths.length && paths.every(Boolean), 'two primary destinations share an icon');
-    // every primary href is one of the seven roots — no Infrastructure/Updates/Autoheal squatters
-    const hrefs = qa('.rail-nav .rail-item').map((el) => el.getAttribute('href'));
-    for (const href of hrefs) {
-      expect(['/', '/services', '/stacks', '/monitoring', '/system', '/activity', '/settings'].includes(href || ''),
-        `an unexpected primary destination slipped into the rail: ${href}`);
-    }
-    // the global actions sit in the rail foot, after the primary nav — one of each
-    const foot = q('.rail-foot')!;
-    expect(!!foot, 'the rail foot is missing');
-    expect(qa('.rail-foot .rail-item').length === 4,
-      `the rail foot holds Search, Notifications, the theme toggle and Sign out — saw ${qa('.rail-foot .rail-item').length}`);
-    expect(!!q('.rail-foot [aria-label="Open search"]'), 'the search action is missing from the rail foot');
-    expect(!!q('.rail-foot .rail-notifications'), 'the bell is missing from the rail foot');
-    expect(!!q('.rail-foot [aria-label^="Theme:"]'), 'the theme toggle is missing from the rail foot');
-    expect(!!q('.rail-foot [aria-label^="Sign out"]'), 'sign out is missing from the rail foot');
-    const nav = q('.rail-nav')!;
-    expect((nav.compareDocumentPosition(foot) & 4) !== 0, 'the rail foot must sit below the primary nav, not above or inside');
-    expect(qa('.rail-nav .rail-notifications').length === 0 && !q('.rail-nav [aria-label="Open search"]'),
-      'a global action leaked into the primary nav');
-    // the mobile bar mirrors the seven destinations (plus the bell and search that cannot fit the rail)
-    const mbar = q('.mobile-bar')!;
-    expect(!!mbar, 'the mobile bar is missing');
-    expect(qa('.mobile-bar a.rail-item').length === 7,
-      `the mobile bar must mirror the seven destinations, saw ${qa('.mobile-bar a.rail-item').length}`);
-    const mhrefs = qa('.mobile-bar a.rail-item').map((el) => el.getAttribute('href'));
-    for (let i = 0; i < expected.length; i++) {
-      expect(mhrefs[i] === hrefs[i], `mobile slot ${i} ("${mhrefs[i]}") does not match rail slot ${i} ("${hrefs[i]}")`);
-    }
+    await h.waitFor(() => !!q('.topbar'), 'the top bar');
+    expect(!q('.rail') && !q('.mobile-bar'), 'the old rail or its mobile bar is still rendered');
+    const links = qa('.tb-nav a');
+    expect(links.map((a) => text(a).trim()).join(',') === 'Home,Containers,Uptime', `primary destinations: ${links.map((a) => text(a)).join(',')}`);
+    expect(links.map((a) => a.getAttribute('href')).join(',') === '/,/services,/monitoring', 'the destinations point at the wrong pages');
+    expect(links[0].getAttribute('aria-current') === 'page', 'Home is not marked current on /');
+    expect(!!q('.topbar [aria-label="Search"]'), 'the search button is missing');
+    expect(!!q('.topbar .notif-bell'), 'the bell is missing');
+    expect(!!q('.topbar .av'), 'the avatar is missing');
+    expect(!q('.acct'), 'the account menu is open before it was asked for');
+
+    // the avatar menu: who, appearance (theme, backgrounds, accent), Settings, Sign out
+    click(q('.topbar .av')!);
+    await h.waitFor(() => !!q('.acct'), 'the account menu');
+    expect(text(q('.acct .mh')!).includes('admin'), 'the account name is not shown');
+    expect(qa('.acct [aria-label="Theme"] button').length === 3, 'the theme switch is missing');
+    const bgs = qa('.acct .bgsw');
+    expect(bgs.length === 4, `four built-in backgrounds without a photo, saw ${bgs.length}`);
+    expect(qa('.acct .acsw').length === 7, 'the seven accents are missing');
+    expect(qa('.acct a').some((a) => a.getAttribute('href') === '/settings'), 'Settings is missing from the account menu');
+    expect(text(q('.acct')!).includes('Sign out'), 'Sign out is missing from the account menu');
+    click(bgs[1]);
+    await h.waitFor(() => h.writes('PUT', '/api/settings').length > 0, 'the background write');
+    const put = h.writes('PUT', '/api/settings').pop()!.body as { appearance?: { background?: string } };
+    expect(put.appearance?.background === 'dusk', `the background was not saved (${JSON.stringify(put)})`);
   });
 
-  await test('nav: the removed Infrastructure addresses redirect to System and keep it active', async (h) => {
+  await test('nav: the removed Infrastructure addresses redirect to System', async (h) => {
     h.setRoutes({ ...stubRoutes(), ...AUTH_ROUTES });
     for (const entry of ['/infrastructure?tab=volumes', '/system/infrastructure?tab=storage']) {
       await h.mount(<MemoryRouter initialEntries={[entry]}><App /></MemoryRouter>);
-      await h.waitFor(() => !!q('.rail-nav'), `the shell for ${entry}`);
-      const systemItem = qa('.rail-nav .rail-item').find((el) => el.getAttribute('aria-label') === 'System')!;
-      expect(systemItem.classList.contains('active'), `the System rail item is not active on ${entry}`);
+      await h.waitFor(() => !!q('.topbar'), `the shell for ${entry}`);
       expect(!q('.err'), `${entry} did not resolve`);
       expect(!text().includes('Page not found'), `${entry} reached the not-found page`);
     }
@@ -757,8 +740,6 @@ export async function runWebTests(): Promise<WebResult> {
     const host = qa('a', nav).find((el) => text(el).trim() === 'Host')!;
     expect(host.classList.contains('active') || host.getAttribute('aria-current') === 'page',
       'the Host chip is not marked active on /system/host');
-    const systemItem = qa('.rail-nav .rail-item').find((el) => el.getAttribute('aria-label') === 'System')!;
-    expect(systemItem.classList.contains('active'), 'the System rail item is not active on /system/host');
     // the legacy mount still arrives where it meant to
     await h.mount(<MemoryRouter initialEntries={['/host']}><App /></MemoryRouter>);
     await h.waitFor(() => !!q('.mon-views, .page-views'), 'the host view after the legacy redirect');
@@ -1160,7 +1141,7 @@ export async function runWebTests(): Promise<WebResult> {
     });
     await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
     await h.waitFor(() => text().includes('Welcome'), 'the setup wizard');
-    expect(!q('.rail'), 'the application shell rendered before setup was complete');
+    expect(!q('.topbar'), 'the application shell rendered before setup was complete');
     expect(text().includes('Administrator') && text().includes('Discovery'), 'the wizard steps are missing');
     expect(!h.calls.some((c) => c.path === '/api/services' || c.path === '/api/settings'), 'pre-auth requests were made for application data');
     expect(!q('#setup-user'), 'the account fields appear before the welcome step');
@@ -1279,7 +1260,7 @@ export async function runWebTests(): Promise<WebResult> {
     // Review: the recap, then the one mutation
     expect(text().includes('Review'), 'no review step');
     expect(text().includes('admin'), 'the recap does not name the account being created');
-    expect(!q('.rail'), 'the shell appeared before the account existed');
+    expect(!q('.topbar'), 'the shell appeared before the account existed');
     await advance('Create account');
     const post = h.writes('POST', '/api/setup')[0];
     expect(!!post, 'the account was never created');
@@ -1289,11 +1270,11 @@ export async function runWebTests(): Promise<WebResult> {
 
     // Finish: a real screen, still no application behind it
     expect(text().includes('Enter OpusHub'), 'the Finish screen is missing');
-    expect(!q('.rail'), 'creating the account jumped straight into the Hub');
+    expect(!q('.topbar'), 'creating the account jumped straight into the Hub');
 
     // …and the hand-off is explicit
     await advance('Enter OpusHub');
-    await h.waitFor(() => !!q('.rail'), 'the application shell after entering');
+    await h.waitFor(() => !!q('.topbar'), 'the application shell after entering');
   });
 
   /* 18c — Phase 5: a deep link into a filtered view is still behind the door */
@@ -1305,7 +1286,7 @@ export async function runWebTests(): Promise<WebResult> {
     });
     await h.mount(<MemoryRouter initialEntries={['/activity?service=wave']}><App /></MemoryRouter>);
     await h.waitFor(() => !!q('#login-pass'), 'the sign-in screen');
-    expect(!q('.rail'), 'the shell rendered behind a deep link');
+    expect(!q('.topbar'), 'the shell rendered behind a deep link');
     expect(!text().includes('wave'), 'the deep link leaked a service name into the sign-in screen');
     const appPaths = h.calls.filter((c) => c.path.startsWith('/api/') && !c.path.startsWith('/api/auth/') && !c.path.startsWith('/api/setup/'));
     expect(appPaths.length === 0, `an unauthenticated deep link fetched ${appPaths.map((c) => c.path).join(', ')}`);
@@ -1329,7 +1310,7 @@ export async function runWebTests(): Promise<WebResult> {
     let signedIn = false;
     await h.mount(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
     await h.waitFor(() => !!q('#login-pass'), 'the login screen');
-    expect(!q('.rail'), 'the shell rendered before a session existed');
+    expect(!q('.topbar'), 'the shell rendered before a session existed');
 
     type(q<HTMLInputElement>('#login-user')!, 'admin');
     type(q<HTMLInputElement>('#login-pass')!, 'wrong-password');
@@ -1338,12 +1319,12 @@ export async function runWebTests(): Promise<WebResult> {
     expect(!!q('.auth-error'), 'the refusal is not shown');
     expect(text().includes('Incorrect username or password.'), 'the server reason is not shown');
     expect(q<HTMLInputElement>('#login-pass')!.value === '', 'the password field is not cleared after a failure');
-    expect(!q('.rail'), 'a failed sign-in let the shell through');
+    expect(!q('.topbar'), 'a failed sign-in let the shell through');
 
     type(q<HTMLInputElement>('#login-user')!, 'admin');
     type(q<HTMLInputElement>('#login-pass')!, 'correct-horse-battery');
     click(q('button.auth-submit')!);
-    await h.waitFor(() => !!q('.rail'), 'the application shell');
+    await h.waitFor(() => !!q('.topbar'), 'the application shell');
     expect(h.calls.some((c) => c.method === 'GET' && c.path === '/api/settings'), 'the shell did not load its data after sign-in');
 
     // nothing is kept in browser storage — the session is an HttpOnly cookie and nothing else

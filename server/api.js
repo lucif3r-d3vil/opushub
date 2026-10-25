@@ -849,6 +849,20 @@ export async function handleApi(req, res, url) {
     });
   }
 
+  // ---------- the optional background photo (config/background.jpg) ----------
+  // One fixed file name, read-only, behind the session. There is no upload and no path input.
+  if (route === 'GET /api/appearance/background') {
+    const photo = model.backgroundPhoto();
+    if (!photo) return send(res, 404, { error: 'no background photo is installed' });
+    const etag = `"${photo.size}-${Math.round(photo.mtimeMs)}"`;
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304); res.end(); return; }
+    res.setHeader('content-type', 'image/jpeg');
+    res.setHeader('cache-control', 'private, max-age=3600');
+    res.setHeader('etag', etag);
+    res.writeHead(200);
+    return res.end(fs.readFileSync(photo.file));
+  }
+
   // ---------- icons ----------
   if (route === 'GET /api/icons/search') {
     const q = url.searchParams.get('q') || '';

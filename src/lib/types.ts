@@ -249,6 +249,9 @@ export interface ActivityGroup {
   events: ActivityEvent[];
 }
 
+export type BackgroundId = 'graphite' | 'dusk' | 'forest' | 'ember' | 'photo';
+export const BACKGROUND_IDS: BackgroundId[] = ['graphite', 'dusk', 'forest', 'ember', 'photo'];
+
 export interface SettingsDoc {
   app: { name: string; tagline: string };
   appearance: {
@@ -257,6 +260,10 @@ export interface SettingsDoc {
     density: 'comfortable' | 'compact';
     transparency: boolean;
     fontScale: number;
+    /** one of BACKGROUND_IDS; anything else reads as 'graphite' */
+    background?: BackgroundId;
+    /** computed by the server: true when config/background.jpg exists */
+    photoAvailable?: boolean;
   };
   hub: { greetingName: string | null; clock24h: boolean; showSeconds: boolean };
   behavior: { logLaunches: boolean; refresh: { system: number; services: number } };

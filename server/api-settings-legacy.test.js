@@ -62,12 +62,13 @@ test('PUT /api/settings: sections from older builds are accepted and ignored', a
   });
   assert.equal(put.status, 200, 'an old settings file still saves');
   assert.equal(put.json.appearance.theme, 'dark', 'the part that still exists is kept');
-  for (const gone of [put.json.appearance.background, put.json.advanced, put.json.integrations]) {
+  for (const gone of [put.json.advanced, put.json.integrations]) {
     assert.equal(gone, undefined, 'a removed section is not served back');
   }
+  assert.equal(put.json.appearance.background, 'graphite', 'the old object-shaped background reads as the default id');
   const read = await call('GET', '/api/settings');
   assert.equal(read.status, 200);
-  assert.equal(read.json.appearance.background, undefined);
+  assert.equal(read.json.appearance.background, 'graphite');
   assert.equal(read.json.advanced, undefined);
   assert.equal(read.json.integrations, undefined);
 });
