@@ -85,10 +85,10 @@ All safe to remove, with the dependencies that have to be handled in the same co
 | 3 | Weather, news, markets (server, widgets, Integrations tab, settings keys) | 1,000 | Low; edit `model.js` |
 | 4 | Background and custom CSS/JS (`providers/background.js`, `BackgroundImage`, Background tab, `/api/custom`, `/user/*.css|js`) | 800 | Low; reduces attack surface |
 | 5 | Icons page | 180 | Very low |
-| 6 | Container charts (per-container history only; keep the host sampler and add a disk field to it) | 450 | Low; keep live stats |
-| 7 | Orphan routes: `/api/volumes`, `/images`, `/docker`, `/resources`, `resources.js`, `errors.js`, v1 alias layer | 450 | Low; confirm no external caller |
-| 8 | Config export, import, scope, the whole History UI and the Import & migration wizard (with `homepageImport.js`, `configImport.js`) | 3,300 | Medium; keep on-disk backups; see decision 7 |
-| 9 | Catalog (plus operations plumbing) | 1,800 | Medium (touches `operations/engine.js`, `policy.js`) |
+| 6 | **Done** (`49e6ab0`): Container charts (per-container history only; keep the host sampler and add a disk field to it) | 450 | Low; keep live stats |
+| 7 | **Done** (`2065608`): Orphan routes: `/api/volumes`, `/images`, `/docker`, `/resources`, `resources.js`, `errors.js`, v1 alias layer | 450 | Low; confirm no external caller |
+| 8 | **Done** (`917f37c`): Config export, import, scope, the whole History UI and the Import & migration wizard (with `homepageImport.js`, `configImport.js`) | 3,300 | Medium; keep on-disk backups; see decision 7 |
+| 9 | **Done** (`c844613`): Catalog (plus operations plumbing) | 1,800 | Medium (touches `operations/engine.js`, `policy.js`) |
 | 10 | Bell panel: add recent-activity list and alert ack (**additive**, builds first) | +150 | Low |
 | 11 | Activity page removal (content now in the bell panel) | 380 | Low after 10 |
 | 12 | Home page (stack grouping, host strip) built; then remove hub composition, templates, widgets, Setup template step | 2,300 net | Medium: touches first-run flow and `layout.json` |
@@ -96,6 +96,13 @@ All safe to remove, with the dependencies that have to be handled in the same co
 | 14 | Settings reshaped to five sections (Services overlay editor moves to Containers; Groups and Bookmarks removed) | 1,500 net | Medium |
 | 15 | One Docker client and one pipeline (merge adapters, planners, the two update paths) | 1,500 net | **High: Docker socket writes.** Disposable host first; keep the proof tests. |
 | 16 | Leftovers: unused import/export helpers, dead settings keys, `config/` sample cleanup | 300 | Low; do last |
+
+**Status (branch `streamline/simplify-2`):** commits 6 to 9 are done (net about 9,900 lines removed). Commit 6 did not add the host sampler's `diskUsedPct` field; that goes into the Home build (decision 9, and the round 2 decision in `docs/design/DESIGN.md`).
+
+**Deferred to the rebuild** (they depend on the new bell, Containers page and Settings, so they are built there instead of removed first):
+- Commits 10 and 11: the bell panel (recent activity, alert ack) and removal of the Activity page.
+- Commit 14: the Settings trim to five sections.
+- Commit 15: the write-path merge (one Docker client and one pipeline).
 
 Total: roughly **14,500 lines** out of about 60,000.
 
