@@ -69,8 +69,3 @@ export function useHubData({ types, activityLimit = 12 }: HubNeedOptions): HubDa
 
   return { system, services, stacks, activity, bookmarks, weather, news, markets, widgets, providers, monitoring };
 }
-
-/** Convenience: the catalogue entry for a type, from whichever doc has loaded. */
-export function catalogueEntry(doc: WidgetDoc | null, type: string) {
-  return doc?.catalogue.find((c) => c.type === type) || null;
-}

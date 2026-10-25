@@ -3,11 +3,9 @@
 // Widgets editor and the live preview all move widgets the same way.
 import type { HubSpacing, LayoutDoc, WidgetCatalogueEntry, WidgetInstance, WidgetSize, WidgetZone } from './types';
 
-export const ZONES: WidgetZone[] = ['main', 'rail'];
 export const ZONE_LABEL: Record<WidgetZone, string> = { main: 'Main column', rail: 'Sidebar' };
 export const SIZE_ORDER: WidgetSize[] = ['sm', 'md', 'lg'];
 export const SIZE_LABEL: Record<WidgetSize, string> = { sm: 'Small', md: 'Medium', lg: 'Large' };
-export const SPACING_LABEL: Record<HubSpacing, string> = { cozy: 'Cozy', comfortable: 'Comfortable', airy: 'Airy' };
 
 /** The widgets a zone renders, in order. Hidden ones are kept (so nothing is lost) but not shown. */
 export function visibleInZone(layout: LayoutDoc | null, zone: WidgetZone): WidgetInstance[] {
@@ -16,10 +14,6 @@ export function visibleInZone(layout: LayoutDoc | null, zone: WidgetZone): Widge
 
 export function hiddenWidgets(layout: LayoutDoc | null): WidgetInstance[] {
   return (layout?.hub.widgets || []).filter((w) => w.visible === false);
-}
-
-export function widgetsOfType(layout: LayoutDoc | null, ...types: string[]): WidgetInstance[] {
-  return (layout?.hub.widgets || []).filter((w) => types.includes(w.type));
 }
 
 /** The widget types present and visible — what the Hub needs data for (and nothing more). */
@@ -98,16 +92,6 @@ export function setSpacing(layout: LayoutDoc, spacing: HubSpacing): LayoutDoc {
   const next = clone(layout);
   next.hub.spacing = spacing;
   return next;
-}
-
-/** A one-line description of a widget instance, for lists and menus — never a badge. */
-export function widgetLabel(w: WidgetInstance, catalogue: WidgetCatalogueEntry[]): string {
-  const entry = catalogue.find((c) => c.type === w.type);
-  return w.title || entry?.title || w.type;
-}
-
-export function widgetDescription(w: WidgetInstance, catalogue: WidgetCatalogueEntry[]): string {
-  return catalogue.find((c) => c.type === w.type)?.description || '';
 }
 
 /** Config keys that have a value — used to say "configured" without inventing a status pill. */

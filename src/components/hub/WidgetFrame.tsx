@@ -72,11 +72,6 @@ export function WidgetFrame({ widget, catalogue, zone, interactive, handle, righ
   );
 }
 
-/** The quiet, per-widget "no data yet" line — the page stays stable while providers answer. */
-export function WidgetLoading({ what = 'Reading…' }: { what?: string }) {
-  return <div className="widget-quiet" role="status" aria-live="polite">{what}</div>;
-}
-
 /** Empty states are sentences, never illustrations. */
 export function WidgetEmpty({ children, href, linkLabel }: { children: ReactNode; href?: string; linkLabel?: string }) {
   return (

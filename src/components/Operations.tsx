@@ -12,11 +12,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, invalidateShared } from '../lib/api';
-import { relTime } from '../lib/format';
 import {
   cancelOperation, dryRun, execute, followOperation, healthWord, isTerminal, stateWord, wordsFor,
   onOperationRequest,
-  type ConfirmationDoc, type DryRunResponse, type OperationAction, type OperationDoc,
+  type DryRunResponse, type OperationAction, type OperationDoc,
   type OperationParams, type OperationTargetRef, type PlanDoc,
 } from '../lib/operations';
 import { Modal } from './ui';
@@ -424,45 +423,5 @@ function Elapsed({ since }: { since: number }) {
 
 const riskWord = (risk: string | null) =>
   risk === 'high' ? 'Higher' : risk === 'medium' ? 'Medium' : risk === 'low' ? 'Low' : 'Unknown';
-
-/* ------------------------------------------------------------------ */
-/* a running operation, in whatever row it belongs to                  */
-/* ------------------------------------------------------------------ */
-
-/** One line about an operation, for the Activity page and the Operations panel. */
-export function OperationRow({ operation, onOpen }: { operation: OperationDoc; onOpen?: (o: OperationDoc) => void }) {
-  const words = wordsFor(operation.action);
-  const target = operation.target?.label || operation.target?.containerName || 'service';
-  const status = operation.status;
-  return (
-    <button
-      className={`op-row op-row--${status}`}
-      onClick={() => onOpen?.(operation)}
-      title={operation.error?.reason || `${words.progressive} ${target}`}
-    >
-      <span className={`op-mark op-mark--${status}`} aria-hidden="true">
-        {status === 'running' || status === 'authorized' ? '●' : status === 'succeeded' ? '✓' : status === 'timed_out' ? '◔' : '✕'}
-      </span>
-      <span className="op-row-text">
-        <span className="op-row-title">{words.imperative} {target}</span>
-        <span className="op-row-sub">
-          {statusWord(status)}
-          {operation.completedAt ? ` · ${relTime(operation.completedAt)}` : operation.startedAt ? ` · started ${relTime(operation.startedAt)}` : ''}
-          {operation.actor ? ` · ${operation.actor}` : ''}
-        </span>
-      </span>
-      {operation.durationMs != null && <span className="op-row-dur">{Math.max(0, Math.round(operation.durationMs / 100) / 10)}s</span>}
-    </button>
-  );
-}
-
-const statusWord = (s: string) =>
-  s === 'running' || s === 'authorized' ? 'Running'
-    : s === 'awaiting_confirmation' ? 'Awaiting confirmation'
-      : s === 'succeeded' ? 'Completed'
-        : s === 'failed' ? 'Failed'
-          : s === 'timed_out' ? 'Timed out'
-            : s === 'rejected' ? 'Rejected'
-              : s === 'cancelled' ? 'Cancelled' : s;
 
 export { isTerminal };

@@ -176,4 +176,3 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
   return <LCtx.Provider value={{ layout, setLayout, reload, resetLayout }}>{children}</LCtx.Provider>;
 }
 
-export { FALLBACK as FALLBACK_SETTINGS };

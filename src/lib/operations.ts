@@ -20,9 +20,6 @@ export type OperationAction =
   | 'stack.deploy' | 'stack.start' | 'stack.stop' | 'stack.remove'
   | 'image.pull' | 'service.install';
 
-/** The lifecycle actions a service page offers as buttons. */
-export const LIFECYCLE_ACTIONS: OperationAction[] = ['container.start', 'container.restart', 'container.stop', 'container.pause', 'container.unpause', 'container.kill'];
-
 export interface OperationTargetRef {
   type: 'service' | 'container' | 'stack' | 'image' | 'new' | 'catalog';
   id?: string;
@@ -151,15 +148,6 @@ export interface OperationsOverview {
   recent: OperationDoc[];
 }
 
-export interface OperationTrailRow {
-  id: string; t: number; iso: string; opId: string; phase: string; actor: string | null;
-  action: string | null; target: { containerName?: string; label?: string } | null;
-  status: string | null; reason: string | null; code: string | null; detail: string | null;
-  confirmation: { required: boolean; mode: string; consumed: boolean } | null;
-  durationMs: number | null; verification: { state: string | null; health: string | null; verified: boolean } | null;
-  note: string | null;
-}
-
 export const TERMINAL: OperationStatus[] = ['succeeded', 'failed', 'rejected', 'cancelled', 'timed_out'];
 export const isTerminal = (s: OperationStatus | string | null | undefined) => TERMINAL.includes(s as OperationStatus);
 
@@ -177,10 +165,6 @@ export const execute = (action: string, target: OperationTargetRef, confirmation
 export const fetchOperation = (id: string) => api<{ operation: OperationDoc }>(`/api/v1/operations/${id}`);
 
 export const cancelOperation = (id: string) => api<{ operation: OperationDoc }>(`/api/v1/operations/${id}/cancel`, { method: 'POST', body: '{}' });
-
-export const fetchOperations = () => api<OperationsOverview>('/api/v1/operations');
-
-export const fetchTrail = (id: string) => api<{ operation: OperationDoc; trail: OperationTrailRow[] }>(`/api/v1/operations/${id}/trail`);
 
 /**
  * Follow an operation until it settles.
