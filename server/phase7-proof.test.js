@@ -108,11 +108,11 @@ test('a full API sweep issues only GET requests to the engine', async () => {
   const svcPath = `/api/services/${encodeURIComponent(svc.group)}/${encodeURIComponent(svc.name)}`;
 
   const paths = [
-    '/api/stacks', '/api/discovery', '/api/host', '/api/networks', '/api/volumes', '/api/images',
-    '/api/system', '/api/resources', '/api/alerts', '/api/updates', '/api/version',
+    '/api/stacks', '/api/discovery', '/api/host', '/api/networks',
+    '/api/system', '/api/alerts', '/api/updates', '/api/version',
     '/api/providers', '/api/activity?limit=20', '/api/search?q=wave', svcPath, `${svcPath}/health`,
     `/api/docker/containers/${encodeURIComponent(svc.name)}/logs?tail=10`,
-    '/api/v1/services', '/api/v1/stacks', '/api/v1/resources',
+    '/api/services', '/api/stacks',
   ];
   for (const p of paths) {
     const r = await get(p);
@@ -136,7 +136,7 @@ test('Phase-7 responses carry no secrets, env values or socket paths', async () 
   const svcPath = `/api/services/${encodeURIComponent(svc.group)}/${encodeURIComponent(svc.name)}`;
   const blobs = [];
   for (const p of ['/api/services', '/api/stacks', '/api/discovery', '/api/host', '/api/networks',
-    '/api/volumes', '/api/images', '/api/system', '/api/resources', '/api/alerts',
+    '/api/system', '/api/alerts',
     '/api/updates', svcPath, `${svcPath}/health`]) {
     blobs.push((await get(p)).text);
   }

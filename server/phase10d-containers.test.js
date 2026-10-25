@@ -66,13 +66,13 @@ async function call(method, pathname, body = null, cookie = COOKIE) {
 }
 const get = (p, cookie) => call('GET', p, null, cookie);
 const post = (p, body, cookie) => call('POST', p, body, cookie);
-const dryRun = (action, target, params) => post('/api/v1/operations/dry-run', { action, target, ...(params !== undefined ? { params } : {}) });
-const execute = (action, target, params, token, operationId) => post('/api/v1/operations', { action, target, ...(params !== undefined ? { params } : {}), confirmationToken: token, operationId });
+const dryRun = (action, target, params) => post('/api/operations/dry-run', { action, target, ...(params !== undefined ? { params } : {}) });
+const execute = (action, target, params, token, operationId) => post('/api/operations', { action, target, ...(params !== undefined ? { params } : {}), confirmationToken: token, operationId });
 async function settle(id, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
-    const r = await get(`/api/v1/operations/${id}`);
+    const r = await get(`/api/operations/${id}`);
     last = r.json?.operation || last;
     if (last && !['pending', 'awaiting_confirmation', 'authorized', 'running'].includes(last.status)) return last;
     await new Promise((r) => setTimeout(r, 60));
@@ -240,7 +240,7 @@ test('an in-place update changes only restart policy and resources, without a re
 test('an edit that needs a recreate runs the full ladder and the diff names exactly what changed', async () => {
   const t = { type: 'service', id: 'vaultwarden' };
   const oldId = fx('vaultwarden').Id;
-  const preview = await post('/api/v1/containers/vaultwarden/diff', { spec: { env: { MOCK_FIXTURE: 'true', SECRET_SHOULD_NEVER_LEAVE_SERVER: 'hunter2', NEW_FLAG: '1' } } });
+  const preview = await post('/api/containers/vaultwarden/diff', { spec: { env: { MOCK_FIXTURE: 'true', SECRET_SHOULD_NEVER_LEAVE_SERVER: 'hunter2', NEW_FLAG: '1' } } });
   assert.equal(preview.status, 200, JSON.stringify(preview.json));
   assert.deepEqual(preview.json.diff.changed, ['env']);
   assert.equal(preview.json.action, 'container.edit');
@@ -387,7 +387,7 @@ test('a blocked edit is refused before confirmation; a dangerous one forces a st
   assert.equal(dangerous.json.confirmation.mode, 'strong');
   assert.equal(dangerous.json.dryRun.plan.policy.level, 'DANGEROUS');
   assert.match(dangerous.json.confirmation.prompt.body, /dangerous/i);
-  await post(`/api/v1/operations/${dangerous.json.operation.id}/cancel`, {});
+  await post(`/api/operations/${dangerous.json.operation.id}/cancel`, {});
 });
 
 /* ------------------------------ 8. locks ------------------------------ */
@@ -404,7 +404,7 @@ test('a container operation holds its stack lock, so a second operation on the s
     assert.equal(same.json.operation.error.code, 'already_running');
     const sibling = await dryRun('container.restart', { type: 'service', id: 'observability-loki-1' });
     assert.equal(sibling.status, 200, 'a sibling container may still be operated on (only the stack-wide lock is shared)');
-    await post(`/api/v1/operations/${sibling.json.operation.id}/cancel`, {});
+    await post(`/api/operations/${sibling.json.operation.id}/cancel`, {});
     await settle(e.json.operation.id);
   } finally {
     delete process.env.OPUSHUB_MOCK_OP_DELAY;
@@ -414,25 +414,25 @@ test('a container operation holds its stack lock, so a second operation on the s
 /* ------------------------------ 9. read surface ------------------------------ */
 
 test('the containers read surface returns the canonical spec with secrets masked, and requires a session', async () => {
-  const anon = await get('/api/v1/containers/vaultwarden/spec', null);
+  const anon = await get('/api/containers/vaultwarden/spec', null);
   assert.equal(anon.status, 401);
-  const r = await get('/api/v1/containers/vaultwarden/spec');
+  const r = await get('/api/containers/vaultwarden/spec');
   assert.equal(r.status, 200, JSON.stringify(r.json));
   assert.equal(r.json.spec.image, 'vaultwarden/server:1.32.0');
   assert.ok(!r.text.includes('hunter2'), 'env secrets are masked');
   assert.ok(r.json.secretKeys.includes('SECRET_SHOULD_NEVER_LEAVE_SERVER'));
   assert.deepEqual(r.json.fields.map((f) => f.field), [...spec.SPEC_FIELDS]);
-  const fields = await get('/api/v1/containers/spec-fields');
+  const fields = await get('/api/containers/spec-fields');
   assert.deepEqual(fields.json.inPlace, ['restartPolicy', 'resources']);
-  const vols = await get('/api/v1/containers/jellyfin/volumes');
+  const vols = await get('/api/containers/jellyfin/volumes');
   assert.equal(vols.status, 200);
   assert.ok(vols.json.volumes.some((v) => v.type === 'volume' && v.source === 'jellyfin-config'));
   assert.ok(!vols.text.includes('/var/lib/docker'), 'no mountpoints leak');
-  const top = await get('/api/v1/containers/jellyfin/top');
+  const top = await get('/api/containers/jellyfin/top');
   assert.equal(top.status, 200);
-  const viewer = await get('/api/v1/containers/vaultwarden/spec', VIEWER_COOKIE);
+  const viewer = await get('/api/containers/vaultwarden/spec', VIEWER_COOKIE);
   assert.equal(viewer.status, 200, 'reads are not permission-gated beyond the session (the UI hides what cannot be run)');
-  const missing = await get('/api/v1/containers/does-not-exist/spec');
+  const missing = await get('/api/containers/does-not-exist/spec');
   assert.equal(missing.status, 404);
   assert.deepEqual(posts(), [], 'the read surface never writes');
 });

@@ -95,7 +95,7 @@ export default function ServiceDetail() {
   const sys = usePolled<SystemSnapshot>('/api/system', 10_000);
   // operations for THIS service, as the server recorded them (bounded, newest first)
   const ops = usePolled<{ operations: { id: string; action: string; status: string; at: number; actor: string | null }[] }>(
-    `/api/v1/operations?service=${encodeURIComponent(name)}`, 0,
+    `/api/operations?service=${encodeURIComponent(name)}`, 0,
   );
   const opsCap = useOperationsCapabilities();
   const opsHistory = ops.data?.operations ?? [];

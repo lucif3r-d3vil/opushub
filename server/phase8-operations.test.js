@@ -80,18 +80,18 @@ const get = (p, headers, cookie) => call('GET', p, null, headers, cookie);
 const post = (p, body, headers, cookie) => call('POST', p, body, headers, cookie);
 
 /** Ask for an operation to be confirmed (a dry-run) and return the whole answer. */
-const dryRun = (action, target) => post('/api/v1/operations/dry-run', { action, target });
+const dryRun = (action, target) => post('/api/operations/dry-run', { action, target });
 
 /** Spend a confirmation. */
 const execute = (action, target, token, operationId) =>
-  post('/api/v1/operations', { action, target, confirmationToken: token, operationId });
+  post('/api/operations', { action, target, confirmationToken: token, operationId });
 
 /** Follow an operation to its final state. */
 async function settleOperation(id, { timeoutMs = 15_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
-    const r = await get(`/api/v1/operations/${id}`);
+    const r = await get(`/api/operations/${id}`);
     last = r.json?.operation || last;
     if (last && !['pending', 'awaiting_confirmation', 'authorized', 'running'].includes(last.status)) return last;
     await new Promise((r) => setTimeout(r, 60));
@@ -282,12 +282,12 @@ test('the administrator holds every operation permission; a viewer holds none', 
 });
 
 test('an unauthenticated request cannot reach any operations route', async () => {
-  for (const p of ['/api/v1/operations', '/api/operations', '/api/v1/operations/op-20260101-aaaaaaa']) {
+  for (const p of ['/api/operations', '/api/operations', '/api/operations/op-20260101-aaaaaaa']) {
     const r = await get(p, null, null);
     assert.equal(r.status, 401, `${p} must require a session`);
     assert.equal(r.json.code, 'auth_required');
   }
-  for (const [p, body] of [['/api/v1/operations', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' } }], ['/api/v1/operations/dry-run', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' } }]]) {
+  for (const [p, body] of [['/api/operations', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' } }], ['/api/operations/dry-run', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' } }]]) {
     const r = await post(p, body, null, null);
     assert.equal(r.status, 401, `${p} must require a session`);
   }
@@ -297,8 +297,8 @@ test('an unauthenticated request cannot reach any operations route', async () =>
 test('a cross-site request is refused by the CSRF gate before the engine sees it', async () => {
   const evil = { origin: 'http://evil.example', 'sec-fetch-site': 'cross-site' };
   for (const [p, body] of [
-    ['/api/v1/operations/dry-run', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' } }],
-    ['/api/v1/operations', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' }, confirmationToken: 'x' }],
+    ['/api/operations/dry-run', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' } }],
+    ['/api/operations', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' }, confirmationToken: 'x' }],
   ]) {
     const r = await post(p, body, evil);
     assert.equal(r.status, 403, `${p} must be refused cross-site`);
@@ -313,7 +313,7 @@ test('an account without the permission is refused every operation', async () =>
   for (const action of registry.ACTION_IDS) {
     // the per-session rate limit is a real control (tested on its own); it is not what this loop is about
     if (++n % 4 === 0) locks._resetLimits();
-    const r = await dryRun(action, target) && await post('/api/v1/operations/dry-run', { action, target }, null, VIEWER_COOKIE);
+    const r = await dryRun(action, target) && await post('/api/operations/dry-run', { action, target }, null, VIEWER_COOKIE);
     assert.equal(r.status, 403, `${action} must be refused for a viewer`);
     assert.equal(r.json.operation.error.code, 'not_permitted');
   }
@@ -321,11 +321,11 @@ test('an account without the permission is refused every operation', async () =>
 });
 
 test('the overview tells the caller exactly which actions it may run', async () => {
-  const mine = await get('/api/v1/operations');
+  const mine = await get('/api/operations');
   assert.equal(mine.status, 200);
   assert.ok(mine.json.actions.length >= 3);
   assert.ok(mine.json.actions.every((a) => a.permitted === true), 'the administrator may run every action');
-  const theirs = await get('/api/v1/operations', null, VIEWER_COOKIE);
+  const theirs = await get('/api/operations', null, VIEWER_COOKIE);
   assert.ok(theirs.json.actions.every((a) => a.permitted === false), 'a viewer may run none');
   assert.equal(theirs.json.actor.role, 'viewer');
 });
@@ -360,7 +360,7 @@ test('executing without a confirmation is refused', async () => {
 });
 
 test('a confirmed boolean in the body means nothing', async () => {
-  const r = await post('/api/v1/operations', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' }, confirmed: true });
+  const r = await post('/api/operations', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' }, confirmed: true });
   assert.equal(r.status, 409);
   assert.equal(r.json.operation.error.code, 'confirmation_required');
   assert.deepEqual(wirePosts(), []);
@@ -373,7 +373,7 @@ test('a confirmation token cannot be spent twice', async () => {
   assert.equal(first.status, 202, 'the first spend starts the operation');
   const op = await settleOperation(first.json.operation.id);
   assert.equal(op.status, 'succeeded');
-  const second = await post('/api/v1/operations', {
+  const second = await post('/api/operations', {
     action: 'container.start', target: { type: 'service', id: 'paperless' }, confirmationToken: token,
   });
   assert.equal(second.status, 409);
@@ -405,7 +405,7 @@ test('a token from another session is refused', async () => {
   const d = await dryRun('container.restart', { type: 'service', id: 'jellyfin' });
   // the same person, a different browser: the confirmation is bound to the session that asked
   // for it, so a token lifted from one session is worthless in another
-  const r = await post('/api/v1/operations', {
+  const r = await post('/api/operations', {
     action: 'container.restart', target: { type: 'service', id: 'jellyfin' },
     confirmationToken: d.json.confirmation.token, operationId: d.json.operation.id,
   }, null, otherCookie);
@@ -426,7 +426,7 @@ test('an expired confirmation is refused', async () => {
 test('a cancel ends the operation without running it', async () => {
   const d = await dryRun('container.restart', { type: 'service', id: 'jellyfin' });
   const id = d.json.operation.id;
-  const r = await post(`/api/v1/operations/${id}/cancel`, {});
+  const r = await post(`/api/operations/${id}/cancel`, {});
   assert.equal(r.status, 200);
   assert.equal(r.json.operation.status, 'cancelled');
   const after = await execute('container.restart', { type: 'service', id: 'jellyfin' }, d.json.confirmation.token, id);
@@ -610,7 +610,7 @@ test('repeated failures on one service enforce a short back-off', async () => {
 
 test('every operation leaves a trail of the phases it went through', async () => {
   const { operation } = await runOperation('container.start', { type: 'service', id: 'paperless' });
-  const r = await get(`/api/v1/operations/${operation.id}/trail`);
+  const r = await get(`/api/operations/${operation.id}/trail`);
   assert.equal(r.status, 200);
   const phases = r.json.trail.map((t) => t.phase);
   for (const phase of ['requested', 'authorization', 'target', 'confirmation', 'execution', 'completed']) {
@@ -638,8 +638,8 @@ test('a rejected operation is audited with the reason it was refused', async () 
 test('the audit trail and the API carry no secrets, tokens or socket paths', async () => {
   const { operation } = await runOperation('container.restart', { type: 'service', id: 'jellyfin' });
   const blobs = [
-    JSON.stringify(await (await get('/api/v1/operations')).json),
-    JSON.stringify((await get(`/api/v1/operations/${operation.id}/trail`)).json),
+    JSON.stringify(await (await get('/api/operations')).json),
+    JSON.stringify((await get(`/api/operations/${operation.id}/trail`)).json),
     fs.readFileSync(path.join(DATA_DIR, 'operations.jsonl'), 'utf8'),
     fs.readFileSync(path.join(DATA_DIR, 'activity.jsonl'), 'utf8'),
   ];
@@ -743,7 +743,7 @@ test('operation flooding is throttled server-side', async () => {
   const limit = locks._internals.MAX_PER_WINDOW;
   let throttled = null;
   for (let i = 0; i < limit + 3; i++) {
-    const r = await post('/api/v1/operations/dry-run', { action: 'container.restart', target }, null, cookie);
+    const r = await post('/api/operations/dry-run', { action: 'container.restart', target }, null, cookie);
     if (r.status === 429) { throttled = r; break; }
   }
   assert.ok(throttled, 'a flood of operations is refused');
@@ -756,7 +756,7 @@ test('operation flooding is throttled server-side', async () => {
 
 test('the operations API is inert: no route runs anything on its own', async () => {
   ENGINE.reset();
-  const overview = await get('/api/v1/operations');
+  const overview = await get('/api/operations');
   assert.equal(overview.status, 200);
   assert.equal(overview.json.docker.channel, 'shared');
   assert.ok(Array.isArray(overview.json.actions));

@@ -51,9 +51,9 @@ function readOperationBody(body) {
  * rest of the API dispatch can carry on.
  */
 export async function handleOperations({ p, method, send, jsonBody, actor, sessionId, query = null }) {
-  const base = p === '/api/operations' || p === '/api/v1/operations';
-  const m = p.match(/^\/api\/(?:v1\/)?operations\/([^/]+)$/);
-  const sub = p.match(/^\/api\/(?:v1\/)?operations\/([^/]+)\/(trail|cancel)$/);
+  const base = p === '/api/operations' || p === '/api/operations';
+  const m = p.match(/^\/api\/operations\/([^/]+)$/);
+  const sub = p.match(/^\/api\/operations\/([^/]+)\/(trail|cancel)$/);
 
   // ---- capabilities + recent operations ----
   if (method === 'GET' && base) {

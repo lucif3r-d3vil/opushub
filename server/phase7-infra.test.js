@@ -1,5 +1,5 @@
-// Phase 7B — infrastructure API: /api/host, /api/docker, /api/networks, /api/volumes,
-// /api/images, /api/version, /api/v1/* aliases, and degraded-mode lastKnown.
+// Phase 7B — infrastructure API: /api/host, /api/networks, /api/version
+// and degraded-mode lastKnown.
 // Calls handleApi directly with stub req/res; docker joins run against the mock engine.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -74,28 +74,11 @@ test('GET /api/host: canonical shape with engine, traefik and version', async ()
   assert.ok(json.address.effective);
 });
 
-test('GET /api/docker: engine status plus inventory counts', async () => {
-  const { status, json } = await get('/api/docker');
-  assert.equal(status, 200);
-  assert.equal(json.status.ok, true);
-  assert.ok(json.counts.containers > 0);
-  assert.ok(json.counts.networks >= 3);
-  assert.ok(json.counts.volumes >= 3);
-  assert.ok(json.counts.images >= 1);
-  assert.equal(json.live, true);
-});
-
-test('GET /api/networks|volumes|images: live slices with counts', async () => {
+test('GET /api/networks: live slice with counts', async () => {
   const n = await get('/api/networks');
   assert.equal(n.json.live, true);
   assert.ok(n.json.networks.some((x) => x.name === 'proxy'));
-  const v = await get('/api/volumes');
-  assert.equal(v.json.live, true);
-  assert.ok(v.json.volumes.some((x) => x.name === 'jellyfin-config'));
-  const i = await get('/api/images');
-  assert.equal(i.json.live, true);
-  assert.ok(i.json.images.length >= 1);
-  const blob = JSON.stringify([n.json, v.json, i.json]);
+  const blob = JSON.stringify(n.json);
   assert.doesNotMatch(blob, /Mountpoint/);
   assert.doesNotMatch(blob, /\/var\/lib\/docker/);
   assert.doesNotMatch(blob, /hunter2/);
@@ -105,22 +88,6 @@ test('GET /api/version: build identity', async () => {
   const v = await get('/api/version');
   assert.equal(v.json.name, 'OpusHub');
   assert.ok(v.json.version);
-});
-
-test('/api/v1/* mirrors the unversioned shapes exactly', async () => {
-  for (const name of ['host', 'docker', 'networks', 'volumes', 'images', 'version']) {
-    const a = await get(`/api/${name}`);
-    const b = await get(`/api/v1/${name}`);
-    assert.equal(b.status, 200, name);
-    assert.deepEqual(Object.keys(b.json).sort(), Object.keys(a.json).sort(), name);
-  }
-});
-
-test('/api/v1 refuses routes that were not deliberately versioned', async () => {
-  // handleApi throws its 404 (index.js renders it); the point is v1 lends no alias.
-  for (const name of ['health', 'auth/me', 'settings', 'activity']) {
-    await assert.rejects(() => get(`/api/v1/${name}`), /no route: GET \/api\/v1\//, name);
-  }
 });
 
 test('degraded mode: dead engine serves labelled last-known state, never live data', async () => {

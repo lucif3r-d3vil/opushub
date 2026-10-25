@@ -1,14 +1,14 @@
 // Phase 10D-C — registries. Credentials live server-side only.
 //
-//   GET    /api/v1/registries                 the list (no secret in any form)
-//   POST   /api/v1/registries                 { id, name, kind, endpoint, insecure?, username?, secret?, default? }
-//   GET    /api/v1/registries/:id
-//   PATCH  /api/v1/registries/:id             same fields; secret undefined = keep, '' = clear
-//   DELETE /api/v1/registries/:id
-//   POST   /api/v1/registries/:id/test        /v2/ ping with the stored credentials
-//   GET    /api/v1/registries/:id/repositories?q=   (private registries only)
-//   GET    /api/v1/registries/:id/tags?repository=
-//   GET    /api/v1/registries/:id/manifest?repository=&reference=
+//   GET    /api/registries                 the list (no secret in any form)
+//   POST   /api/registries                 { id, name, kind, endpoint, insecure?, username?, secret?, default? }
+//   GET    /api/registries/:id
+//   PATCH  /api/registries/:id             same fields; secret undefined = keep, '' = clear
+//   DELETE /api/registries/:id
+//   POST   /api/registries/:id/test        /v2/ ping with the stored credentials
+//   GET    /api/registries/:id/repositories?q=   (private registries only)
+//   GET    /api/registries/:id/tags?repository=
+//   GET    /api/registries/:id/manifest?repository=&reference=
 //
 // Every remote call is one of the five fixed request shapes in registries/client.js against the
 // stored, validated endpoint; the browser cannot name a URL, a path, a method or a header. Pulls
@@ -45,7 +45,7 @@ function readBodyFields(body, { partial = false } = {}) {
 }
 
 export async function handleRegistriesRoutes({ p, method, send, jsonBody, actor, query }) {
-  const m = p.match(/^\/api\/(?:v1\/)?registries(?:\/([^/]+)(?:\/(test|repositories|tags|manifest))?)?$/);
+  const m = p.match(/^\/api\/registries(?:\/([^/]+)(?:\/(test|repositories|tags|manifest))?)?$/);
   if (!m) return false;
   const [, rawId, sub] = m;
   const bad = (status, code, error, extra = {}) => { send(status, { error, code, ...extra }); return true; };

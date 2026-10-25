@@ -76,16 +76,6 @@ test('listVolumes projects names and usage, never host mountpoints', async () =>
   assert.doesNotMatch(blob, /\/var\/lib\/docker/);
 });
 
-test('listImages projects tags and sizes, never config or labels', async () => {
-  const images = await docker.listImages();
-  assert.ok(images.length >= 1);
-  for (const i of images) {
-    assert.ok(i.id === null || i.id.length === 12);
-    assert.ok(Array.isArray(i.tags));
-    assert.ok(!('Config' in i) && !('Labels' in i) && !('Env' in i));
-  }
-});
-
 // --- canonical host document --------------------------------------------------
 
 test('hostDocument combines system, engine, traefik and version in one shape', async () => {

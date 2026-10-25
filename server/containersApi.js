@@ -1,16 +1,16 @@
 // Phase 10D-A — the container read surface behind the Edit Container UI and the detail views.
 //
-//   GET  /api/v1/containers/:ref                 the safe inspect projection (providers/docker.js)
-//   GET  /api/v1/containers/:ref/spec            the canonical, editable spec (env values masked)
-//   GET  /api/v1/containers/:ref/top             processes (read-only, args redacted)
-//   GET  /api/v1/containers/:ref/volumes         the volumes and binds the container uses
-//   GET  /api/v1/containers/:ref/health          the unified health verdict (health model)
-//   GET  /api/v1/containers/spec-fields          the field allow-list and per-field editability
-//   POST /api/v1/containers/:ref/diff            preview: CURRENT / NEW / CHANGES for a spec patch.
+//   GET  /api/containers/:ref                 the safe inspect projection (providers/docker.js)
+//   GET  /api/containers/:ref/spec            the canonical, editable spec (env values masked)
+//   GET  /api/containers/:ref/top             processes (read-only, args redacted)
+//   GET  /api/containers/:ref/volumes         the volumes and binds the container uses
+//   GET  /api/containers/:ref/health          the unified health verdict (health model)
+//   GET  /api/containers/spec-fields          the field allow-list and per-field editability
+//   POST /api/containers/:ref/diff            preview: CURRENT / NEW / CHANGES for a spec patch.
 //                                                Side-effect free — it reads the container and runs
 //                                                the same planner the dry-run runs. Nothing is written.
 //
-// Every mutation goes through POST /api/v1/operations (operations engine). This module never
+// Every mutation goes through POST /api/operations (operations engine). This module never
 // imports the write adapters, and the proof in phase10d tests checks that it cannot.
 import * as docker from './providers/docker.js';
 import * as model from './model.js';
@@ -26,7 +26,7 @@ const REF_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 
 /** Returns true when the route was handled. */
 export async function handleContainersRoutes({ p, method, send, jsonBody }) {
-  const base = p.replace(/^\/api\/v1\/containers/, '').replace(/^\/api\/containers/, '');
+  const base = p.replace(/^\/api\/containers/, '');
   if (base === p) return false;
 
   if (method === 'GET' && base === '/spec-fields') {

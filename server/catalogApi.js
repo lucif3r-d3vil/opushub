@@ -1,12 +1,12 @@
 // Phase 10D-D — the service catalog.
 //
-//   GET  /api/v1/catalog                      entries (search ?q=, ?category=), categories, proxy provider
-//   GET  /api/v1/catalog/installs             install history (no secrets are ever stored)
-//   GET  /api/v1/catalog/:id                  one manifest (public projection) + installed instances
-//   POST /api/v1/catalog/:id/plan             { config } → the same plan the operation will run, no mutation
+//   GET  /api/catalog                      entries (search ?q=, ?category=), categories, proxy provider
+//   GET  /api/catalog/installs             install history (no secrets are ever stored)
+//   GET  /api/catalog/:id                  one manifest (public projection) + installed instances
+//   POST /api/catalog/:id/plan             { config } → the same plan the operation will run, no mutation
 //
-// Installing is NOT a route here. It is the `service.install` operation: POST /api/v1/operations/
-// dry-run then POST /api/v1/operations with the confirmation token — authz, params, planning,
+// Installing is NOT a route here. It is the `service.install` operation: POST /api/operations/
+// dry-run then POST /api/operations with the confirmation token — authz, params, planning,
 // policy, locking, execution, verification and audit all happen in the operations engine.
 import { listManifests, getManifest, loadManifests, CATEGORIES } from './catalog/schema.js';
 import { buildInstall, planInstall, MANAGED_LABEL } from './catalog/planner.js';
@@ -33,7 +33,7 @@ function publicManifest(m, { full = false } = {}) {
 }
 
 export async function handleCatalogRoutes({ p, method, send, jsonBody, actor, query }) {
-  const m = p.match(/^\/api\/(?:v1\/)?catalog(?:\/([^/]+)(?:\/(plan))?)?$/);
+  const m = p.match(/^\/api\/catalog(?:\/([^/]+)(?:\/(plan))?)?$/);
   if (!m) return false;
   const [, rawId, sub] = m;
   const bad = (status, code, error, extra = {}) => { send(status, { error, code, ...extra }); return true; };

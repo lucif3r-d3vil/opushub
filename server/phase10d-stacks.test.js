@@ -71,7 +71,7 @@ async function settle(id, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
-    const r = await get(`/api/v1/operations/${id}`);
+    const r = await get(`/api/operations/${id}`);
     last = r.json?.operation || last;
     if (last && !['pending', 'awaiting_confirmation', 'authorized', 'running'].includes(last.status)) return last;
     await new Promise((r) => setTimeout(r, 60));
@@ -81,9 +81,9 @@ async function settle(id, timeoutMs = 30_000) {
 /** The stack verb wrappers return a dry-run + token; execution is the ordinary operations POST. */
 async function runStack(verb, id) {
   locks._resetLimits();
-  const d = await post(`/api/v1/stacks/${id}/${verb}`);
+  const d = await post(`/api/stacks/${id}/${verb}`);
   if (d.status !== 200) return { dryRun: d, operation: d.json?.operation ?? null };
-  const e = await post('/api/v1/operations', { action: `stack.${verb}`, target: { type: 'stack', id }, confirmationToken: d.json.confirmation.token, operationId: d.json.operation.id });
+  const e = await post('/api/operations', { action: `stack.${verb}`, target: { type: 'stack', id }, confirmationToken: d.json.confirmation.token, operationId: d.json.operation.id });
   const operation = e.status === 202 ? await settle(e.json.operation.id) : e.json.operation;
   return { dryRun: d, execute: e, operation };
 }
@@ -216,37 +216,37 @@ test('the policy classifies a stack: SAFE, WARNING, DANGEROUS, BLOCKED — and c
 /* ------------------------------ 2. the managed store + routes ------------------------------ */
 
 test('creating a managed stack validates, stores, masks secrets, and deploys nothing', async () => {
-  const r = await post('/api/v1/stacks/managed', { name: 'shop', compose: DOC, env: { API_TOKEN: 'supersecret-token' } });
+  const r = await post('/api/stacks/managed', { name: 'shop', compose: DOC, env: { API_TOKEN: 'supersecret-token' } });
   assert.equal(r.status, 201, JSON.stringify(r.json));
   assert.equal(r.json.stack.revision, 1);
   assert.notEqual(r.json.stack.env.API_TOKEN, 'supersecret-token', 'secret env is masked in the response');
   assert.match(r.json.stack.env.API_TOKEN, /^••••/);
   assert.deepEqual(posts(), [], 'creating the definition touches nothing on the engine');
-  const list = await get('/api/v1/stacks/managed');
+  const list = await get('/api/stacks/managed');
   assert.equal(list.json.stacks.length, 1);
   assert.ok(!JSON.stringify(list.json).includes('supersecret-token'));
   // blocked documents are refused at the door
-  const blocked = await post('/api/v1/stacks/managed', { name: 'evil', compose: 'services:\n  a:\n    image: x:1\n    privileged: true\n' });
+  const blocked = await post('/api/stacks/managed', { name: 'evil', compose: 'services:\n  a:\n    image: x:1\n    privileged: true\n' });
   assert.equal(blocked.status, 422);
   assert.equal(blocked.json.code, 'policy_blocked');
   // so are broken ones, unknown fields, and duplicate names
-  assert.equal((await post('/api/v1/stacks/managed', { name: 'bad', compose: 'services: [' })).status, 422);
-  assert.equal((await post('/api/v1/stacks/managed', { name: 'bad', compose: DOC, command: 'rm -rf /' })).status, 400);
-  assert.equal((await post('/api/v1/stacks/managed', { name: 'shop', compose: DOC })).status, 409);
+  assert.equal((await post('/api/stacks/managed', { name: 'bad', compose: 'services: [' })).status, 422);
+  assert.equal((await post('/api/stacks/managed', { name: 'bad', compose: DOC, command: 'rm -rf /' })).status, 400);
+  assert.equal((await post('/api/stacks/managed', { name: 'shop', compose: DOC })).status, 409);
   // the routes sit inside the session gate and the permission model
-  assert.equal((await get('/api/v1/stacks/managed', null)).status, 401);
-  assert.equal((await post('/api/v1/stacks/managed', { name: 'x', compose: DOC }, VIEWER_COOKIE)).status, 403);
+  assert.equal((await get('/api/stacks/managed', null)).status, 401);
+  assert.equal((await post('/api/stacks/managed', { name: 'x', compose: DOC }, VIEWER_COOKIE)).status, 403);
   // the discovery projection does not list a stack that has no containers
   const disc = await get('/api/stacks');
   assert.ok(!disc.json.stacks.some((s) => s.id === 'shop'), 'the store never fabricates inventory');
 });
 
 test('validate and plan are side-effect free and describe exactly what a deploy would do', async () => {
-  const v = await post('/api/v1/stacks/managed/shop/validate');
+  const v = await post('/api/stacks/managed/shop/validate');
   assert.equal(v.status, 200);
   assert.ok(v.json.ok);
   assert.deepEqual(v.json.services.map((s) => s.key), ['db', 'web']);
-  const plan = await post('/api/v1/stacks/managed/shop/plan');
+  const plan = await post('/api/stacks/managed/shop/plan');
   assert.equal(plan.status, 200, JSON.stringify(plan.json));
   assert.deepEqual(plan.json.plan.services.map((s) => [s.key, s.action]), [['db', 'create'], ['web', 'create']]);
   assert.ok(plan.json.plan.services.every((s) => !('desired' in s) && !('_model' in plan.json.plan)), 'the runner input is not exposed');
@@ -276,7 +276,7 @@ test('deploy creates networks, volumes and containers in dependency order, verif
   const shop = disc.json.stacks.find((s) => s.id === 'shop');
   assert.ok(shop, 'the deployed stack is now discovered from Docker');
   assert.equal(shop.containerCount, 2);
-  const detail = await get('/api/v1/stacks/managed/shop');
+  const detail = await get('/api/stacks/managed/shop');
   assert.equal(detail.json.stack.state, 'running');
   assert.equal(detail.json.stack.lastDeploy.status, 'succeeded');
   assert.equal(detail.json.history[0].status, 'succeeded');
@@ -290,7 +290,7 @@ test('a second deploy of the same document changes nothing; a changed service is
   assert.deepEqual(same.dryRun.json.dryRun.plan.services.map((s) => s.action), ['unchanged', 'unchanged']);
 
   const changed = DOC.replace('GREETING: hello', 'GREETING: bonjour');
-  const upd = await patch('/api/v1/stacks/managed/shop', { compose: changed });
+  const upd = await patch('/api/stacks/managed/shop', { compose: changed });
   assert.equal(upd.status, 200, JSON.stringify(upd.json));
   assert.equal(upd.json.stack.revision, 2);
   const stored = store.getStack('shop');
@@ -308,13 +308,13 @@ test('a second deploy of the same document changes nothing; a changed service is
 });
 
 test('editing the document invalidates a deploy confirmation issued for the previous revision', async () => {
-  const d = await post('/api/v1/stacks/shop/deploy');
+  const d = await post('/api/stacks/shop/deploy');
   assert.equal(d.status, 200);
-  await patch('/api/v1/stacks/managed/shop', { compose: DOC.replace('GREETING: hello', 'GREETING: hola') });
-  const e = await post('/api/v1/operations', { action: 'stack.deploy', target: { type: 'stack', id: 'shop' }, confirmationToken: d.json.confirmation.token });
+  await patch('/api/stacks/managed/shop', { compose: DOC.replace('GREETING: hello', 'GREETING: hola') });
+  const e = await post('/api/operations', { action: 'stack.deploy', target: { type: 'stack', id: 'shop' }, confirmationToken: d.json.confirmation.token });
   assert.equal(e.json.operation.error.code, 'confirmation_mismatch');
   assert.deepEqual(posts(), []);
-  await patch('/api/v1/stacks/managed/shop', { compose: DOC.replace('GREETING: hello', 'GREETING: bonjour') });
+  await patch('/api/stacks/managed/shop', { compose: DOC.replace('GREETING: hello', 'GREETING: bonjour') });
 });
 
 test('a partial failure stops the pipeline, rolls back what this run created, and reports honestly', async () => {
@@ -327,21 +327,21 @@ services:
     container_name: exit-immediately-broken
     depends_on: [ok]
 `;
-  assert.equal((await post('/api/v1/stacks/managed', { name: 'fragile', compose: doc })).status, 201);
+  assert.equal((await post('/api/stacks/managed', { name: 'fragile', compose: doc })).status, 201);
   const { operation } = await runStack('deploy', 'fragile');
   assert.equal(operation.status, 'failed');
   assert.match(operation.error.reason, /broken.*exited immediately/);
   assert.ok(!fx('fragile-ok-1'), 'the service created earlier in this run was rolled back');
   assert.ok(!fx('exit-immediately-broken'));
   assert.ok(!CREATED_NETWORKS.has('fragile_default'), 'the network created in this run was removed');
-  const detail = await get('/api/v1/stacks/managed/fragile');
+  const detail = await get('/api/stacks/managed/fragile');
   assert.equal(detail.json.stack.lastDeploy.status, 'failed');
   const h = detail.json.history[0];
   assert.equal(h.status, 'failed');
   assert.deepEqual(h.services.map((s) => [s.key, s.result]), [['ok', 'rolled_back'], ['broken', 'failed']]);
   assert.equal(detail.json.stack.state, 'not_deployed');
   // no rollback point exists (nothing ever succeeded)
-  assert.equal((await post('/api/v1/stacks/managed/fragile/rollback')).status, 404);
+  assert.equal((await post('/api/stacks/managed/fragile/rollback')).status, 404);
 });
 
 test('a deploy that changes a running service and fails verification leaves the previous container running', async () => {
@@ -349,7 +349,7 @@ test('a deploy that changes a running service and fails verification leaves the 
   const doc = DOC.replace('GREETING: hello', 'GREETING: bonjour').replace('ghcr.io/example/web:1.0', 'ghcr.io/example/web:2.0').replace('image: ghcr.io/example/web:2.0', 'image: ghcr.io/example/web:2.0\n    container_name: shop-web-exit-immediately');
   // (container_name changes → the plan sees "web" by service label, recreates under the new name)
   const before = fx('shop-web-1');
-  const upd = await patch('/api/v1/stacks/managed/shop', { compose: doc });
+  const upd = await patch('/api/stacks/managed/shop', { compose: doc });
   assert.equal(upd.status, 200, JSON.stringify(upd.json));
   const { operation } = await runStack('deploy', 'shop');
   assert.equal(operation.status, 'failed', JSON.stringify(operation));
@@ -359,7 +359,7 @@ test('a deploy that changes a running service and fails verification leaves the 
   assert.ok(!fx('shop-web-exit-immediately'));
   // rollback restores the last good document as a new revision (deploy is a separate, confirmed step)
   ENGINE.reset();
-  const rb = await post('/api/v1/stacks/managed/shop/rollback');
+  const rb = await post('/api/stacks/managed/shop/rollback');
   assert.equal(rb.status, 200, JSON.stringify(rb.json));
   assert.equal(store.getStack('shop').compose, DOC.replace('GREETING: hello', 'GREETING: bonjour'));
   assert.deepEqual(posts(), [], 'rolling back the document deploys nothing by itself');
@@ -380,27 +380,27 @@ test('stack stop and start act on every member, in dependency order, and are ver
   assert.equal(fx('shop-web-1').State, 'running');
   assert.deepEqual(posts().map(nameOf), ['/shop-db-1', '/shop-web-1'], 'dependencies start first');
   // discovered (non-managed) stacks get the lifecycle verbs too, but never deploy
-  const d = await post('/api/v1/stacks/opustream/deploy');
+  const d = await post('/api/stacks/opustream/deploy');
   assert.equal(d.status, 409, JSON.stringify(d.json));
   assert.equal(d.json.code, 'not_managed');
-  const s = await post('/api/v1/stacks/opustream/stop');
+  const s = await post('/api/stacks/opustream/stop');
   assert.equal(s.status, 200);
-  await post(`/api/v1/operations/${s.json.operation.id}/cancel`);
+  await post(`/api/operations/${s.json.operation.id}/cancel`);
 });
 
 test('a stack operation holds the stack lock and every member, so a member operation is refused meanwhile', async () => {
-  const d = await post('/api/v1/stacks/shop/stop');
+  const d = await post('/api/stacks/shop/stop');
   assert.equal(d.status, 200);
   // simulate the running stack operation holding its keys
   const keys = ['stack:shop', ...FLEET.filter((f) => f.Labels['com.docker.compose.project'] === 'shop').map((f) => f.Id.slice(0, 12))];
   for (const k of keys) locks.acquire(k, { opId: 'op-running', action: 'stack.stop' });
-  const m = await post('/api/v1/operations/dry-run', { action: 'container.restart', target: { type: 'container', id: 'shop-web-1' } });
+  const m = await post('/api/operations/dry-run', { action: 'container.restart', target: { type: 'container', id: 'shop-web-1' } });
   assert.equal(m.status, 409, JSON.stringify(m.json));
   assert.equal(m.json.code, 'already_running');
-  const other = await post('/api/v1/stacks/shop/deploy');
+  const other = await post('/api/stacks/shop/deploy');
   assert.equal(other.status, 409);
   locks._resetLimits();
-  await post(`/api/v1/operations/${d.json.operation.id}/cancel`);
+  await post(`/api/operations/${d.json.operation.id}/cancel`);
 });
 
 test('OpusHub refuses to stop or remove the stack it runs in', async () => {
@@ -413,10 +413,10 @@ test('OpusHub refuses to stop or remove the stack it runs in', async () => {
     opushub.Labels['com.docker.compose.service'] = 'opushub';
     const { invalidateDiscovery } = await import('./model.js');
     invalidateDiscovery();
-    const s = await post('/api/v1/stacks/shop/stop');
+    const s = await post('/api/stacks/shop/stop');
     assert.notEqual(s.status, 200);
     assert.equal(s.json.code, 'ineligible');
-    const r = await post('/api/v1/stacks/shop/remove');
+    const r = await post('/api/stacks/shop/remove');
     assert.equal(r.json.code, 'ineligible');
   } finally {
     delete opushub.Labels['com.docker.compose.project'];
@@ -435,12 +435,12 @@ test('stack remove deletes the containers and the networks it created, keeps vol
   assert.ok(!CREATED_NETWORKS.has('shop_default'));
   assert.ok(CREATED_VOLUMES.has('shop_data'), 'volumes are never deleted');
   assert.ok(!posts().some((l) => /v=1|\/volumes\//.test(l)));
-  const detail = await get('/api/v1/stacks/managed/shop');
+  const detail = await get('/api/stacks/managed/shop');
   assert.equal(detail.status, 200, 'the definition is still there');
   assert.equal(detail.json.stack.state, 'not_deployed');
   // and can now be forgotten
-  assert.equal((await del('/api/v1/stacks/managed/shop')).status, 200);
-  assert.equal((await get('/api/v1/stacks/managed/shop')).status, 404);
+  assert.equal((await del('/api/stacks/managed/shop')).status, 200);
+  assert.equal((await get('/api/stacks/managed/shop')).status, 404);
 });
 
 /* ------------------------------ 5. static proofs ------------------------------ */

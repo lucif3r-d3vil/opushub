@@ -3,7 +3,7 @@
 // These proofs assert things like "no module contains `execSync`". That only makes sense over code,
 // not over the prose around it, so comments have to be removed first. The obvious one-liner —
 // `src.replace(/\/\*[\s\S]*?\*\//g, '')` — is not safe enough to build a proof on: a `/*` that
-// appears inside a line comment or a string (a route glob written as `/api/v1/*` is enough) opens a
+// appears inside a line comment or a string (a route glob written as `/api/*` is enough) opens a
 // "comment" that runs until the next unrelated `*/`, deleting everything in between. In
 // server/api.js that single mistake swallowed 30% of the file, including the very
 // `route === 'POST /api/setup'` lines the proof exists to check — it passed while looking at a

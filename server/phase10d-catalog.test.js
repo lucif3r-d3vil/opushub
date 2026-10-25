@@ -57,12 +57,12 @@ async function call(method, pathname, body = null, cookie = COOKIE) {
 }
 const get = (p, cookie) => call('GET', p, null, cookie);
 const post = (p, body, cookie) => call('POST', p, body, cookie);
-const dryRun = (config, id = 'uptime-kuma') => { locks._resetRate(); return post('/api/v1/operations/dry-run', { action: 'service.install', target: { type: 'catalog', id }, params: { config } }); };
+const dryRun = (config, id = 'uptime-kuma') => { locks._resetRate(); return post('/api/operations/dry-run', { action: 'service.install', target: { type: 'catalog', id }, params: { config } }); };
 async function settle(id, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
-    const r = await get(`/api/v1/operations/${id}`);
+    const r = await get(`/api/operations/${id}`);
     last = r.json?.operation || last;
     if (last && !['pending', 'awaiting_confirmation', 'authorized', 'running'].includes(last.status)) return last;
     await new Promise((r) => setTimeout(r, 60));
@@ -73,7 +73,7 @@ async function install(config, id = 'uptime-kuma') {
   locks._resetLimits();
   const d = await dryRun(config, id);
   if (d.status !== 200) return { dryRun: d, operation: d.json?.operation ?? null };
-  const e = await post('/api/v1/operations', { action: 'service.install', target: { type: 'catalog', id }, params: { config }, confirmationToken: d.json.confirmation.token, operationId: d.json.operation.id });
+  const e = await post('/api/operations', { action: 'service.install', target: { type: 'catalog', id }, params: { config }, confirmationToken: d.json.confirmation.token, operationId: d.json.operation.id });
   const operation = e.status === 202 ? await settle(e.json.operation.id) : e.json.operation;
   return { dryRun: d, execute: e, operation };
 }
@@ -231,25 +231,25 @@ test('proxy provider: Traefik is one provider behind the abstraction; none appli
 /* ------------------------------ 3. API ------------------------------ */
 
 test('catalog API: browse, search, categories, detail; plan is read-only; no install route', async () => {
-  const list = await get('/api/v1/catalog');
+  const list = await get('/api/catalog');
   assert.equal(list.status, 200);
   assert.ok(list.json.entries.length >= 5);
   assert.ok(list.json.categories.includes('database'));
   assert.equal(list.json.proxy.provider, 'traefik');
-  const search = await get('/api/v1/catalog?q=password');
+  const search = await get('/api/catalog?q=password');
   assert.deepEqual(search.json.entries.map((e) => e.id), ['vaultwarden']);
-  const cat = await get('/api/v1/catalog?category=database');
+  const cat = await get('/api/catalog?category=database');
   assert.deepEqual(cat.json.entries.map((e) => e.id).sort(), ['postgres', 'redis']);
-  const detail = await get('/api/v1/catalog/postgres');
+  const detail = await get('/api/catalog/postgres');
   assert.equal(detail.status, 200);
   assert.equal(detail.json.entry.variables.find((v) => v.key === 'POSTGRES_PASSWORD').kind, 'secret');
   assert.ok(detail.json.networks.includes('proxy'));
-  assert.equal((await get('/api/v1/catalog/nope')).status, 404);
-  const viewerDetail = await get('/api/v1/catalog/postgres', VIEWER_COOKIE);
+  assert.equal((await get('/api/catalog/nope')).status, 404);
+  const viewerDetail = await get('/api/catalog/postgres', VIEWER_COOKIE);
   assert.equal(viewerDetail.status, 200); assert.equal(viewerDetail.json.permissions.install, false);
 
   const before = posts().length;
-  const plan = await post('/api/v1/catalog/postgres/plan', { config: { name: 'pg-plan', variables: { POSTGRES_PASSWORD: 'correct-horse-battery' } } });
+  const plan = await post('/api/catalog/postgres/plan', { config: { name: 'pg-plan', variables: { POSTGRES_PASSWORD: 'correct-horse-battery' } } });
   assert.equal(plan.status, 200); assert.equal(plan.json.ok, true);
   assert.equal(plan.json.plan.kind, 'install');
   assert.ok(plan.json.plan.steps.includes('create network pg-plan_net'));
@@ -257,16 +257,16 @@ test('catalog API: browse, search, categories, detail; plan is read-only; no ins
   assert.equal(plan.json.plan._install, undefined, 'runner-only material never crosses the API');
   assert.equal(posts().length, before, 'planning writes nothing to the engine');
   assert.ok(!fx('pg-plan'));
-  const badPlan = await post('/api/v1/catalog/postgres/plan', { config: { name: 'pg-plan' } });
+  const badPlan = await post('/api/catalog/postgres/plan', { config: { name: 'pg-plan' } });
   assert.equal(badPlan.json.ok, false); assert.match(badPlan.json.problems[0], /required/);
-  await assert.rejects(() => post('/api/v1/catalog/postgres/install', {}), /no route/, 'there is no install route under /catalog');
-  assert.equal((await post('/api/v1/catalog/postgres', {})).status, 405);
+  await assert.rejects(() => post('/api/catalog/postgres/install', {}), /no route/, 'there is no install route under /catalog');
+  assert.equal((await post('/api/catalog/postgres', {})).status, 405);
 });
 
 /* ------------------------------ 4. install pipeline ------------------------------ */
 
 test('install: pull → network → volume → create → start → verify healthy → monitor → activity; viewer refused', async () => {
-  const viewer = await post('/api/v1/operations/dry-run', { action: 'service.install', target: { type: 'catalog', id: 'redis' }, params: { config: { name: 'cache1' } } }, VIEWER_COOKIE);
+  const viewer = await post('/api/operations/dry-run', { action: 'service.install', target: { type: 'catalog', id: 'redis' }, params: { config: { name: 'cache1' } } }, VIEWER_COOKIE);
   assert.equal(viewer.status, 403);
   const r = await install({ name: 'cache1', variables: { MAXMEMORY: '128mb' }, updates: true }, 'redis');
   assert.equal(r.dryRun.status, 200, JSON.stringify(r.dryRun.json));
@@ -286,10 +286,10 @@ test('install: pull → network → volume → create → start → verify healt
   assert.equal(r.operation.verification.state, 'running');
   const mon = monitoring.overview().monitors.find((m) => m.target?.service?.name === 'cache1');
   assert.ok(mon); assert.equal(mon.type, 'docker');
-  const installs = await get('/api/v1/catalog/installs');
+  const installs = await get('/api/catalog/installs');
   assert.equal(installs.json.installs[0].status, 'succeeded'); assert.equal(installs.json.installs[0].name, 'cache1');
   assert.ok(!JSON.stringify(installs.json).includes('MAXMEMORY'), 'no variables stored in the install record');
-  const listed = await get('/api/v1/catalog');
+  const listed = await get('/api/catalog');
   assert.ok(listed.json.installed.some((i) => i.manifest === 'redis' && i.name === 'cache1'));
   const act = await get('/api/activity?limit=50');
   assert.ok(JSON.stringify(act.json).includes('installed as cache1'));
@@ -305,7 +305,7 @@ test('install: a missing image is pulled first with the stored registry credenti
   assert.equal(PULL_AUTH.length, 1, 'stored Docker Hub credential used for the pull');
   assert.equal(r.operation.result.report.image.registry, 'hub');
   assert.ok(r.dryRun.json.dryRun.checks.find((c) => c.key === 'plan'));
-  const blob = JSON.stringify([r.dryRun.json, r.operation, (await get(`/api/v1/operations/${r.operation.id}/trail`)).json]);
+  const blob = JSON.stringify([r.dryRun.json, r.operation, (await get(`/api/operations/${r.operation.id}/trail`)).json]);
   assert.ok(!blob.includes('hub-PW-SECRET') && !blob.includes(PULL_AUTH[0].header));
   regStore._resetRegistriesStore();
   removeFx('web-pull');
@@ -314,7 +314,7 @@ test('install: a missing image is pulled first with the stored registry credenti
 test('install: secrets never appear in the dry-run, operation, activity, events or trail', async () => {
   const r = await install({ name: 'pg2', variables: { POSTGRES_PASSWORD: 'Sup3r-Secret-Value!' } }, 'postgres');
   assert.equal(r.operation.status, 'succeeded', JSON.stringify(r.operation.error));
-  const blob = JSON.stringify([r.dryRun.json, r.operation, (await get('/api/activity?limit=100')).json, (await get('/api/v1/events?limit=100')).json, (await get(`/api/v1/operations/${r.operation.id}/trail`)).json]);
+  const blob = JSON.stringify([r.dryRun.json, r.operation, (await get('/api/activity?limit=100')).json, (await get('/api/events?limit=100')).json, (await get(`/api/operations/${r.operation.id}/trail`)).json]);
   assert.ok(!blob.includes('Sup3r-Secret-Value!'));
   assert.equal(fx('pg2').Config.Env.find((e) => e.startsWith('POSTGRES_PASSWORD=')), 'POSTGRES_PASSWORD=Sup3r-Secret-Value!', 'the container itself gets the real value');
 });
@@ -346,14 +346,14 @@ test('install: policy refuses a BLOCKED configuration before anything is created
   assert.equal(port.status, 409); assert.match(port.json.operation.error.reason, /already published/);
   const missingNet = await dryRun({ name: 'web-net', network: 'no-such-net', ports: { '80/tcp': 18082 } }, 'nginx');
   assert.equal(missingNet.status, 422); assert.match(missingNet.json.operation.error.reason, /does not exist/);
-  const badTarget = await post('/api/v1/operations/dry-run', { action: 'service.install', target: { type: 'catalog', id: 'not-a-manifest' }, params: { config: {} } });
+  const badTarget = await post('/api/operations/dry-run', { action: 'service.install', target: { type: 'catalog', id: 'not-a-manifest' }, params: { config: {} } });
   assert.equal(badTarget.status, 404);
 });
 
 test('install: the confirmation is bound to the config; a changed config is refused at execute', async () => {
   const d = await dryRun({ name: 'web-bound', ports: { '80/tcp': 18083 } }, 'nginx');
   assert.equal(d.status, 200);
-  const e = await post('/api/v1/operations', { action: 'service.install', target: { type: 'catalog', id: 'nginx' }, params: { config: { name: 'web-bound', ports: { '80/tcp': 18084 } } }, confirmationToken: d.json.confirmation.token });
+  const e = await post('/api/operations', { action: 'service.install', target: { type: 'catalog', id: 'nginx' }, params: { config: { name: 'web-bound', ports: { '80/tcp': 18084 } } }, confirmationToken: d.json.confirmation.token });
   assert.notEqual(e.status, 202);
   assert.ok(!fx('web-bound')); assert.equal(posts().length, 0);
 });
@@ -375,7 +375,7 @@ test('install: a failed pull creates nothing; an unhealthy start is rolled back 
   assert.ok(wire.includes('DELETE /containers/<id>?force=true') || wire.some((l) => l.startsWith('DELETE /containers/')));
   assert.ok(wire.some((l) => l === 'DELETE /networks/pg-become-unhealthy_net'));
   assert.ok(!wire.some((l) => l.startsWith('DELETE /volumes')));
-  const rec = (await get('/api/v1/catalog/installs')).json.installs.find((i) => i.name === 'pg-become-unhealthy');
+  const rec = (await get('/api/catalog/installs')).json.installs.find((i) => i.name === 'pg-become-unhealthy');
   assert.equal(rec.status, 'failed'); assert.ok(rec.report.warnings.some((w) => /kept/.test(w)));
   assert.ok(!monitoring.overview().monitors.some((m) => m.target?.service?.name === 'pg-become-unhealthy'), 'no monitor for a rolled-back install');
 });
@@ -383,7 +383,7 @@ test('install: a failed pull creates nothing; an unhealthy start is rolled back 
 test('install: locks — a second install of the same name is refused while the first runs', async () => {
   const d1 = await dryRun({ name: 'web-lock', ports: { '80/tcp': 18086 } }, 'nginx');
   assert.equal(d1.status, 200);
-  const e1 = await post('/api/v1/operations', { action: 'service.install', target: { type: 'catalog', id: 'nginx' }, params: { config: { name: 'web-lock', ports: { '80/tcp': 18086 } } }, confirmationToken: d1.json.confirmation.token, operationId: d1.json.operation.id });
+  const e1 = await post('/api/operations', { action: 'service.install', target: { type: 'catalog', id: 'nginx' }, params: { config: { name: 'web-lock', ports: { '80/tcp': 18086 } } }, confirmationToken: d1.json.confirmation.token, operationId: d1.json.operation.id });
   assert.equal(e1.status, 202);
   const d2 = await dryRun({ name: 'web-lock', ports: { '80/tcp': 18086 } }, 'nginx');
   assert.equal(d2.status, 409, JSON.stringify(d2.json));

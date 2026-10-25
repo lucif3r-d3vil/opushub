@@ -485,22 +485,6 @@ export async function engineInfo() {
   return out;
 }
 
-export async function imagesSummary() {
-  try {
-    const list = await requestJson('/images/json');
-    return list.slice(0, 400).map((i) => ({
-      id: typeof i.Id === 'string' && i.Id.startsWith('sha256:') ? i.Id.slice(7, 19) : null,
-      tags: i.RepoTags || [],
-      size: i.Size,
-    }));
-  } catch { return []; }
-}
-
-export async function systemDf() {
-  try { return await requestJson('/system/df'); }
-  catch { return null; }
-}
-
 /** Test helper — the negotiated version is process-global state. */
 export const _internals = {
   get apiVersion() { return apiVersion; },
@@ -566,23 +550,6 @@ export async function listVolumes() {
     // Usage counts come from the `UsageData` the daemon reports (RefCount, Size).
     refCount: Number.isFinite(v.UsageData?.RefCount) ? v.UsageData.RefCount : null,
     size: Number.isFinite(v.UsageData?.Size) && v.UsageData.Size >= 0 ? v.UsageData.Size : null,
-  }));
-}
-
-/**
- * Docker images, projected safe: tags + size + usage. Config/labels are never fetched here
- * (people put tokens in both); per-image detail stays behind `imageInfo()` which also omits them.
- */
-export async function listImages() {
-  const list = await requestJson('/images/json');
-  return (Array.isArray(list) ? list : []).slice(0, 400).map((i) => ({
-    id: typeof i.Id === 'string' && i.Id.startsWith('sha256:') ? i.Id.slice(7, 19) : null,
-    tags: Array.isArray(i.RepoTags) ? i.RepoTags.filter((t) => t !== '<none>:<none>').slice(0, 8) : [],
-    digests: Array.isArray(i.RepoDigests) ? i.RepoDigests.slice(0, 4) : [],
-    created: Number.isFinite(i.Created) ? i.Created : null,
-    size: Number.isFinite(i.Size) ? i.Size : null,
-    virtualSize: Number.isFinite(i.VirtualSize) ? i.VirtualSize : null,
-    containers: Number.isFinite(i.Containers) ? i.Containers : null,
   }));
 }
 

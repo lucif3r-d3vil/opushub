@@ -102,10 +102,7 @@ function send(res, status, obj, { etagBody } = {}) {
 }
 
 export async function handleApi(req, res, url) {
-  let p = url.pathname.replace(/\/+$/, '') || '/';
-  // /api/v1/* — the canonical versioned namespace. The unversioned routes below are permanent
-  // compatibility aliases with identical shapes; v1 exists so future versions can diverge.
-  p = rewriteV1(p);
+  const p = url.pathname.replace(/\/+$/, '') || '/';
   const method = req.method;
   const route = `${method} ${p}`;
   // Every mutating endpoint speaks JSON and only JSON. A form-encoded or text/plain body is
@@ -156,7 +153,7 @@ export async function handleApi(req, res, url) {
   // that the answer to "is the operations surface authenticated?" is: it cannot be reached
   // unauthenticated, because it is inside the same gate as everything else. The handler is a
   // separate module — this file only decides *where* it sits in the request path.
-  if (p.startsWith('/api/operations') || p.startsWith('/api/v1/operations')) {
+  if (p.startsWith('/api/operations')) {
     const handled = await handleOperations({
       p, method,
       send: (status, obj) => send(res, status, obj),
@@ -232,8 +229,8 @@ export async function handleApi(req, res, url) {
 
   // ---------- containers (Phase 10D-A) ----------
   // The read surface behind the Edit Container UI: inspect, canonical spec, processes, volumes,
-  // and a side-effect-free diff preview. Every write is an operation (POST /api/v1/operations).
-  if (p.startsWith('/api/containers') || p.startsWith('/api/v1/containers')) {
+  // and a side-effect-free diff preview. Every write is an operation (POST /api/operations).
+  if (p.startsWith('/api/containers')) {
     const handled = await handleContainersRoutes({
       p, method,
       send: (status, obj) => send(res, status, obj),
@@ -246,7 +243,7 @@ export async function handleApi(req, res, url) {
   // Compose documents as data: stored, validated, planned; deployed only through the operations
   // engine. Sits before the unversioned /api/stacks discovery routes so `/api/stacks/managed` and
   // the `/api/stacks/:id/<verb>` wrappers never fall through to the projection routes.
-  if (p.startsWith('/api/stacks/') || p.startsWith('/api/v1/stacks/')) {
+  if (p.startsWith('/api/stacks/')) {
     const handled = await handleStacksRoutes({
       p, method,
       send: (status, obj) => send(res, status, obj),
@@ -260,7 +257,7 @@ export async function handleApi(req, res, url) {
   // ---------- registries (Phase 10D-C) ----------
   // Credentials are stored encrypted and never returned; remote calls are the five fixed shapes
   // of registries/client.js against a validated endpoint. Pulls are operations, not routes here.
-  if (p.startsWith('/api/registries') || p.startsWith('/api/v1/registries')) {
+  if (p.startsWith('/api/registries')) {
     const handled = await handleRegistriesRoutes({
       p, method,
       send: (status, obj) => send(res, status, obj),
@@ -273,7 +270,7 @@ export async function handleApi(req, res, url) {
 
   // ---------- service catalog (Phase 10D-D) ----------
   // Reads and plans only. Installing is the `service.install` operation (confirmed, locked, audited).
-  if (p.startsWith('/api/catalog') || p.startsWith('/api/v1/catalog')) {
+  if (p.startsWith('/api/catalog')) {
     const handled = await handleCatalogRoutes({
       p, method,
       send: (status, obj) => send(res, status, obj),
@@ -784,52 +781,12 @@ export async function handleApi(req, res, url) {
     const inv = await model.getInventory();
     return send(res, 200, await hostDocument({ inventory: inv }));
   }
-  if (route === 'GET /api/docker') {
-    const [inv, infra, dockerProv] = await Promise.all([
-      model.getInventory(),
-      model.getInfra(),
-      dockerAvailabilityCached(),
-    ]);
-    return send(res, 200, {
-      at: Date.now(),
-      status: dockerProv,
-      engine: inv.engine || null,
-      counts: {
-        containers: inv.live ? inv.stats.containers : null,
-        running: inv.live ? inv.stats.running : null,
-        stopped: inv.live ? inv.stats.stopped : null,
-        images: infra.live ? infra.counts.images : null,
-        volumes: infra.live ? infra.counts.volumes : null,
-        networks: infra.live ? infra.counts.networks : null,
-      },
-      live: inv.live && infra.live,
-      statusReason: inv.live ? (infra.live ? null : infra.statusReason) : inv.statusReason,
-      code: (inv.live && infra.live) ? null : 'docker_unavailable',
-      lastKnown: inv.live ? null : inv.lastKnown,
-    });
-  }
   if (route === 'GET /api/networks') {
     const infra = await model.getInfra();
     return send(res, 200, {
       at: infra.at, live: infra.live, statusReason: infra.statusReason,
       code: infra.live ? null : 'docker_unavailable',
       networks: infra.networks, count: infra.counts.networks, stale: infra.stale,
-    });
-  }
-  if (route === 'GET /api/volumes') {
-    const infra = await model.getInfra();
-    return send(res, 200, {
-      at: infra.at, live: infra.live, statusReason: infra.statusReason,
-      code: infra.live ? null : 'docker_unavailable',
-      volumes: infra.volumes, count: infra.counts.volumes, stale: infra.stale,
-    });
-  }
-  if (route === 'GET /api/images') {
-    const infra = await model.getInfra();
-    return send(res, 200, {
-      at: infra.at, live: infra.live, statusReason: infra.statusReason,
-      code: infra.live ? null : 'docker_unavailable',
-      images: infra.images, count: infra.counts.images, stale: infra.stale,
     });
   }
   if (route === 'GET /api/version') {
@@ -849,12 +806,6 @@ export async function handleApi(req, res, url) {
     });
     return send(res, 200, { check, repo: REPO_URL });
   }
-  if (route === 'GET /api/resources') {
-    const { resourcesDocument } = await import('./resources.js');
-    const system = await collectSystem().catch(() => null);
-    return send(res, 200, resourcesDocument({ system, points: history.window(3600_000) }));
-  }
-
   // ---------- activity ----------
   if (route === 'GET /api/activity') {
     const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 100));
@@ -1590,36 +1541,3 @@ function summarizeSettingsPatch(patch) {
 }
 
 export function markBoot(t) { bootAt = t; }
-
-/**
- * /api/v1/* → /api/* rewrite for the allowlisted canonical routes. Anything not listed passes
- * through untouched (and 404s as `no route`), so v1 can never accidentally expose a route that
- * was not deliberately versioned.
- */
-const V1_ROUTES = new Set([
-  '/host', '/docker', '/networks', '/volumes', '/images', '/version', '/resources',
-  '/services', '/stacks', '/system', '/discovery', '/providers',
-  // Phase 8 — the canonical operations routes; the /:id and /:id/trail forms keep their v1
-  // prefix because they are patterns, not fixed paths, and are matched by the handler itself.
-  '/operations', '/operations/dry-run',
-  // Phase 10B — events & notifications
-  '/events', '/events/stream', '/events/stats',
-  '/notifications', '/notifications/unread-count', '/notifications/stats',
-  '/notifications/policy', '/notifications/providers',
-  '/notifications/telegram',
-  // Phase 10D — containers (the /:ref forms are patterns, matched by the handler itself)
-  '/containers/spec-fields',
-  // Phase 10D — managed stacks (the /:id forms are patterns, matched by the handler itself)
-  '/stacks/managed',
-  // Phase 10D — registries
-  '/registries',
-  // Phase 10D — service catalog
-  '/catalog',
-]);
-
-export function rewriteV1(pathname) {
-  if (!pathname.startsWith('/api/v1/')) return pathname;
-  const rest = pathname.slice('/api/v1'.length);
-  if (V1_ROUTES.has(rest)) return '/api' + rest;
-  return pathname;
-}

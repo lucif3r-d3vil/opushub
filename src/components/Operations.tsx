@@ -120,8 +120,8 @@ export function OperationDialog({
       invalidateShared('/api/services');
       invalidateShared('/api/stacks');
       invalidateShared('/api/activity');
-      invalidateShared('/api/v1/operations');
-      invalidateShared('/api/v1/stacks');
+      invalidateShared('/api/operations');
+      invalidateShared('/api/stacks');
     } catch (err) {
       const body = err instanceof ApiError ? (err.body as { operation?: OperationDoc; error?: string; code?: string } | null) : null;
       setError({

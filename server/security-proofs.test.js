@@ -38,7 +38,7 @@ test('the Docker read provider is still GET-only', () => {
 
 test('the source scanner these proofs read with does not delete code', () => {
   // A static proof is only as good as the text it reads. api.js documents its versioned namespace
-  // with a line comment containing `/api/v1/*`, and the naive block-comment strip treats that `/*`
+  // with a line comment containing `/api/*`, and the naive block-comment strip treats that `/*`
   // as the start of a comment and deletes everything up to the next `*/` — 30% of the file,
   // including the setup, auth, settings and layout routes. That version of this assertion passed
   // while looking at a file with those routes missing, which is worse than having no assertion.

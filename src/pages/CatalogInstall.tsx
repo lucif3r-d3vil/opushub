@@ -2,7 +2,7 @@
 //
 // The page is a form over the manifest's declared slots (name, version, variables, ports,
 // storage, network, exposure, restart, healthcheck, integrations). "Preview" asks the server for
-// the plan (POST /api/v1/catalog/:id/plan — no mutation); "Install…" opens the operations dialog
+// the plan (POST /api/catalog/:id/plan — no mutation); "Install…" opens the operations dialog
 // for `service.install`, which re-evaluates the same plan, requires the strong confirmation,
 // and runs the transaction. The browser never sends a Docker field — only this config object.
 import { useEffect, useMemo, useState } from 'react';
@@ -49,7 +49,7 @@ const randomValue = (kind: 'password' | 'hex') => {
 
 export default function CatalogInstallPage() {
   const { id } = useParams();
-  const { data, error } = usePolled<Detail>(id ? `/api/v1/catalog/${encodeURIComponent(id)}` : null, 60_000);
+  const { data, error } = usePolled<Detail>(id ? `/api/catalog/${encodeURIComponent(id)}` : null, 60_000);
   const entry = data?.entry;
 
   const [name, setName] = useState('');
@@ -124,7 +124,7 @@ export default function CatalogInstallPage() {
   const preview = async () => {
     if (!entry) return;
     setBusy(true);
-    try { setPlan(await api<PlanResponse>(`/api/v1/catalog/${encodeURIComponent(entry.id)}/plan`, { method: 'POST', body: JSON.stringify({ config }) })); }
+    try { setPlan(await api<PlanResponse>(`/api/catalog/${encodeURIComponent(entry.id)}/plan`, { method: 'POST', body: JSON.stringify({ config }) })); }
     catch (err) { setPlan({ ok: false, problems: [err instanceof ApiError ? String((err.body as { error?: string } | null)?.error || err.message) : String(err)], plan: null }); }
     finally { setBusy(false); }
   };
@@ -277,7 +277,7 @@ export default function CatalogInstallPage() {
         <aside className="mstack-side">
           {installing && (
             <section className="mstack-card">
-              <OperationDialog inline action="service.install" target={{ type: 'catalog', id: entry.id }} params={{ config: installing }} onClose={() => { setInstalling(null); invalidateShared('/api/v1/catalog'); }} />
+              <OperationDialog inline action="service.install" target={{ type: 'catalog', id: entry.id }} params={{ config: installing }} onClose={() => { setInstalling(null); invalidateShared('/api/catalog'); }} />
             </section>
           )}
           {plan && (

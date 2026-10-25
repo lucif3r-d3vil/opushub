@@ -5,7 +5,7 @@
 //
 // Every button that changes the engine goes through the ordinary operations dialog
 // (`requestOperation('stack.<verb>', { type: 'stack', id })`): dry-run, plan, confirmation, then
-// the same POST /api/v1/operations as a container restart. This page only edits the definition.
+// the same POST /api/operations as a container restart. This page only edits the definition.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, invalidateShared, usePolled } from '../lib/api';
@@ -68,7 +68,7 @@ export default function ManagedStackPage() {
   const isNew = !id;
   const nav = useNavigate();
   const caps = useOperationsCapabilities();
-  const { data, error, refresh } = usePolled<ManagedStackDoc>(isNew ? null : `/api/v1/stacks/managed/${encodeURIComponent(id!)}`, 15_000);
+  const { data, error, refresh } = usePolled<ManagedStackDoc>(isNew ? null : `/api/stacks/managed/${encodeURIComponent(id!)}`, 15_000);
 
   const [name, setName] = useState('');
   const [compose, setCompose] = useState(TEMPLATE);
@@ -106,7 +106,7 @@ export default function ManagedStackPage() {
     if (envParsed.error) { setNotice({ kind: 'bad', text: envParsed.error }); return; }
     setBusy('validate'); setNotice(null); setPlan(null);
     try {
-      const path = isNew ? `/api/v1/stacks/managed/${encodeURIComponent(name || 'new')}/validate` : `/api/v1/stacks/managed/${encodeURIComponent(id!)}/validate`;
+      const path = isNew ? `/api/stacks/managed/${encodeURIComponent(name || 'new')}/validate` : `/api/stacks/managed/${encodeURIComponent(id!)}/validate`;
       const v = await api<Validation>(path, { method: 'POST', body: JSON.stringify({ compose, env: envParsed.env }) });
       setValidation(v);
       setNotice(v.ok ? { kind: 'ok', text: `Valid — ${v.services.length} service${v.services.length === 1 ? '' : 's'}, policy ${v.policy?.level.toLowerCase()}.` } : { kind: 'bad', text: v.errors[0] || 'The document is not allowed by policy.' });
@@ -118,12 +118,12 @@ export default function ManagedStackPage() {
     setBusy('save'); setNotice(null);
     try {
       if (isNew) {
-        const r = await api<{ stack: { id: string; adopted?: boolean; members?: number } }>('/api/v1/stacks/managed', { method: 'POST', body: JSON.stringify({ name, compose, env: envParsed.env }) });
-        invalidateShared('/api/v1/stacks');
+        const r = await api<{ stack: { id: string; adopted?: boolean; members?: number } }>('/api/stacks/managed', { method: 'POST', body: JSON.stringify({ name, compose, env: envParsed.env }) });
+        invalidateShared('/api/stacks');
         nav(`/stacks/${encodeURIComponent(r.stack.id)}/edit`, { replace: true });
       } else {
-        await api(`/api/v1/stacks/managed/${encodeURIComponent(id!)}`, { method: 'PATCH', body: JSON.stringify({ compose, env: envParsed.env }) });
-        invalidateShared('/api/v1/stacks');
+        await api(`/api/stacks/managed/${encodeURIComponent(id!)}`, { method: 'PATCH', body: JSON.stringify({ compose, env: envParsed.env }) });
+        invalidateShared('/api/stacks');
         setLoadedRev(null);
         setPlan(null);
         refresh();
@@ -136,7 +136,7 @@ export default function ManagedStackPage() {
     setBusy('plan'); setNotice(null);
     try {
       const body = dirty ? { compose, env: envParsed.env } : {};
-      const p = await api<PlanDoc>(`/api/v1/stacks/managed/${encodeURIComponent(id!)}/plan`, { method: 'POST', body: JSON.stringify(body) });
+      const p = await api<PlanDoc>(`/api/stacks/managed/${encodeURIComponent(id!)}/plan`, { method: 'POST', body: JSON.stringify(body) });
       setPlan(p);
     } catch (err) { fail(err, 'The plan could not be made.'); } finally { setBusy(null); }
   }, [compose, dirty, envParsed.env, id]);
@@ -144,7 +144,7 @@ export default function ManagedStackPage() {
   const rollback = useCallback(async () => {
     setBusy('rollback'); setNotice(null);
     try {
-      await api(`/api/v1/stacks/managed/${encodeURIComponent(id!)}/rollback`, { method: 'POST', body: '{}' });
+      await api(`/api/stacks/managed/${encodeURIComponent(id!)}/rollback`, { method: 'POST', body: '{}' });
       setLoadedRev(null); setPlan(null); refresh();
       setNotice({ kind: 'ok', text: 'The last successfully deployed document was restored as a new revision. Deploy to apply it.' });
     } catch (err) { fail(err, 'Rollback failed.'); } finally { setBusy(null); }
@@ -153,7 +153,7 @@ export default function ManagedStackPage() {
   const forget = useCallback(async () => {
     if (!window.confirm(`Forget the managed definition of ${id}? Containers on the engine are not touched.`)) return;
     setBusy('forget');
-    try { await api(`/api/v1/stacks/managed/${encodeURIComponent(id!)}`, { method: 'DELETE' }); invalidateShared('/api/v1/stacks'); nav('/stacks'); } catch (err) { fail(err, 'Could not forget the stack.'); } finally { setBusy(null); }
+    try { await api(`/api/stacks/managed/${encodeURIComponent(id!)}`, { method: 'DELETE' }); invalidateShared('/api/stacks'); nav('/stacks'); } catch (err) { fail(err, 'Could not forget the stack.'); } finally { setBusy(null); }
   }, [id, nav]);
 
   const op = (verb: 'deploy' | 'start' | 'stop' | 'remove') => requestOperation(`stack.${verb}`, { type: 'stack', id: id! });

@@ -12,7 +12,7 @@
 //                       only then writes to Docker.
 //
 // Execution is bounded and non-blocking: the HTTP route returns as soon as the operation has been
-// accepted and started, and the client follows it with `GET /api/v1/operations/:id`. Nothing waits
+// accepted and started, and the client follows it with `GET /api/operations/:id`. Nothing waits
 // indefinitely, and nothing is queued to run later — if Docker is unavailable the operation is
 // rejected now, not stored for a future attempt.
 import * as docker from '../providers/docker.js';

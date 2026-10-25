@@ -923,12 +923,7 @@ export function invalidateDiscovery() {
 }
 
 /**
- * Canonical infrastructure inventory: networks, volumes, images — one cached document.
- *
- * Joins are proven, never inferred: an image lists the containers whose `image` reference
- * matches one of its tags; networks carry the daemon's own attachment map. Volume-to-container
- * mapping would need an inspect per container, so volumes report the daemon's RefCount instead
- * of a membership list we cannot prove cheaply.
+ * Docker networks, cached. The only consumer is the container editor's network picker.
  *
  * Degraded mode: when the engine is unreachable the last good document is served as `stale`
  * (explicitly labelled with its timestamp), alongside the live failure reason.
@@ -936,55 +931,22 @@ export function invalidateDiscovery() {
 export async function getInfra({ refreshMs = 30000, force = false } = {}) {
   if (!force && infraCache.value && Date.now() - infraCache.at < refreshMs) return infraCache.value;
   const at = Date.now();
-  const avail = docker.availability();
-  if (!avail.ok) {
-    const value = {
-      at, live: false, statusReason: avail.public,
-      networks: [], volumes: [], images: [],
-      counts: { networks: null, volumes: null, images: null },
-      stale: lastGoodInfra, // null until one live pass has succeeded
-    };
+  const down = (statusReason) => {
+    const value = { at, live: false, statusReason, networks: [], counts: { networks: null }, stale: lastGoodInfra };
     infraCache = { at, value };
     return value;
-  }
+  };
+  const avail = docker.availability();
+  if (!avail.ok) return down(avail.public);
   try {
-    const [networks, volumes, images, inv] = await Promise.all([
-      docker.listNetworks(),
-      docker.listVolumes(),
-      docker.listImages(),
-      getInventory({ refreshMs }).catch(() => null),
-    ]);
-    // Proven image usage: container.image (e.g. `jellyfin/jellyfin:10.9.7`) against RepoTags.
-    const byTag = new Map();
-    for (const img of images) for (const t of img.tags || []) byTag.set(t, img);
-    const usedBy = new Map(); // image id → container names
-    for (const s of inv?.services || []) {
-      const img = s.container?.image ? byTag.get(s.container.image) : null;
-      const key = img?.id || null;
-      if (key) {
-        if (!usedBy.has(key)) usedBy.set(key, []);
-        usedBy.get(key).push(s.name);
-      }
-    }
-    for (const img of images) img.usedBy = usedBy.get(img.id) || [];
-    const value = {
-      at, live: true, statusReason: null, networks, volumes, images,
-      counts: { networks: networks.length, volumes: volumes.length, images: images.length },
-      stale: null,
-    };
+    const networks = await docker.listNetworks();
+    const value = { at, live: true, statusReason: null, networks, counts: { networks: networks.length }, stale: null };
     lastGoodInfra = { ...value, staleAt: at, stale: null };
     infraCache = { at, value };
     return value;
   } catch (err) {
     if (process.env.OPUSHUB_DEBUG) console.warn(`[docker] infra error: ${err.message}`);
-    const value = {
-      at, live: false, statusReason: 'Docker engine answered with an error. Check the daemon and try again.',
-      networks: [], volumes: [], images: [],
-      counts: { networks: null, volumes: null, images: null },
-      stale: lastGoodInfra,
-    };
-    infraCache = { at, value };
-    return value;
+    return down('Docker engine answered with an error. Check the daemon and try again.');
   }
 }
 

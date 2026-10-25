@@ -76,14 +76,6 @@ const stackDetail = {
     netRx: 4_500_000, netTx: 900_000, upSince: Date.now() - 6 * 3600_000,
   },
 };
-const stackHistory = {
-  stack: 'media', containers: 2, reporting: 2, watchingSince: Date.now() - 8 * 60_000, bucketMs: 2000,
-  samples: [
-    { t: Date.now() - 15_000, cpu: 18.0, mem: 500_000_000, memLimit: 2_000_000_000, netRx: 4_000_000, netTx: 800_000, count: 2 },
-    { t: Date.now() - 10_000, cpu: 20.2, mem: 505_000_000, memLimit: 2_000_000_000, netRx: 4_200_000, netTx: 850_000, count: 2 },
-    { t: Date.now() - 5_000, cpu: 21.4, mem: 512_000_000, memLimit: 2_000_000_000, netRx: 4_500_000, netTx: 900_000, count: 2 },
-  ],
-};
 const noWebService = servicesDoc.services.find((s) => s.url == null)!;
 const noWebDetail = { ...serviceDetail, service: noWebService, url: null, urlSource: 'none', container: null };
 
@@ -119,18 +111,6 @@ const waveContainer = {
   exposedPorts: [{ private: 8096, type: 'tcp' }],
   networks: [{ name: 'media_default', ip: '172.20.0.4', gateway: '172.20.0.1' }],
   mounts: [{ type: 'bind', source: '/srv/wave/data', destination: '/data', mode: 'rw', size: null }],
-};
-const statsSamples = {
-  service: 'wave',
-  watchingSince: Date.now() - 12 * 60_000,
-  capped: false,
-  samples: [
-    { t: Date.now() - 25_000, cpu: 12.5, mem: 220_000_000, memLimit: 4_000_000_000, netRx: 10_000, netTx: 2_000, pids: 8, blockIo: null },
-    { t: Date.now() - 20_000, cpu: 14.1, mem: 224_000_000, memLimit: 4_000_000_000, netRx: 30_000, netTx: 4_000, pids: 8, blockIo: null },
-    { t: Date.now() - 15_000, cpu: 11.9, mem: 221_000_000, memLimit: 4_000_000_000, netRx: 52_000, netTx: 7_000, pids: 9, blockIo: null },
-    { t: Date.now() - 10_000, cpu: 18.2, mem: 228_000_000, memLimit: 4_000_000_000, netRx: 76_000, netTx: 9_000, pids: 9, blockIo: null },
-    { t: Date.now() - 5_000, cpu: 16.0, mem: 226_000_000, memLimit: 4_000_000_000, netRx: 99_000, netTx: 12_000, pids: 9, blockIo: null },
-  ],
 };
 const liveStats = { status: 'ok', at: Date.now(), stats: { cpu: 16.0, memory: { used: 226_000_000, limit: 4_000_000_000 }, net: { rx: 99_000, tx: 12_000 }, pids: 9, blockIo: null } };
 const serviceHistoryDoc = {
@@ -188,28 +168,6 @@ const networksDoc = {
     { id: 'aaaabbbbcccc', name: 'proxy', driver: 'bridge', scope: 'local', internal: false, attachable: true, created: null, containerCount: 2, containers: [{ name: 'wave' }, { name: 'stream' }] },
     { id: 'dddddeeeefff', name: 'media_default', driver: 'bridge', scope: 'local', internal: false, attachable: false, created: null, containerCount: 1, containers: [{ name: 'wave' }] },
   ],
-};
-const volumesDoc = {
-  at: Date.now(), live: true, statusReason: null, code: null, count: 2, stale: null,
-  volumes: [
-    { name: 'wave-data', driver: 'local', scope: 'local', createdAt: null, refCount: 1, size: 500_000_000 },
-    { name: 'orphan-volume', driver: 'local', scope: 'local', createdAt: null, refCount: 0, size: 12_000_000 },
-  ],
-};
-const imagesDoc = {
-  at: Date.now(), live: true, statusReason: null, code: null, count: 2, stale: null,
-  images: [
-    { id: 'abc123def456', tags: ['ghcr.io/example/wave:1.0'], digests: [], created: 1789000000, size: 268_435_456, containers: 1, usedBy: ['wave'] },
-    { id: 'deadbeef0000', tags: ['alpine:3.20'], digests: [], created: 1788000000, size: 8_000_000, containers: 0, usedBy: [] },
-  ],
-};
-const resourcesDoc = {
-  at: Date.now(),
-  cpu: { current: 21.4, unit: 'percent', average: 18.2, peak: 44.0, samples: 120, cores: 4, load: [1.2, 0.9, 0.5], availability: 'available', source: 'system-provider', timestamp: Date.now() },
-  memory: { current: 4_000_000_000, total: 8_000_000_000, available: 4_000_000_000, cached: 1_000_000_000, usedPct: 50, unit: 'bytes', averagePct: 48, peakPct: 61, samples: 120, availability: 'available', source: 'system-provider', timestamp: Date.now() },
-  network: { current: { rxPerSec: 1000, txPerSec: 500 }, unit: 'bytes-per-second', averageRx: 900, peakRx: 2000, averageTx: 400, peakTx: 900, samples: 120, interfaces: ['eth0'], availability: 'available', source: 'system-provider', timestamp: Date.now() },
-  storage: { current: { mounts: 2, total: 100_000_000_000, used: 40_000_000_000, free: 60_000_000_000 }, mounts: 2, availability: 'available', source: 'storage-provider', timestamp: Date.now() },
-  gpu: { current: null, availability: 'unavailable', reason: 'Not available', source: 'system-provider', timestamp: Date.now() },
 };
 const alertsDoc = {
   at: new Date().toISOString(),
@@ -272,7 +230,6 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
     },
     '/api/services/Music/wave': { ...serviceDetail, dockerAvailable: true, container: waveContainer, containerStats: liveStats.stats },
     '/api/services/Music/wave/stats': liveStats,
-    '/api/services/Music/wave/stats/history': statsSamples,
     '/api/services/Music/wave/history': serviceHistoryDoc,
     '/api/docker/containers/wave/logs': logsRoute,
     '/api/providers': providersFixture,
@@ -281,20 +238,15 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
       ...serviceDetail,
       service: { ...servicesDoc.services[0], name: 'stream', displayName: 'Stream', group: 'Media' },
     },
-    '/api/services/Media/stream/stats/history': { samples: [], watchingSince: null, capped: 360 },
     '/api/services/Media/stream/history': { service: 'stream', events: [], watchingSince: null, logStarted: null },
     '/api/services/Music/navidrome': {
       ...serviceDetail,
       service: { ...servicesDoc.services[0], name: 'navidrome', displayName: 'Navidrome', description: 'Music streaming', group: 'Music' },
     },
     '/api/stacks/media': stackDetail,
-    '/api/stacks/media/history': stackHistory,
     '/api/host': hostDoc,
     '/api/docker': dockerDoc,
     '/api/networks': networksDoc,
-    '/api/volumes': volumesDoc,
-    '/api/images': imagesDoc,
-    '/api/resources': resourcesDoc,
     '/api/services/Music/wave/health': waveHealth,
     '/api/alerts': alertsDoc,
     '/api/updates': updatesDoc,
@@ -378,14 +330,14 @@ function opsRecord(status: string, { action = 'container.restart', state = 'runn
 function opsRoutes(overview = opsOverview(), { action = 'container.restart', dry = opsDryRun(action), finalStatus = 'succeeded' } = {}) {
   let polls = 0;
   return {
-    '/api/v1/operations': (body: unknown) => (body ? { operation: opsRecord('running', { action }) } : overview),
-    '/api/v1/operations/dry-run': () => dry,
-    '/api/v1/operations/op-fixture': () => {
+    '/api/operations': (body: unknown) => (body ? { operation: opsRecord('running', { action }) } : overview),
+    '/api/operations/dry-run': () => dry,
+    '/api/operations/op-fixture': () => {
       // the first poll sees it running; the second sees it settled — a real engine looks like this
       polls += 1;
       return { operation: polls < 2 ? opsRecord('running', { action }) : opsRecord(finalStatus, { action }) };
     },
-    '/api/v1/operations?service=wave': { ...overview, operations: [] },
+    '/api/operations?service=wave': { ...overview, operations: [] },
   };
 }
 
@@ -996,10 +948,9 @@ export async function runWebTests(): Promise<WebResult> {
   });
 
   /* 13 — a stack page still lists its real members */
-  await test('stack detail renders the project, its rollup, and an aggregate chart', async (h) => {
+  await test('stack detail renders the project and its rollup', async (h) => {
     await h.mount(<TestApp entry="/stacks/media"><Hub /></TestApp>);
     await h.waitFor(() => text().includes('Media'), 'the stack page');
-    await h.waitFor(() => text().includes('aggregated point'), 'the aggregate history');
     expect(text().includes('Wave') || text().includes('wave'), 'the stack members are missing');
     expect(!/Docker isn.t connected/.test(text()) || stackDetail.live === false, 'a live stack reported as disconnected');
 
@@ -1010,36 +961,18 @@ export async function runWebTests(): Promise<WebResult> {
     expect(text().includes('net'), 'lifetime network I/O is missing from the rollup');
     expect(/up \d+[hms]/.test(text()), 'stack uptime is missing');
 
-    // the aggregate chart is measured (fixed box) and honest about what it covers
-    const chart = q('.res-history .chart');
-    expect(!!chart && !!chart.querySelector('svg'), 'the stack history chart did not render');
-    expect(/each point sums \d+ of \d+ container/.test(text()), 'the aggregate chart does not say what a point covers');
-    expect(text().includes('never recorded'), 'the aggregate chart does not bound its own history');
-
     // and the page says out loud that a compose project is not a presentation group
     expect(text().includes('Compose project is infrastructure'), 'the compose-project ≠ group note is missing');
   });
 
-  /* 15 — Phase 3: resources arrive on demand, as sparklines, with real sample counts */
-  await test('service resources: a measured session chart, only while the page is being looked at', async (h) => {
+  /* 15 — resources are live readings; no per-container history is drawn or requested */
+  await test('service resources: live readings only, no history requests', async (h) => {
     await h.mount(<TestApp entry="/services/Music/wave"><Hub /></TestApp>);
     await h.waitFor(() => text().includes('Wave'), 'the service page');
-    await h.waitFor(() => text().includes('samples'), 'the resource history');
-    // one measured chart (fixed box, so it can never paint under the text below it), plus the
-    // network sparkline that lives in the stat strip
-    const chart = q('.res-history .chart');
-    expect(!!chart, 'the session history chart did not render');
-    expect(!!chart!.querySelector('svg'), 'the chart has no drawing');
-    expect(!!chart!.getAttribute('style')?.includes('height'), 'the chart box was not sized');
-    expect(qa('.res-history .spark').length >= 1 || qa('.stat .spark').length >= 1, 'no sparkline at all');
-    expect(text().includes('5 samples'), 'the sample count is not the real one');
-    expect(text().includes('only while a page is watching'), 'the chart does not say what it actually covers');
-    // polling stops when the page is left: count requests, unmount, count again
-    const before = h.calls.filter((c) => c.path.startsWith('/api/services/Music/wave/stats/history')).length;
+    await h.waitFor(() => text().includes('Block I/O'), 'the resource strip');
+    expect(!q('.res-history'), 'a per-container history chart is still drawn');
+    expect(!h.calls.some((c) => c.path.includes('/stats/history')), 'the page still asks for per-container history');
     await h.unmount();
-    await h.flush(80);
-    const after = h.calls.filter((c) => c.path.startsWith('/api/services/Music/wave/stats/history')).length;
-    expect(after === before, `resource history kept polling after unmount (${before} → ${after})`);
 
     // labels: the allow-listed families are shown, the raw map is not
     const h3 = await createHarness({ routes: stubRoutes(), fallback: () => ({}) });
@@ -1056,7 +989,6 @@ export async function runWebTests(): Promise<WebResult> {
     const routes = {
       ...stubRoutes(),
       '/api/services/Music/wave': { ...serviceDetail, dockerAvailable: true, container: waveContainer, containerStats: null },
-      '/api/services/Music/wave/stats/history': { status: 'unavailable', reason: 'stats unavailable: container is stopped', samples: [] },
     };
     const h2 = await createHarness({ routes, fallback: () => ({}) });
     try {
@@ -1958,9 +1890,9 @@ export async function runWebTests(): Promise<WebResult> {
     dry.confirmation.prompt = { ...dry.confirmation.prompt, title: 'Install Uptime Kuma as kuma?', confirmLabel: 'Install', acknowledge: 'I understand this creates and starts a new container.' };
     const routes = {
       ...stubRoutes(), ...opsRoutes(undefined, { action: 'service.install', dry }),
-      '/api/v1/catalog': fx.list,
-      '/api/v1/catalog/uptime-kuma': fx.detail,
-      '/api/v1/catalog/uptime-kuma/plan': () => fx.plan,
+      '/api/catalog': fx.list,
+      '/api/catalog/uptime-kuma': fx.detail,
+      '/api/catalog/uptime-kuma/plan': () => fx.plan,
     };
     h.setRoutes(routes);
     await h.mount(<TestApp entry="/catalog"><div /></TestApp>);
@@ -1982,28 +1914,28 @@ export async function runWebTests(): Promise<WebResult> {
     type(q<HTMLInputElement>('#ci-name')!, 'kuma');
     // preview is a plan request — no operation, no dry-run
     click(qa('button').find((b) => text(b).trim() === 'Preview plan')!);
-    await h2.waitFor(() => !!h2.lastCall('POST', '/api/v1/catalog/uptime-kuma/plan'), 'the plan request');
-    const asked = h2.lastCall('POST', '/api/v1/catalog/uptime-kuma/plan')!.body as { config: Record<string, unknown> };
+    await h2.waitFor(() => !!h2.lastCall('POST', '/api/catalog/uptime-kuma/plan'), 'the plan request');
+    const asked = h2.lastCall('POST', '/api/catalog/uptime-kuma/plan')!.body as { config: Record<string, unknown> };
     expect(Object.keys(asked).join(',') === 'config', `the plan request carried more than config: ${Object.keys(asked).join(',')}`);
     expect(asked.config.name === 'kuma' && asked.config.network === 'bridge' && asked.config.monitoring === true, 'the config does not reflect the form');
     expect(!('image' in asked.config) && !('privileged' in asked.config) && !('binds' in asked.config), 'the browser sent Docker fields, not catalog config');
     await h2.waitFor(() => text().includes('create container kuma'), 'the server plan steps');
-    expect(!h2.lastCall('POST', '/api/v1/operations/dry-run') && !h2.lastCall('POST', '/api/v1/operations'), 'previewing touched the operations API');
+    expect(!h2.lastCall('POST', '/api/operations/dry-run') && !h2.lastCall('POST', '/api/operations'), 'previewing touched the operations API');
     // Install… goes through the one operations flow: dry-run, strong confirmation, execute
     click(qa('button').find((b) => text(b).trim() === 'Install…')!);
-    await h2.waitFor(() => !!h2.lastCall('POST', '/api/v1/operations/dry-run'), 'the dry-run');
-    const dr = h2.lastCall('POST', '/api/v1/operations/dry-run')!.body as { action: string; target: { type: string; id: string }; params: { config: Record<string, unknown> } };
+    await h2.waitFor(() => !!h2.lastCall('POST', '/api/operations/dry-run'), 'the dry-run');
+    const dr = h2.lastCall('POST', '/api/operations/dry-run')!.body as { action: string; target: { type: string; id: string }; params: { config: Record<string, unknown> } };
     expect(dr.action === 'service.install' && dr.target.type === 'catalog' && dr.target.id === 'uptime-kuma', 'the dry-run names the wrong action or target');
     expect(dr.params.config.name === 'kuma', 'the dry-run did not carry the same config as the preview');
-    expect(!h2.lastCall('POST', '/api/v1/operations'), 'the install executed before confirmation');
+    expect(!h2.lastCall('POST', '/api/operations'), 'the install executed before confirmation');
     await h2.waitFor(() => text().includes('I understand this creates'), 'the strong acknowledgement');
     const ack = q<HTMLInputElement>('.op-inline input[type="checkbox"]');
     expect(!!ack, 'no acknowledgement checkbox for a strong confirmation');
     click(ack!);
     await h2.flush(20);
     click(qa('.op-inline button').find((b) => text(b).trim() === 'Install')!);
-    await h2.waitFor(() => !!h2.lastCall('POST', '/api/v1/operations'), 'the execute request');
-    const sent = h2.lastCall('POST', '/api/v1/operations')!.body as Record<string, unknown>;
+    await h2.waitFor(() => !!h2.lastCall('POST', '/api/operations'), 'the execute request');
+    const sent = h2.lastCall('POST', '/api/operations')!.body as Record<string, unknown>;
     expect(sent.confirmationToken === 'tok-fixture' && sent.action === 'service.install', 'the execution did not spend the issued token for service.install');
     } finally { await h2.unmount(); }
   });
@@ -2017,9 +1949,9 @@ export async function runWebTests(): Promise<WebResult> {
     click(restart!);
     await h.flush(60);
     // asking is a dry-run: it evaluates, and it is the only request made so far
-    await h.waitFor(() => !!h.lastCall('POST', '/api/v1/operations/dry-run'), 'the dry-run request');
-    expect(!h.lastCall('POST', '/api/v1/operations'), 'clicking the button executed something before confirmation');
-    const asked = h.lastCall('POST', '/api/v1/operations/dry-run')!.body as { action: string; target: { id: string } };
+    await h.waitFor(() => !!h.lastCall('POST', '/api/operations/dry-run'), 'the dry-run request');
+    expect(!h.lastCall('POST', '/api/operations'), 'clicking the button executed something before confirmation');
+    const asked = h.lastCall('POST', '/api/operations/dry-run')!.body as { action: string; target: { id: string } };
     expect(asked.action === 'container.restart' && asked.target.id === 'wave', 'the request named the wrong action or target');
     expect(Object.keys(asked).sort().join(',') === 'action,target', `the request carried unexpected fields: ${Object.keys(asked).join(',')}`);
     // the dialog shows the server's own checks before it offers to run anything
@@ -2027,13 +1959,13 @@ export async function runWebTests(): Promise<WebResult> {
     expect(text().includes('Wave'), 'the dialog does not name the target');
     click(q('.modal-foot button')!);                       // Cancel
     await h.flush(20);
-    expect(!h.lastCall('POST', '/api/v1/operations'), 'cancelling ran the operation anyway');
+    expect(!h.lastCall('POST', '/api/operations'), 'cancelling ran the operation anyway');
     // confirmed: the token the server issued is what gets spent, and nothing else
     click(qa('button').find((b) => text(b).trim() === 'Restart')!);
     await h.waitFor(() => !!confirmButton(), 'the confirm button');
     click(confirmButton()!);
-    await h.waitFor(() => !!h.lastCall('POST', '/api/v1/operations'), 'the execute request');
-    const sent = h.lastCall('POST', '/api/v1/operations')!.body as Record<string, unknown>;
+    await h.waitFor(() => !!h.lastCall('POST', '/api/operations'), 'the execute request');
+    const sent = h.lastCall('POST', '/api/operations')!.body as Record<string, unknown>;
     expect(sent.confirmationToken === 'tok-fixture', 'the execution did not spend the token the server issued');
     expect(!('confirmed' in sent), 'the browser sent a “confirmed” flag — the server must decide that');
     expect(Object.keys(sent).sort().join(',') === 'action,confirmationToken,operationId,target', `unexpected execute fields: ${Object.keys(sent).join(',')}`);
@@ -2047,21 +1979,21 @@ export async function runWebTests(): Promise<WebResult> {
     // the server answers a refused dry-run with a non-200 that still carries the operation record
     h.setRoutes({
       ...stubRoutes(),
-      '/api/v1/operations': (body: unknown) => (body ? { operation: opsRecord('running') } : opsOverview({ permitted: ['container.start'] })),
-      '/api/v1/operations/dry-run': { $status: 403, body: { operation: opsRecord('rejected', { action: 'container.stop', error: refusal }), error: refusal.reason, code: refusal.code } },
-      '/api/v1/operations/op-fixture': () => ({ operation: opsRecord('rejected', { action: 'container.stop', error: refusal }) }),
+      '/api/operations': (body: unknown) => (body ? { operation: opsRecord('running') } : opsOverview({ permitted: ['container.start'] })),
+      '/api/operations/dry-run': { $status: 403, body: { operation: opsRecord('rejected', { action: 'container.stop', error: refusal }), error: refusal.reason, code: refusal.code } },
+      '/api/operations/op-fixture': () => ({ operation: opsRecord('rejected', { action: 'container.stop', error: refusal }) }),
     });
     await h.mount(<TestApp entry="/services/Music/wave"><ServiceDetail /></TestApp>);
     await h.waitFor(() => !!qa('button').find((b) => text(b).trim() === 'Stop'), 'a Stop control');
     click(qa('button').find((b) => text(b).trim() === 'Stop')!);
     await h.waitFor(() => /not allowed to stop/i.test(text()), 'the refusal reason');
     expect(text().includes('Nothing was changed'), 'the dialog does not say that nothing happened');
-    expect(!h.lastCall('POST', '/api/v1/operations'), 'a refused operation was executed anyway');
+    expect(!h.lastCall('POST', '/api/operations'), 'a refused operation was executed anyway');
     expect(!confirmButton(), 'a refused operation still offers a confirm button');
   });
 
   await test('operations: a viewer is offered no controls and is told why', async (h) => {
-    h.setRoutes({ ...stubRoutes(), '/api/v1/operations': opsOverview({ permitted: [], role: 'viewer' }) });
+    h.setRoutes({ ...stubRoutes(), '/api/operations': opsOverview({ permitted: [], role: 'viewer' }) });
     await h.mount(<TestApp entry="/services/Music/wave"><ServiceDetail /></TestApp>);
     await h.waitFor(() => text().includes('Operations'), 'the operations section');
     await h.flush(60);
@@ -2093,8 +2025,8 @@ export async function runWebTests(): Promise<WebResult> {
     await h.flush(260);
     expect(text().includes('Operations'), 'operation results are not grouped under Operations');
     key(window, 'Enter');
-    await h.waitFor(() => !!h.lastCall('POST', '/api/v1/operations/dry-run'), 'the dry-run request');
-    expect(!h.lastCall('POST', '/api/v1/operations'), 'choosing a palette result executed the operation');
+    await h.waitFor(() => !!h.lastCall('POST', '/api/operations/dry-run'), 'the dry-run request');
+    expect(!h.lastCall('POST', '/api/operations'), 'choosing a palette result executed the operation');
     await h.waitFor(() => text().includes('Registered action'), 'the confirmation dialog');
   });
 
@@ -2209,7 +2141,7 @@ export async function runWebTests(): Promise<WebResult> {
     // pausing is an action, and it is sent to the monitor's own endpoint
     click(qa('button').find((b) => text(b).trim() === 'Pause')!);
     await h.waitFor(() => !!h.lastCall('POST', '/api/monitoring/monitors/mon-fixture0002/pause'), 'the pause request');
-    expect(!h.lastCall('POST', '/api/v1/operations'), 'monitoring reached the operations engine');
+    expect(!h.lastCall('POST', '/api/operations'), 'monitoring reached the operations engine');
   });
 
   await test('monitoring: maintenance is explicit, bounded, and ends from the same place', async (h) => {

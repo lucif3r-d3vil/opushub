@@ -20,7 +20,7 @@ export interface CatalogDoc {
 
 export default function CatalogPage() {
   const nav = useNavigate();
-  const { data, error } = usePolled<CatalogDoc>('/api/v1/catalog', 60_000);
+  const { data, error } = usePolled<CatalogDoc>('/api/catalog', 60_000);
   const [q, setQ] = useState('');
   const [category, setCategory] = useState<string>('');
   const entries = useMemo(() => {

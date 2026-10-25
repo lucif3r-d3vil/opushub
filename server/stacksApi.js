@@ -1,18 +1,18 @@
 // Phase 10D-B — managed stacks (Compose as data).
 //
-//   GET    /api/v1/stacks/managed                the managed stacks (env values masked)
-//   POST   /api/v1/stacks/managed                create  { name, compose, env? }   → validated, stored, NOT deployed
-//   GET    /api/v1/stacks/managed/:id            one managed stack + live members + last deploy
-//   PATCH  /api/v1/stacks/managed/:id            update  { compose?, env? }         → new revision, NOT deployed
-//   DELETE /api/v1/stacks/managed/:id            forget the definition (containers untouched; refuse if deployed)
-//   POST   /api/v1/stacks/managed/:id/validate   parse + policy for the stored (or a submitted) document; no writes
-//   POST   /api/v1/stacks/managed/:id/plan       the deployment plan against the live engine; no writes
-//   GET    /api/v1/stacks/managed/:id/history    deployment history
-//   POST   /api/v1/stacks/managed/:id/rollback   re-store the last successful document (a new revision; deploy separately)
-//   POST   /api/v1/stacks/:id/{deploy,start,stop,remove}
+//   GET    /api/stacks/managed                the managed stacks (env values masked)
+//   POST   /api/stacks/managed                create  { name, compose, env? }   → validated, stored, NOT deployed
+//   GET    /api/stacks/managed/:id            one managed stack + live members + last deploy
+//   PATCH  /api/stacks/managed/:id            update  { compose?, env? }         → new revision, NOT deployed
+//   DELETE /api/stacks/managed/:id            forget the definition (containers untouched; refuse if deployed)
+//   POST   /api/stacks/managed/:id/validate   parse + policy for the stored (or a submitted) document; no writes
+//   POST   /api/stacks/managed/:id/plan       the deployment plan against the live engine; no writes
+//   GET    /api/stacks/managed/:id/history    deployment history
+//   POST   /api/stacks/managed/:id/rollback   re-store the last successful document (a new revision; deploy separately)
+//   POST   /api/stacks/:id/{deploy,start,stop,remove}
 //          thin wrappers: they call the operations engine with `stack.<verb>` and return the same
-//          dry-run + confirmation shape as POST /api/v1/operations/dry-run. Execution is the
-//          ordinary confirmed POST /api/v1/operations — one confirmation flow, no second door.
+//          dry-run + confirmation shape as POST /api/operations/dry-run. Execution is the
+//          ordinary confirmed POST /api/operations — one confirmation flow, no second door.
 //
 // `/api/stacks` (unversioned, GET/PUT) remains the discovery projection + stacks.yaml overlays.
 // The managed store never feeds inventory: members always come from Docker.
@@ -51,7 +51,7 @@ function mergeEnv(stored, incoming) {
 
 /** Returns true when the route was handled. */
 export async function handleStacksRoutes({ p, method, send, jsonBody, actor, sessionId }) {
-  const m = p.match(/^\/api\/(?:v1\/)?stacks\/(?:managed(?:\/([^/]+))?(?:\/(validate|plan|history|rollback))?|([^/]+)\/(deploy|start|stop|remove))$/);
+  const m = p.match(/^\/api\/stacks\/(?:managed(?:\/([^/]+))?(?:\/(validate|plan|history|rollback))?|([^/]+)\/(deploy|start|stop|remove))$/);
   if (!m) return false;
   const [, managedId, sub, verbId, verb] = m;
   const bad = (status, code, error, extra = {}) => { send(status, { error, code, ...extra }); return true; };
@@ -68,7 +68,7 @@ export async function handleStacksRoutes({ p, method, send, jsonBody, actor, ses
       operation: r.operation,
       dryRun: dryRunReport({ evaluation: r.evaluation, confirmationRequired: true, mode: r.confirmation.mode }),
       confirmation: { required: true, mode: r.confirmation.mode, token: r.confirmation.token, expiresAt: r.confirmation.expiresAt, ttlMs: r.confirmation.ttlMs, prompt: r.confirmation.prompt },
-      execute: { path: '/api/v1/operations', body: { action: VERBS[verb], target: { type: 'stack', id }, operationId: r.operation.id, confirmationToken: '<token>' } },
+      execute: { path: '/api/operations', body: { action: VERBS[verb], target: { type: 'stack', id }, operationId: r.operation.id, confirmationToken: '<token>' } },
     });
     return true;
   }

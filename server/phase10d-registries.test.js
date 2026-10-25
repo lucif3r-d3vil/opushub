@@ -201,45 +201,45 @@ test('authHeaderFor: matches by host, explicit id must match image host, anonymo
 
 // ---------- API ----------
 test('api: viewer can list (masked) but cannot write or test; admin CRUD; secret never echoed', async () => {
-  const create = await api(admin, 'POST', '/api/v1/registries', { id: 'corp', name: 'Corp', kind: 'oci', endpoint: 'https://reg.internal', username: 'bob', secret: 'pw' });
+  const create = await api(admin, 'POST', '/api/registries', { id: 'corp', name: 'Corp', kind: 'oci', endpoint: 'https://reg.internal', username: 'bob', secret: 'pw' });
   assert.equal(create.status, 201, JSON.stringify(create.obj));
   assert.ok(!JSON.stringify(create.obj).includes('"pw"'));
-  const list = await api(viewer, 'GET', '/api/v1/registries');
+  const list = await api(viewer, 'GET', '/api/registries');
   assert.equal(list.status, 200); assert.equal(list.obj.registries.length, 1); assert.equal(list.obj.permissions.manage, false);
   assert.ok(!JSON.stringify(list.obj).includes('secret":"'));
-  assert.equal((await api(viewer, 'POST', '/api/v1/registries', { id: 'x', kind: 'ghcr' })).status, 403);
-  assert.equal((await api(viewer, 'PATCH', '/api/v1/registries/corp', { name: 'n' })).status, 403);
-  assert.equal((await api(viewer, 'DELETE', '/api/v1/registries/corp')).status, 403);
-  assert.equal((await api(viewer, 'POST', '/api/v1/registries/corp/test')).status, 403);
-  const patch = await api(admin, 'PATCH', '/api/v1/registries/corp', { name: 'Corp2' });
+  assert.equal((await api(viewer, 'POST', '/api/registries', { id: 'x', kind: 'ghcr' })).status, 403);
+  assert.equal((await api(viewer, 'PATCH', '/api/registries/corp', { name: 'n' })).status, 403);
+  assert.equal((await api(viewer, 'DELETE', '/api/registries/corp')).status, 403);
+  assert.equal((await api(viewer, 'POST', '/api/registries/corp/test')).status, 403);
+  const patch = await api(admin, 'PATCH', '/api/registries/corp', { name: 'Corp2' });
   assert.equal(patch.status, 200); assert.equal(store.credentialsFor('corp').credentials.secret, 'pw', 'patch without secret keeps it');
-  assert.equal((await api(admin, 'PATCH', '/api/v1/registries/corp', { id: 'other' })).status, 400);
-  assert.equal((await api(admin, 'POST', '/api/v1/registries', { id: 'corp', kind: 'oci', endpoint: 'https://reg.internal' })).status, 409);
-  assert.equal((await api(admin, 'DELETE', '/api/v1/registries/corp')).status, 200);
-  assert.equal((await api(admin, 'GET', '/api/v1/registries/corp')).status, 404);
+  assert.equal((await api(admin, 'PATCH', '/api/registries/corp', { id: 'other' })).status, 400);
+  assert.equal((await api(admin, 'POST', '/api/registries', { id: 'corp', kind: 'oci', endpoint: 'https://reg.internal' })).status, 409);
+  assert.equal((await api(admin, 'DELETE', '/api/registries/corp')).status, 200);
+  assert.equal((await api(admin, 'GET', '/api/registries/corp')).status, 404);
 });
 
 test('api: SSRF-shaped endpoints and unknown fields are refused at create time', async () => {
   for (const endpoint of ['https://loop.evil', 'https://meta.evil', 'https://reg.internal/v2/', 'http://reg.internal', 'https://u:p@reg.internal']) {
-    const r = await api(admin, 'POST', '/api/v1/registries', { id: 'bad', name: 'x', kind: 'oci', endpoint });
+    const r = await api(admin, 'POST', '/api/registries', { id: 'bad', name: 'x', kind: 'oci', endpoint });
     assert.equal(r.status, 400, endpoint);
   }
-  assert.equal((await api(admin, 'POST', '/api/v1/registries', { id: 'bad', kind: 'oci', endpoint: 'https://reg.internal', url: 'https://x' })).status, 400);
-  assert.equal((await api(admin, 'POST', '/api/v1/registries', { id: 'hub', kind: 'dockerhub', endpoint: 'https://evil.example.com' })).status, 400, 'dockerhub kind is pinned to its host');
-  assert.equal((await api(admin, 'POST', '/api/v1/registries', { id: 'hub', kind: 'dockerhub' })).status, 201);
+  assert.equal((await api(admin, 'POST', '/api/registries', { id: 'bad', kind: 'oci', endpoint: 'https://reg.internal', url: 'https://x' })).status, 400);
+  assert.equal((await api(admin, 'POST', '/api/registries', { id: 'hub', kind: 'dockerhub', endpoint: 'https://evil.example.com' })).status, 400, 'dockerhub kind is pinned to its host');
+  assert.equal((await api(admin, 'POST', '/api/registries', { id: 'hub', kind: 'dockerhub' })).status, 201);
   assert.equal(REQUESTS.length, 0, 'creating a registry makes no remote request');
 });
 
 test('api: test/tags/manifest use only the fixed shapes; bad grammar rejected before any request', async () => {
-  await api(admin, 'POST', '/api/v1/registries', { id: 'corp', name: 'Corp', kind: 'oci', endpoint: 'https://reg.internal', username: 'bob', secret: 'pw' });
+  await api(admin, 'POST', '/api/registries', { id: 'corp', name: 'Corp', kind: 'oci', endpoint: 'https://reg.internal', username: 'bob', secret: 'pw' });
   route = (req) => req.url.includes('/tags/list') ? json(200, { tags: ['a'] }) : json(200, {}, { 'docker-distribution-api-version': 'registry/2.0' });
-  const t = await api(admin, 'POST', '/api/v1/registries/corp/test');
+  const t = await api(admin, 'POST', '/api/registries/corp/test');
   assert.equal(t.obj.result.ok, true);
   assert.equal(store.getRegistry('corp').lastTest.ok, true);
-  assert.equal((await api(viewer, 'GET', '/api/v1/registries/corp/tags', null, 'repository=team/app')).obj.tags[0], 'a');
+  assert.equal((await api(viewer, 'GET', '/api/registries/corp/tags', null, 'repository=team/app')).obj.tags[0], 'a');
   REQUESTS.length = 0;
-  assert.equal((await api(viewer, 'GET', '/api/v1/registries/corp/tags', null, 'repository=../x')).status, 400);
-  assert.equal((await api(viewer, 'GET', '/api/v1/registries/corp/manifest', null, 'repository=team/app&reference=bad ref')).status, 400);
+  assert.equal((await api(viewer, 'GET', '/api/registries/corp/tags', null, 'repository=../x')).status, 400);
+  assert.equal((await api(viewer, 'GET', '/api/registries/corp/manifest', null, 'repository=team/app&reference=bad ref')).status, 400);
   assert.equal(REQUESTS.length, 0);
   assert.ok(REQUESTS.every((r) => /^https:\/\/reg\.internal\/v2\/(?:$|team\/app\/(tags\/list|manifests\/))/.test(r.url)));
 });

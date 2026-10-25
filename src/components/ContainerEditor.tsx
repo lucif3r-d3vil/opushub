@@ -1,8 +1,8 @@
 // Edit Container — the one place a container's configuration is changed.
 //
-// The editor is a *form over the server's canonical spec*: it loads `GET /api/v1/containers/:ref/spec`
+// The editor is a *form over the server's canonical spec*: it loads `GET /api/containers/:ref/spec`
 // (secret env values already masked), lets the operator change the fields on the server's
-// allow-list, previews the change with `POST /api/v1/containers/:ref/diff` (side-effect free), and
+// allow-list, previews the change with `POST /api/containers/:ref/diff` (side-effect free), and
 // then asks for a `container.edit` / `container.update` operation exactly like every other
 // button does — the same dialog, the same dry-run, the same confirmation bound to the patch.
 //
@@ -158,7 +158,7 @@ const MODE_FIELDS: Record<EditorMode, string[] | null> = {
 
 export function ContainerEditor({ name, group, mode, onClose }: { name: string; group: string | null; mode: EditorMode; onClose: () => void }) {
   const { can } = useOperationsCapabilities();
-  const { data, error } = usePolled<SpecDoc>(`/api/v1/containers/${encodeURIComponent(name)}/spec`, 0);
+  const { data, error } = usePolled<SpecDoc>(`/api/containers/${encodeURIComponent(name)}/spec`, 0);
   const { data: nets } = usePolled<{ networks?: { name: string }[] } | { name: string }[]>('/api/networks', 0);
   const [draft, setDraft] = useState<Draft>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -210,7 +210,7 @@ export function ContainerEditor({ name, group, mode, onClose }: { name: string; 
     if (!data || Object.keys(patch.errs).length) return;
     setPreviewing(true);
     try {
-      const r = await api<DiffDoc>(`/api/v1/containers/${encodeURIComponent(name)}/diff`, { method: 'POST', body: JSON.stringify({ spec: patch.patch }) });
+      const r = await api<DiffDoc>(`/api/containers/${encodeURIComponent(name)}/diff`, { method: 'POST', body: JSON.stringify({ spec: patch.patch }) });
       setPreview(r);
       setPreviewError(null);
     } catch (err) {

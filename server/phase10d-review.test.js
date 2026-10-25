@@ -62,7 +62,7 @@ async function settle(id, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
-    const r = await get(`/api/v1/operations/${id}`);
+    const r = await get(`/api/operations/${id}`);
     last = r.json?.operation || last;
     if (last && !['pending', 'awaiting_confirmation', 'authorized', 'running'].includes(last.status)) return last;
     await new Promise((r) => setTimeout(r, 60));
@@ -72,9 +72,9 @@ async function settle(id, timeoutMs = 20_000) {
 /** The one flow every mutation uses: dry-run → token → execute → settle. */
 async function run(action, target, params) {
   locks._resetLimits();
-  const d = await post('/api/v1/operations/dry-run', { action, target, ...(params !== undefined ? { params } : {}) });
+  const d = await post('/api/operations/dry-run', { action, target, ...(params !== undefined ? { params } : {}) });
   if (d.status !== 200) return { dryRun: d, operation: d.json?.operation ?? null };
-  const e = await post('/api/v1/operations', { action, target, ...(params !== undefined ? { params } : {}), confirmationToken: d.json.confirmation.token, operationId: d.json.operation.id });
+  const e = await post('/api/operations', { action, target, ...(params !== undefined ? { params } : {}), confirmationToken: d.json.confirmation.token, operationId: d.json.operation.id });
   const operation = e.status === 202 ? await settle(e.json.operation.id) : e.json.operation;
   return { dryRun: d, execute: e, operation };
 }
@@ -148,7 +148,7 @@ test('a realistic install (Gitea: volume, env, healthcheck, restart, network, po
   assert.ok(detail.json.container.mounts.some((m) => m.target === '/data'));
   assert.ok(detail.json.container.ports.some((p) => p.hostPort === '2223'));
   assert.ok(detail.json.container.networks.some((n) => n.name === 'proxy'));
-  const spec = await get('/api/v1/containers/git/spec');
+  const spec = await get('/api/containers/git/spec');
   assert.equal(spec.status, 200);
   assert.equal(spec.json.spec.image, 'gitea/gitea:1.22');
   assert.equal(spec.json.spec.restartPolicy.name, 'unless-stopped');
@@ -256,7 +256,7 @@ test('monitoring follows the installed container through the monitoring engine, 
   assert.ok(!posts().some((l) => l.startsWith('DELETE /volumes')), 'remove never deletes volumes');
   assert.ok(CREATED_VOLUMES.has('git-data'), 'data volume kept');
   // the catalog knows nothing special about the removal; it just observes Docker
-  const cat = await get('/api/v1/catalog/gitea');
+  const cat = await get('/api/catalog/gitea');
   assert.ok(!cat.json.instances.some((i) => i.name === 'git'));
 });
 
@@ -323,7 +323,7 @@ test('rollback matrix: a monitoring-registration failure is a reported partial s
 test('boundary: an install cannot name another stack\'s container, remove the external proxy network, or claim someone else\'s volume as its own', async () => {
   const before = snapshot();
   // 1 — a name that already belongs to a compose stack member → refused at plan time, no write
-  const clash = await post('/api/v1/operations/dry-run', { action: 'service.install', target: { type: 'catalog', id: 'redis' }, params: { config: { name: 'jellyfin' } } });
+  const clash = await post('/api/operations/dry-run', { action: 'service.install', target: { type: 'catalog', id: 'redis' }, params: { config: { name: 'jellyfin' } } });
   assert.equal(clash.status, 409); assert.equal(clash.json.operation.error.code, 'name_taken');
   // 2 — joining the shared proxy network as an existing network is allowed; it is never created or removed by the install
   const onProxy = await install({ name: 'cache-onproxy', network: 'proxy' }, 'redis');
@@ -352,10 +352,10 @@ test('boundary: an install cannot name another stack\'s container, remove the ex
 
 test('operation boundary: no session → 401; viewer → 403; no token → 409; a catalog install is one operation record with confirmation, lock, verification, event and activity', async () => {
   const saved = COOKIE; COOKIE = null;
-  const anon = await post('/api/v1/operations/dry-run', { action: 'service.install', target: { type: 'catalog', id: 'redis' }, params: { config: { name: 'x' } } });
+  const anon = await post('/api/operations/dry-run', { action: 'service.install', target: { type: 'catalog', id: 'redis' }, params: { config: { name: 'x' } } });
   COOKIE = saved;
   assert.equal(anon.status, 401);
-  const noToken = await post('/api/v1/operations', { action: 'service.install', target: { type: 'catalog', id: 'redis' }, params: { config: { name: 'cache-notoken' } } });
+  const noToken = await post('/api/operations', { action: 'service.install', target: { type: 'catalog', id: 'redis' }, params: { config: { name: 'cache-notoken' } } });
   assert.ok([400, 409].includes(noToken.status), String(noToken.status)); assert.ok(!fx('cache-notoken'));
   const r = await install({ name: 'cache-bound' }, 'redis');
   const op = r.operation;
@@ -364,7 +364,7 @@ test('operation boundary: no session → 401; viewer → 403; no token → 409; 
   assert.equal(op.confirmation.mode, 'strong');
   assert.equal(op.verification.verified, true);
   assert.ok(op.auditId);
-  const trail = await get(`/api/v1/operations/${op.id}/trail`);
+  const trail = await get(`/api/operations/${op.id}/trail`);
   assert.equal(trail.status, 200);
   assert.ok(events.getRecentEvents({ limit: 100 }).some((e) => e.type === 'operation.completed' && e.correlation?.operationId === op.id), 'Event Bus completion event');
   assert.ok(JSON.stringify((await get('/api/activity?limit=100')).json).includes('cache-bound'));
@@ -378,14 +378,14 @@ test('secret hygiene: a generated/typed secret reaches only the container — ne
   assert.equal(ok.operation.status, 'succeeded', JSON.stringify(ok.operation.error));
   const bad = await install({ name: 'pg-hyg-become-unhealthy', variables: { POSTGRES_PASSWORD: SECRET } }, 'postgres');
   assert.equal(bad.operation.status, 'failed');
-  const preview = await post('/api/v1/catalog/postgres/plan', { config: { name: 'pg-hyg-preview', variables: { POSTGRES_PASSWORD: SECRET } } });
+  const preview = await post('/api/catalog/postgres/plan', { config: { name: 'pg-hyg-preview', variables: { POSTGRES_PASSWORD: SECRET } } });
   assert.equal(preview.status, 200);
   const blob = JSON.stringify([
     ok.dryRun.json, ok.operation, bad.dryRun.json, bad.operation, preview.json,
-    (await get('/api/activity?limit=200')).json, (await get('/api/v1/events?limit=200')).json,
-    (await get('/api/v1/operations?limit=100')).json, (await get('/api/v1/catalog/installs')).json, (await get('/api/v1/catalog/postgres')).json,
-    (await get(`/api/v1/operations/${ok.operation.id}/trail`)).json, (await get(`/api/v1/operations/${bad.operation.id}/trail`)).json,
-    (await get('/api/v1/containers/pg-hyg/spec')).json,
+    (await get('/api/activity?limit=200')).json, (await get('/api/events?limit=200')).json,
+    (await get('/api/operations?limit=100')).json, (await get('/api/catalog/installs')).json, (await get('/api/catalog/postgres')).json,
+    (await get(`/api/operations/${ok.operation.id}/trail`)).json, (await get(`/api/operations/${bad.operation.id}/trail`)).json,
+    (await get('/api/containers/pg-hyg/spec')).json,
   ]);
   assert.ok(!blob.includes(SECRET), 'the secret leaked into an API response or record');
   assert.ok(!LOGS.join('\n').includes(SECRET), 'the secret was logged');

@@ -221,12 +221,6 @@ test('events: parses and filters by window', async () => {
   assert.equal(narrow[0].actor, 'navidrome');
 });
 
-test('imagesSummary and systemDf degrade gracefully', async () => {
-  const imgs = await docker.imagesSummary();
-  assert.ok(imgs.length > 0 && imgs[0].tags.length > 0);
-  assert.ok((await docker.systemDf()) !== null);
-});
-
 test('groupByProject separates compose stacks from standalone', async () => {
   const list = await docker.listContainers({ all: true });
   const { projects, standalone } = docker.groupByProject(list);

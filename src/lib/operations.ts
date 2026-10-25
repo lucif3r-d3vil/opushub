@@ -153,18 +153,18 @@ export const isTerminal = (s: OperationStatus | string | null | undefined) => TE
 
 /** Ask the server what it would do. Never operates. */
 export const dryRun = (action: string, target: OperationTargetRef, params?: OperationParams) =>
-  api<DryRunResponse>('/api/v1/operations/dry-run', { method: 'POST', body: JSON.stringify({ action, target, ...(params ? { params } : {}) }) });
+  api<DryRunResponse>('/api/operations/dry-run', { method: 'POST', body: JSON.stringify({ action, target, ...(params ? { params } : {}) }) });
 
 /**
  * Spend a confirmation. The server re-checks everything before it touches Docker — and the token
  * is bound to the exact parameters the dry-run evaluated, so the same `params` must be sent.
  */
 export const execute = (action: string, target: OperationTargetRef, confirmationToken: string, operationId: string, params?: OperationParams) =>
-  api<ExecuteResponse>('/api/v1/operations', { method: 'POST', body: JSON.stringify({ action, target, ...(params ? { params } : {}), confirmationToken, operationId }) });
+  api<ExecuteResponse>('/api/operations', { method: 'POST', body: JSON.stringify({ action, target, ...(params ? { params } : {}), confirmationToken, operationId }) });
 
-export const fetchOperation = (id: string) => api<{ operation: OperationDoc }>(`/api/v1/operations/${id}`);
+export const fetchOperation = (id: string) => api<{ operation: OperationDoc }>(`/api/operations/${id}`);
 
-export const cancelOperation = (id: string) => api<{ operation: OperationDoc }>(`/api/v1/operations/${id}/cancel`, { method: 'POST', body: '{}' });
+export const cancelOperation = (id: string) => api<{ operation: OperationDoc }>(`/api/operations/${id}/cancel`, { method: 'POST', body: '{}' });
 
 /**
  * Follow an operation until it settles.
@@ -307,7 +307,7 @@ export const onOperationRequest = (fn: (detail: { action: OperationAction; targe
  * would be refused.
  */
 export function useOperationsCapabilities() {
-  const { data, error } = usePolled<OperationsOverview>('/api/v1/operations', 60_000);
+  const { data, error } = usePolled<OperationsOverview>('/api/operations', 60_000);
   const permitted = useMemo(
     () => new Set((data?.actions || []).filter((a) => a.permitted).map((a) => a.id)),
     [data],

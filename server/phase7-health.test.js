@@ -7,7 +7,6 @@ import path from 'node:path';
 import { startMockEngine } from '../test/mock-engine.js';
 import { probeUrl, _resetProbes } from './probe.js';
 import { aggregateHealth, evaluateServiceHealth } from './healthModel.js';
-import { publicError, ERROR_CODES } from './errors.js';
 
 const ok200 = async () => ({ res: { statusCode: 200, headers: {} }, latencyMs: 12 });
 
@@ -103,17 +102,6 @@ test('evaluateServiceHealth probes only trusted URL sources', async () => {
   assert.equal(r2.health.state, 'available');
   assert.equal(r2.probe.checked, false);
   assert.equal(probed.length, 0);
-});
-
-// --- error model ----------------------------------------------------------------
-
-test('publicError speaks in stable codes with public-safe prose', () => {
-  for (const code of Object.keys(ERROR_CODES)) {
-    const e = publicError(code);
-    assert.equal(e.code, code);
-    assert.ok(e.reason.length > 8);
-  }
-  assert.equal(publicError('nope').code, 'not_available');
 });
 
 // --- endpoint --------------------------------------------------------------------

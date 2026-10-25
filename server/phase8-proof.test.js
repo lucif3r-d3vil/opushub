@@ -303,7 +303,7 @@ test('no operation route reads an HTTP method, a Docker path or a command from t
 
 test('the client can name an action and a target, and nothing else is interpreted', async () => {
   // a body padded with every field a generic proxy would need changes nothing about the outcome
-  const r = await call('POST', '/api/v1/operations', {
+  const r = await call('POST', '/api/operations', {
     action: 'container.stop',
     target: { type: 'service', id: 'jellyfin' },
     method: 'DELETE',
@@ -320,7 +320,7 @@ test('the client can name an action and a target, and nothing else is interprete
   assert.equal(r.status, 400, 'a padded request is not negotiated with');
   assert.equal(r.json.code, 'bad_request');
 
-  const sneaky = await call('POST', '/api/v1/operations', {
+  const sneaky = await call('POST', '/api/operations', {
     action: 'container.stop', target: { type: 'service', id: 'jellyfin' },
     method: 'DELETE', path: '/containers/jellyfin/exec', command: 'id', confirmed: true, force: true,
   });
@@ -386,18 +386,18 @@ test('adding a write path did not change the read client', () => {
 
 test('a full read sweep plus a full operation still issues only approved engine calls', async () => {
   ENGINE.reset();
-  for (const p of ['/api/services', '/api/stacks', '/api/discovery', '/api/host', '/api/networks', '/api/volumes', '/api/images', '/api/system', '/api/resources', '/api/alerts', '/api/activity?limit=10', '/api/v1/operations']) {
+  for (const p of ['/api/services', '/api/stacks', '/api/discovery', '/api/host', '/api/networks', '/api/system', '/api/alerts', '/api/activity?limit=10', '/api/operations']) {
     const r = await call('GET', p);
     assert.ok(r.status < 500, `${p} answered ${r.status}`);
   }
-  const d = await call('POST', '/api/v1/operations/dry-run', { action: 'container.start', target: { type: 'service', id: 'paperless' } });
+  const d = await call('POST', '/api/operations/dry-run', { action: 'container.start', target: { type: 'service', id: 'paperless' } });
   assert.equal(d.status, 200);
-  const e = await call('POST', '/api/v1/operations', {
+  const e = await call('POST', '/api/operations', {
     action: 'container.start', target: { type: 'service', id: 'paperless' },
     confirmationToken: d.json.confirmation.token, operationId: d.json.operation.id,
   });
   assert.equal(e.status, 202);
-  for (let i = 0; i < 100 && (await call('GET', `/api/v1/operations/${e.json.operation.id}`)).json.operation.status === 'running'; i++) {
+  for (let i = 0; i < 100 && (await call('GET', `/api/operations/${e.json.operation.id}`)).json.operation.status === 'running'; i++) {
     await new Promise((r) => setTimeout(r, 50));
   }
   const writes = ENGINE.log.filter((l) => !l.startsWith('GET '));
@@ -417,12 +417,12 @@ test('no server file that answers the browser names a socket path', () => {
 });
 
 test('no API response leaks a socket path, an env value or a token', async () => {
-  const paths = ['/api/v1/operations', '/api/services', '/api/discovery', '/api/health'];
+  const paths = ['/api/operations', '/api/services', '/api/discovery', '/api/health'];
   const blobs = [];
   for (const p of paths) blobs.push((await call('GET', p)).text);
-  const d = await call('POST', '/api/v1/operations/dry-run', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' } });
+  const d = await call('POST', '/api/operations/dry-run', { action: 'container.restart', target: { type: 'service', id: 'jellyfin' } });
   blobs.push(d.text);
-  const e = await call('POST', '/api/v1/operations', {
+  const e = await call('POST', '/api/operations', {
     action: 'container.restart', target: { type: 'service', id: 'jellyfin' },
     confirmationToken: d.json.confirmation.token, operationId: d.json.operation.id,
   });
@@ -443,13 +443,13 @@ test('no API response leaks a socket path, an env value or a token', async () =>
 /* ==================================================================== */
 
 const OPERATION_ROUTES = [
-  ['GET', '/api/v1/operations'],
   ['GET', '/api/operations'],
-  ['GET', '/api/v1/operations/op-20260101-aaaaaaa'],
-  ['GET', '/api/v1/operations/op-20260101-aaaaaaa/trail'],
-  ['POST', '/api/v1/operations/dry-run'],
-  ['POST', '/api/v1/operations'],
-  ['POST', '/api/v1/operations/op-20260101-aaaaaaa/cancel'],
+  ['GET', '/api/operations'],
+  ['GET', '/api/operations/op-20260101-aaaaaaa'],
+  ['GET', '/api/operations/op-20260101-aaaaaaa/trail'],
+  ['POST', '/api/operations/dry-run'],
+  ['POST', '/api/operations'],
+  ['POST', '/api/operations/op-20260101-aaaaaaa/cancel'],
 ];
 
 const BODY = { action: 'container.restart', target: { type: 'service', id: 'jellyfin' } };
@@ -457,7 +457,7 @@ const BODY = { action: 'container.restart', target: { type: 'service', id: 'jell
 /** Wait for any background operation to finish, so an assertion is never racing one. */
 async function drain() {
   for (let i = 0; i < 200; i++) {
-    const doc = (await call('GET', '/api/v1/operations')).json;
+    const doc = (await call('GET', '/api/operations')).json;
     if (!doc?.counts?.running) return;
     await new Promise((r) => setTimeout(r, 50));
   }
@@ -482,11 +482,11 @@ test('every state-changing operations route is behind CSRF', async () => {
 
 test('every operations route enforces authorization', async () => {
   for (const action of ['container.start', 'container.restart', 'container.stop']) {
-    const r = await call('POST', '/api/v1/operations/dry-run', { action, target: { type: 'service', id: 'jellyfin' } }, null, VIEWER_COOKIE);
+    const r = await call('POST', '/api/operations/dry-run', { action, target: { type: 'service', id: 'jellyfin' } }, null, VIEWER_COOKIE);
     assert.equal(r.status, 403, `${action} must be refused for an account without the permission`);
     assert.equal(r.json.code, 'not_permitted');
   }
-  const executed = await call('POST', '/api/v1/operations', { ...BODY, confirmationToken: 'stolen' }, null, VIEWER_COOKIE);
+  const executed = await call('POST', '/api/operations', { ...BODY, confirmationToken: 'stolen' }, null, VIEWER_COOKIE);
   assert.equal(executed.status, 403, 'execution is refused too, not just the dry-run');
 });
 
@@ -500,7 +500,7 @@ test('no operations route executes without a server-bound confirmation', async (
     ['a token-shaped string', { confirmationToken: 'a'.repeat(43) }],
   ];
   for (const [label, extra] of cases) {
-    const r = await call('POST', '/api/v1/operations', { ...BODY, ...extra });
+    const r = await call('POST', '/api/operations', { ...BODY, ...extra });
     assert.equal(r.status, 409, `${label} must not execute`);
     assert.ok(['confirmation_required', 'confirmation_invalid'].includes(r.json.operation.error.code), label);
   }
@@ -510,27 +510,27 @@ test('no operations route executes without a server-bound confirmation', async (
 test('the confirmation is bound to action, target and session, and is single-use', async () => {
   await drain();
   ENGINE.reset();
-  const d = await call('POST', '/api/v1/operations/dry-run', BODY);
+  const d = await call('POST', '/api/operations/dry-run', BODY);
   const token = d.json.confirmation.token;
   // Each of these spends nothing: the token does not match the action/target it was minted for,
   // so the engine refuses before the lock is even taken.
-  const wrongAction = await call('POST', '/api/v1/operations', {
+  const wrongAction = await call('POST', '/api/operations', {
     action: 'container.stop', target: { type: 'service', id: 'jellyfin' }, confirmationToken: token,
   });
   assert.equal(wrongAction.json.operation.error.code, 'confirmation_mismatch', 'a restart token cannot stop');
-  const wrongTarget = await call('POST', '/api/v1/operations', {
+  const wrongTarget = await call('POST', '/api/operations', {
     action: 'container.restart', target: { type: 'service', id: 'radarr' }, confirmationToken: token,
   });
   assert.equal(wrongTarget.json.operation.error.code, 'confirmation_mismatch', 'a Jellyfin token cannot restart Radarr');
   assert.deepEqual(ENGINE.log.filter((l) => !l.startsWith('GET ')), [], 'nothing executed yet');
   assert.ok(confirmation.pendingCount() > 0, 'a refused attempt does not consume the confirmation');
 
-  const first = await call('POST', '/api/v1/operations', { ...BODY, confirmationToken: token, operationId: d.json.operation.id });
+  const first = await call('POST', '/api/operations', { ...BODY, confirmationToken: token, operationId: d.json.operation.id });
   assert.equal(first.status, 202, 'the right action, target and session are accepted');
   await drain();
   // with the container free again, the only thing standing between the replay and a second
   // restart is the fact that the token was already spent
-  const replay = await call('POST', '/api/v1/operations', { ...BODY, confirmationToken: token });
+  const replay = await call('POST', '/api/operations', { ...BODY, confirmationToken: token });
   assert.equal(replay.json.operation.error.code, 'confirmation_used', 'the same token cannot be spent twice');
 });
 
@@ -540,7 +540,7 @@ test('the operations surface is inert until a person confirms something', async 
   // read the whole surface, twice, including every sub-route
   for (const [method, p] of OPERATION_ROUTES.filter(([m]) => m === 'GET')) await call(method, p);
   for (const [method, p] of OPERATION_ROUTES.filter(([m]) => m === 'GET')) await call(method, p);
-  await call('POST', '/api/v1/operations/dry-run', BODY);
+  await call('POST', '/api/operations/dry-run', BODY);
   assert.deepEqual(ENGINE.log.filter((l) => !l.startsWith('GET ')), [],
     'reading the operations surface must never operate on anything');
 });

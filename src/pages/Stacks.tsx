@@ -28,7 +28,7 @@ export default function StacksPage() {
   const nav = useNavigate();
   const { data, error, fetchedAt, refresh } = usePolled<StacksDoc>('/api/stacks', 30_000);
   const caps = useOperationsCapabilities();
-  const managed = usePolled<{ stacks: { id: string; revision: number; lastDeploy: { at: number; status: string } | null }[] }>(caps.overview ? '/api/v1/stacks/managed' : null, 30_000);
+  const managed = usePolled<{ stacks: { id: string; revision: number; lastDeploy: { at: number; status: string } | null }[] }>(caps.overview ? '/api/stacks/managed' : null, 30_000);
   const [logsFor, setLogsFor] = useState<string | null>(null);
   const stacks = data?.stacks ?? [];
   const configured = stacks.filter((s) => s.source !== 'discovered');
