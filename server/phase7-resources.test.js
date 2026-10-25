@@ -13,14 +13,14 @@ test('resourcesDocument summarizes current, average and peak per resource', () =
     cpu: { usage: 42, cores: 8, load1: 1.2, load5: 0.9, load15: 0.5 },
     memory: { total: 8_000, available: 2_000, free: 1_000, cached: 500 },
     network: [{ name: 'eth0', rxPerSec: 1000, txPerSec: 500 }],
+    disks: [{ mount: '/', total: 60, used: 20, free: 40 }, { mount: '/srv', total: 40, used: 20, free: 20 }],
     gpu: { present: false },
   };
   const points = [
     { t: 1, cpu: 10, memUsedPct: 50, rx: 100, tx: 50 },
     { t: 2, cpu: 30, memUsedPct: 70, rx: 300, tx: 150 },
   ];
-  const storage = { at: 1, providers: [{ id: 'filesystem', available: true, totals: { mounts: 2, total: 100, used: 40, free: 60 }, mounts: [{}, {}], at: 1 }, { id: 'zfs', available: 'not-implemented', at: 1 }] };
-  const doc = resourcesDocument({ system, points, storage });
+  const doc = resourcesDocument({ system, points });
   assert.equal(doc.cpu.current, 42);
   assert.equal(doc.cpu.average, 20);
   assert.equal(doc.cpu.peak, 30);
@@ -29,12 +29,14 @@ test('resourcesDocument summarizes current, average and peak per resource', () =
   assert.equal(doc.network.averageRx, 200);
   assert.equal(doc.network.peakTx, 150);
   assert.equal(doc.storage.mounts, 2);
+  assert.deepEqual(doc.storage.current, { mounts: 2, total: 100, used: 40, free: 60 });
+  assert.equal(doc.storage.source, 'system-provider');
   assert.equal(doc.gpu.availability, 'unavailable');
   assert.equal(doc.gpu.reason, 'Not available');
 });
 
 test('resourcesDocument reports unavailable, never zeros, without data', () => {
-  const doc = resourcesDocument({ system: null, points: [], storage: null });
+  const doc = resourcesDocument({ system: null, points: [] });
   assert.equal(doc.cpu.availability, 'unavailable');
   assert.equal(doc.cpu.current, null);
   assert.equal(doc.memory.availability, 'unavailable');

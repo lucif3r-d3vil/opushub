@@ -92,6 +92,23 @@ test('listContainers projects the safe shape for every fixture', async () => {
   assert.equal(typeof byName.get('jellyfin').created, 'number');
 });
 
+test('probeUsable proves the engine can list containers, and says how many', async () => {
+  const p = await docker.probeUsable();
+  assert.equal(p.ok, true);
+  assert.equal(p.containers, FIXTURES.length);
+  const pub = docker.publicStatus(p);
+  assert.deepEqual([pub.ok, pub.state, pub.containers], [true, 'connected', FIXTURES.length]);
+});
+
+test('probeUsable without a reachable engine is the plain unavailable answer, with no count', async () => {
+  process.env.OPUSHUB_DOCKER_SOCKET = '/tmp/opushub-definitely-absent.sock';
+  const p = await docker.probeUsable();
+  assert.equal(p.ok, false);
+  assert.equal(p.containers, undefined);
+  assert.equal('containers' in docker.publicStatus(p), false);
+  restoreSocket();
+});
+
 test('listContainers({ all:false }) returns running only', async () => {
   const list = await docker.listContainers({ all: false });
   assert.ok(list.length > 0 && list.length < FIXTURES.length);

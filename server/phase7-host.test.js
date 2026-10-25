@@ -1,10 +1,10 @@
-// Phase 7A — host model, versioning, storage providers, Docker inventory projections.
+// Phase 7A — host model, versioning, the system sample's mounts, Docker inventory projections.
 // The mock engine speaks the genuine Docker HTTP-over-socket protocol (see test/mock-engine.js).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startMockEngine } from '../test/mock-engine.js';
 import * as docker from './providers/docker.js';
-import { describeStorage, LinuxFilesystemProvider, ZFSProvider } from './providers/storage.js';
+import { collect as collectSystem } from './providers/system.js';
 import { versionInfo, _resetVersion } from './version.js';
 
 const OLD_ENV = { ...process.env };
@@ -34,49 +34,15 @@ test('versionInfo answers honestly: a version always, SHAs only when known', () 
   assert.ok(v.imageTag === null || typeof v.imageTag === 'string');
 });
 
-// --- storage providers -------------------------------------------------------
+// --- host storage: the system sample's mount list -----------------------------
 
-test('filesystem provider reports real mounts with totals', async () => {
-  const p = new LinuxFilesystemProvider();
-  const doc = await p.describe();
-  assert.equal(doc.id, 'filesystem');
-  assert.equal(doc.available, true);
-  assert.ok(Array.isArray(doc.mounts) && doc.mounts.length);
-  for (const m of doc.mounts.slice(0, 5)) {
-    assert.ok(m.mount && m.total > 0 && m.usedPct != null);
+test('the system sample lists real mounts with totals (what the host strip shows)', async () => {
+  const sys = await collectSystem();
+  assert.ok(Array.isArray(sys.disks), 'disks is always a list, empty when the kernel exposes none');
+  for (const d of sys.disks.slice(0, 5)) {
+    assert.ok(d.mount && d.total > 0, `${d.mount} has a measured size`);
+    assert.ok(d.used >= 0 && d.used <= d.total && d.free >= 0, `${d.mount} has consistent usage`);
   }
-  assert.ok(doc.totals && doc.totals.total >= doc.totals.used);
-});
-
-// Phase 9 implements ZFS (see server/providers/zfs.js). The provider no longer answers
-// 'not-implemented': it either read pools and datasets from `zpool`/`zfs`, or it says plainly
-// that it could not. What must never change is the second half of the old guarantee — a ZFS
-// document is only ever built from ZFS's own output, never from filesystem statistics.
-test('zfs provider answers from ZFS or says it could not, and never borrows filesystem numbers', async () => {
-  const p = new ZFSProvider();
-  const doc = await p.describe();
-  assert.ok(['boolean'].includes(typeof doc.available), 'available is a boolean, never a guess');
-  assert.ok(Array.isArray(doc.pools) && Array.isArray(doc.datasets));
-  if (doc.available) {
-    // real ZFS output: every pool has a name, and every dataset belongs to a pool it reported
-    assert.ok(doc.pools.every((x) => typeof x.name === 'string' && x.name));
-    for (const d of doc.datasets) assert.ok(doc.pools.some((x) => x.name === d.pool));
-  } else {
-    // unavailable: a reason in words, and no numbers pretending to be ZFS measurements
-    assert.match(doc.reason || '', /\S/);
-    assert.deepEqual(doc.pools, []);
-    assert.deepEqual(doc.datasets, []);
-  }
-  // the filesystem provider's mounts are never presented as ZFS datasets
-  const fs = await new LinuxFilesystemProvider().describe();
-  const fsMounts = new Set((fs.mounts || []).map((m) => m.mount));
-  for (const d of doc.datasets) assert.ok(!fsMounts.has(d.name), `${d.name} came from /proc/mounts`);
-});
-
-test('describeStorage aggregates every provider without throwing', async () => {
-  const doc = await describeStorage();
-  assert.equal(doc.providers.length, 2);
-  assert.deepEqual(doc.providers.map((p) => p.id), ['filesystem', 'zfs']);
 });
 
 // --- docker inventory projections --------------------------------------------

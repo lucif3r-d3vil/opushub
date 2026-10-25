@@ -50,7 +50,6 @@ function humanType(type) {
     'operation.completed': 'Operation completed',
     'operation.failed': 'Operation failed',
     'operation.timed_out': 'Operation timed out',
-    'infrastructure.health_changed': 'Infrastructure health changed',
     'service.down': 'Service down',
     'service.up': 'Service recovered',
     'service.unhealthy': 'Service unhealthy',

@@ -117,6 +117,21 @@ test('evaluateAlerts stays silent on a healthy snapshot and caps the list', () =
   assert.ok(capped.some((a) => a.signature === 'service.unhealthy:overflow'), 'the cap is disclosed, not silent');
 });
 
+test('a nearly full mount alerts from the system mount list, one alert per mount', () => {
+  const GB = 1024 ** 3;
+  const disk = (mount, usedPct) => ({ mount, device: '/dev/x', fs: 'ext4', total: 100 * GB, used: usedPct * GB, free: (100 - usedPct) * GB });
+  const system = { disks: [disk('/', 40), disk('/srv', 92), disk('/tank', 96), { mount: '/odd', total: 0, used: 0, free: 0 }] };
+  const alerts = evaluateAlerts({ dockerAvailable: true, services: [], stacks: [], system, authFailures: 0 });
+  const mounts = alerts.filter((a) => a.signature.startsWith('storage.filesystem.'));
+  assert.deepEqual(mounts.map((a) => a.signature).sort(), ['storage.filesystem.critical:/tank', 'storage.filesystem.warning:/srv']);
+  assert.equal(mounts.find((a) => a.evidence.mount === '/tank').severity, 'critical');
+  assert.equal(mounts.find((a) => a.evidence.mount === '/srv').severity, 'warning');
+  assert.ok(mounts.every((a) => a.area === 'storage'));
+  assert.ok(!alerts.some((a) => a.evidence?.mount === '/odd'), 'a mount that could not be measured is not alerted on');
+  const quiet = evaluateAlerts({ dockerAvailable: true, services: [], stacks: [], system: { disks: [disk('/', 89)] }, authFailures: 0 });
+  assert.equal(quiet.filter((a) => a.signature.startsWith('storage.')).length, 0, 'below the warning line says nothing');
+});
+
 // --- transitions ----------------------------------------------------------------
 
 test('refreshAlerts logs fired/resolved exactly once per transition', () => {

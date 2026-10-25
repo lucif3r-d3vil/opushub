@@ -76,7 +76,9 @@ test('GET /api/health: connected engine reports version, no paths', async () => 
 test('GET /api/docker/status mirrors the safe shape', async () => {
   const { json } = await get('/api/docker/status');
   assert.equal(json.ok, true);
-  assert.deepEqual(Object.keys(json).sort(), ['api', 'ok', 'state', 'version']);
+  // `containers` is the proof OpusHub may list them, not just reach the engine
+  assert.deepEqual(Object.keys(json).sort(), ['api', 'containers', 'ok', 'state', 'version']);
+  assert.ok(Number.isInteger(json.containers) && json.containers > 0);
 });
 
 test('GET /api/services: status reasons are public-safe; no env/ids leak', async () => {

@@ -33,11 +33,6 @@ export const PUBLIC_EVENT_TYPES = new Set([
   'operation.completed',
   'operation.failed',
   'operation.timed_out',
-  // infrastructure
-  'infrastructure.health_changed',
-  'infrastructure.provider.state_changed',
-  'infrastructure.storage.health_changed',
-  'infrastructure.network.changed',
   // service / docker (public, safe)
   'service.unhealthy',
   'service.healthy',

@@ -134,6 +134,8 @@ const PUBLIC_REASONS = {
     'DOCKER_HOST is set to something OpusHub cannot use. Expected unix:///path/to/docker.sock or tcp://host:port.',
   unreachable:
     'Docker socket is present but the engine is not responding. Check that the daemon is running.',
+  'not-permitted':
+    'The Docker engine answers, but OpusHub is not allowed to list containers. Check the socket\'s group or the socket proxy rules.',
 };
 
 export function availability() {
@@ -156,7 +158,12 @@ export function availability() {
 
 /** The only docker-availability shape allowed to cross the API boundary. */
 export function publicStatus(probed) {
-  if (probed?.ok) return { ok: true, state: 'connected', version: probed.version, api: probed.apiVersion };
+  if (probed?.ok) {
+    return {
+      ok: true, state: 'connected', version: probed.version, api: probed.apiVersion,
+      ...(Number.isInteger(probed.containers) ? { containers: probed.containers } : {}),
+    };
+  }
   const state = probed?.state && probed.state !== 'connected' ? probed.state : 'unreachable';
   return { ok: false, state, reason: PUBLIC_REASONS[state] || PUBLIC_REASONS.unreachable };
 }
@@ -180,6 +187,22 @@ export async function probe() {
     return { ok: true, state: 'connected', version: ver.Version, apiVersion: ver.ApiVersion };
   } catch (err) {
     return { ok: false, state: 'unreachable', reason: `socket present but engine unreachable: ${err.message}`, public: PUBLIC_REASONS.unreachable };
+  }
+}
+
+/**
+ * The check the UI should trust: `probe()` proves the daemon answers, and listing containers
+ * proves OpusHub may actually use it — a group permission or a socket proxy can allow `/version`
+ * and refuse `/containers/json`. Reports how many containers the engine listed.
+ */
+export async function probeUsable() {
+  const p = await probe();
+  if (!p.ok) return p;
+  try {
+    const list = await requestJson('/containers/json?all=true', { timeoutMs: 4000 });
+    return { ...p, containers: Array.isArray(list) ? list.length : 0 };
+  } catch {
+    return { ok: false, state: 'not-permitted', reason: 'engine answers but the container list was refused', public: PUBLIC_REASONS['not-permitted'] };
   }
 }
 

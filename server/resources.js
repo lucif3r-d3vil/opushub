@@ -22,9 +22,9 @@ function summarize(points, pick) {
 
 /**
  * Build the resource document. Pure: callers supply the system sample, the sampled history
- * window, and the storage description — this module judges shapes, never fetches.
+ * window — this module judges shapes, never fetches. Storage comes from the system sample's mount list.
  */
-export function resourcesDocument({ system = null, points = [], storage = null, at = Date.now() } = {}) {
+export function resourcesDocument({ system = null, points = [], at = Date.now() } = {}) {
   const cpuStats = summarize(points, (p) => p.cpu);
   const memStats = summarize(points, (p) => p.memUsedPct);
   const rxStats = summarize(points, (p) => p.rx);
@@ -39,8 +39,10 @@ export function resourcesDocument({ system = null, points = [], storage = null, 
   const txPerSec = ifaces.reduce((a, n) => a + (n.txPerSec || 0), 0);
   const hasRates = ifaces.some((n) => n.rxPerSec != null || n.txPerSec != null);
 
-  const fs = storage?.providers?.find((p) => p.id === 'filesystem') || null;
-  const zfs = storage?.providers?.find((p) => p.id === 'zfs') || null;
+  const disks = Array.isArray(system?.disks) ? system.disks : [];
+  const diskTotals = disks.length
+    ? disks.reduce((a, d) => ({ mounts: a.mounts + 1, total: a.total + d.total, used: a.used + d.used, free: a.free + d.free }), { mounts: 0, total: 0, used: 0, free: 0 })
+    : null;
 
   const gpu = system?.gpu || null;
 
@@ -84,13 +86,12 @@ export function resourcesDocument({ system = null, points = [], storage = null, 
       timestamp: system?.at ?? null,
     },
     storage: {
-      current: fs?.totals || null,
-      mounts: fs?.mounts?.length ?? null,
-      zfs: zfs?.available === true ? { pools: zfs.pools?.length ?? 0 } : null,
+      current: diskTotals,
+      mounts: diskTotals ? diskTotals.mounts : null,
       unit: 'bytes',
-      availability: fs?.available === true ? 'available' : fs?.available === 'not-implemented' ? 'not-implemented' : 'unavailable',
-      source: 'storage-provider',
-      timestamp: fs?.at ?? storage?.at ?? null,
+      availability: diskTotals ? 'available' : 'unavailable',
+      source: 'system-provider',
+      timestamp: system?.at ?? null,
     },
     gpu: gpu?.present
       ? {

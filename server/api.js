@@ -20,7 +20,7 @@ import { checkBackgroundUrl } from './providers/background.js';
 import { URL_REASONS } from './urlResolver.js';
 import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons.js';
 import { logEvent, readEvents, firstEventAt } from './activity.js';
-import { ackAlert, countRecentAuthFailures, getActiveAlerts, refreshAlerts } from './alerts.js';
+import { ackAlert, countRecentAuthFailures, refreshAlerts } from './alerts.js';
 import { checkForUpdates, lastUpdateCheck, REPO_URL } from './updateCheck.js';
 import { searchAll } from './search.js';
 import { loadEnv } from './env.js';
@@ -37,15 +37,9 @@ import { makeWidget, defaultWidgets, WIDGET_TYPES } from './widgets.js';
 import { templateList, templateIds } from './templates.js';
 import { hostDocument } from './host.js';
 import { handleOperations } from './operationsApi.js';
-import { describeStorage } from './providers/storage.js';
-// Phase 9 — the OpusGrid infrastructure surface and its health aggregation
-import { handleInfrastructure } from './infrastructureApi.js';
 // Phase 10A — the monitoring surface (monitors, checks, incidents, engine health)
 import { handleMonitoring } from './monitoringApi.js';
 import { alertInputs as monitoringAlertInputs } from './monitoring/engine.js';
-import { describeProviders } from './infrastructure/registry.js';
-import { aggregateHealth } from './infrastructure/health.js';
-import { storageDocument, networkDocument } from './infrastructure/opusgrid.js';
 import { versionInfo } from './version.js';
 // Phase 10B — live events & notifications
 import { handleEvents, handleEventsSSE, isSSERoute } from './eventsApi.js';
@@ -179,19 +173,6 @@ export async function handleApi(req, res, url) {
       sessionId: activeToken ? auth.sessionHandle(activeToken) : null,
     });
     if (handled) return;
-  }
-
-  // ---------- OpusGrid infrastructure (Phase 9) ----------
-  // Sits inside the same session and CSRF gate as everything else, so the answer to "is the
-  // infrastructure surface authenticated?" is the same as for the rest of the API. The handler
-  // owns every /api/infrastructure/* route and exposes GETs only — see server/infrastructureApi.js.
-  if (p.startsWith('/api/infrastructure')) {
-    await handleInfrastructure({
-      p, method,
-      send: (status, obj) => send(res, status, obj),
-      query: url.searchParams,
-    });
-    return;
   }
 
   // ---------- monitoring (Phase 10A) ----------
@@ -838,13 +819,7 @@ export async function handleApi(req, res, url) {
   // ---------- host & infrastructure (Phase 7 canonical inventory) ----------
   if (route === 'GET /api/host') {
     const inv = await model.getInventory();
-    // Phase 9: the host is the parent context for infrastructure, so the host document carries
-    // the provider picture alongside it. The host facts themselves are unchanged.
-    const [doc, providers] = await Promise.all([
-      hostDocument({ inventory: inv }),
-      describeProviders(),
-    ]);
-    return send(res, 200, { ...doc, providers, health: aggregateHealth({ providers, alerts: getActiveAlerts() }) });
+    return send(res, 200, await hostDocument({ inventory: inv }));
   }
   if (route === 'GET /api/docker') {
     const [inv, infra, dockerProv] = await Promise.all([
@@ -894,9 +869,6 @@ export async function handleApi(req, res, url) {
       images: infra.images, count: infra.counts.images, stale: infra.stale,
     });
   }
-  if (route === 'GET /api/storage') {
-    return send(res, 200, await describeStorage());
-  }
   if (route === 'GET /api/version') {
     return send(res, 200, versionInfo());
   }
@@ -916,11 +888,8 @@ export async function handleApi(req, res, url) {
   }
   if (route === 'GET /api/resources') {
     const { resourcesDocument } = await import('./resources.js');
-    const [system, storage] = await Promise.all([
-      collectSystem().catch(() => null),
-      describeStorage().catch(() => null),
-    ]);
-    return send(res, 200, resourcesDocument({ system, points: history.window(3600_000), storage }));
+    const system = await collectSystem().catch(() => null);
+    return send(res, 200, resourcesDocument({ system, points: history.window(3600_000) }));
   }
 
   // ---------- integrations ----------
@@ -983,15 +952,10 @@ export async function handleApi(req, res, url) {
   // bounded system sample, the auth-failure count). Transitions log to activity inside
   // refreshAlerts, so GET here can append exactly two kinds of honest events.
   if (route === 'GET /api/alerts') {
-    const [servicesView, stacksDoc, system, storage, network, providers] = await Promise.all([
+    const [servicesView, stacksDoc, system] = await Promise.all([
       model.getServicesView().catch(() => null),
       model.getStacksDoc().catch(() => null),
       collectSystem().catch(() => null),
-      // Phase 9: infrastructure evidence. Provider answers are cached and single-flighted by the
-      // registry, so this adds no polling — a provider is asked at most once per its TTL.
-      storageDocument({ detail: true }).catch(() => null),
-      networkDocument().catch(() => null),
-      describeProviders().catch(() => []),
     ]);
     const services = servicesView?.services || [];
     const stacks = (stacksDoc?.stacks || []).map((st) => ({
@@ -1002,7 +966,6 @@ export async function handleApi(req, res, url) {
       dockerAvailable: servicesView ? servicesView.live !== false : true,
       services, stacks, system,
       authFailures: countRecentAuthFailures(),
-      storage, network, providers,
       // Phase 10A: what the monitoring engine *reports* — never what it decides. A monitor that is
       // paused or inside a maintenance window is not offered here, so this is the whole mechanism
       // behind "maintenance is quiet".
@@ -1786,7 +1749,7 @@ async function dockerAvailabilityCached(force = false) {
   const a = docker.availability();
   let value;
   if (!a.ok) value = docker.publicStatus(a);
-  else value = docker.publicStatus(await docker.probe());
+  else value = docker.publicStatus(await docker.probeUsable());
   dockerAvailCache = { at: Date.now(), value };
   return value;
 }
@@ -1812,13 +1775,8 @@ export function markBoot(t) { bootAt = t; }
  * was not deliberately versioned.
  */
 const V1_ROUTES = new Set([
-  '/host', '/docker', '/networks', '/volumes', '/images', '/storage', '/version', '/resources',
+  '/host', '/docker', '/networks', '/volumes', '/images', '/version', '/resources',
   '/services', '/stacks', '/system', '/discovery', '/providers',
-  // Phase 9 — the OpusGrid infrastructure namespace (unversioned aliases work as before)
-  '/infrastructure', '/infrastructure/providers', '/infrastructure/storage',
-  '/infrastructure/storage/pool', '/infrastructure/storage/dataset', '/infrastructure/network',
-  '/infrastructure/power', '/infrastructure/opnsense', '/infrastructure/topology',
-  '/infrastructure/physical', '/infrastructure/provider',
   // Phase 8 — the canonical operations routes; the /:id and /:id/trail forms keep their v1
   // prefix because they are patterns, not fixed paths, and are matched by the handler itself.
   '/operations', '/operations/dry-run',

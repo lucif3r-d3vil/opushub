@@ -8,12 +8,14 @@
 // Bounds: MAX_ALERTS active alerts (worst-first), evaluation is pure over its inputs and
 // runs at most once per MIN_INTERVAL_MS no matter how often it is asked.
 import { logEvent, readEvents } from './activity.js';
-import { THRESHOLDS } from './infrastructure/model.js';
 
 // Phase 10B — best-effort publish onto the canonical event bus (the failure-isolated
 // wrapper lives with the bus; every producer used to carry an identical local copy).
 import { publishEventSafe } from './events/index.js';
 import { SEVERITY_ORDER as SEV_RANK } from './events/model.js';
+
+// Percent used at which a mount is worth saying something about.
+const THRESHOLDS = Object.freeze({ warning: 90, critical: 95 });
 
 export const MAX_ALERTS = 50;
 export const MIN_INTERVAL_MS = 30_000;
@@ -24,8 +26,8 @@ let lastRunAt = 0;
 let lastInputsHash = '';
 
 /**
- * One alert. `area` is which part of the OpusGrid it belongs to (storage, network, power,
- * docker, provider, system, security, service, stack) — the health aggregator groups by it, and
+ * One alert. `area` is which part of the OpusGrid it belongs to (storage,
+ * docker, system, security, service, stack) — the health aggregator groups by it, and
  * the Activity page can filter by it. It is optional so older call sites stay valid.
  */
 function alert({ signature, severity, title, detail, evidence = null, links = [], area = null }) {
@@ -46,9 +48,6 @@ export function evaluateAlerts({
   // it turns "this monitor says it is down" into the same kind of condition everything else here is.
   // Monitors that are paused or inside a maintenance window are filtered out by the caller.
   monitors = [],
-  // Phase 9: infrastructure domains. All three are plain snapshots — this function stays pure and
-  // never fetches anything, so the conditions below can only ever fire on real provider evidence.
-  storage = null, network = null, providers = [],
 } = {}) {
   const out = [];
   if (!dockerAvailable) {
@@ -174,92 +173,22 @@ export function evaluateAlerts({
     }));
   }
 
-  /* ---- Phase 9: storage ------------------------------------------------ */
-  // Only measurements are alerted on. A provider that cannot measure (no ZFS tools, no quota set)
-  // produces no alert at all, because an alert for something that was never measured is noise
-  // dressed up as information.
-  const pools = Array.isArray(storage?.zfs?.pools) ? storage.zfs.pools : [];
-  const badPools = pools.filter((p) => p?.health && p.health !== 'ONLINE');
-  for (const p of badPools.slice(0, 8)) {
-    const critical = ['FAULTED', 'UNAVAIL', 'REMOVED', 'OFFLINE', 'SUSPENDED'].includes(p.health);
+  /* ---- mounts ---------------------------------------------------------- */
+  // One alert per mount that is nearly full, from the mount list the system provider already reads
+  // (/proc/mounts + statfs). A mount that could not be measured produces no alert at all, because
+  // an alert for something never measured is noise dressed up as information.
+  for (const d of (system?.disks || [])) {
+    const usedPct = d?.total > 0 ? (d.used / d.total) * 100 : null;
+    if (typeof usedPct !== 'number' || usedPct < THRESHOLDS.warning) continue;
+    const critical = usedPct >= THRESHOLDS.critical;
     out.push(alert({
-      signature: `zfs.pool.${String(p.health).toLowerCase()}:${p.name}`,
+      signature: `storage.filesystem.${critical ? 'critical' : 'warning'}:${d.mount}`,
       severity: critical ? 'critical' : 'warning',
       area: 'storage',
-      title: `ZFS pool ${p.name} is ${p.health}`,
-      detail: critical
-        ? 'The pool is not serving data. ZFS will keep the pool imported but reads and writes are affected — check the disks before anything else.'
-        : 'The pool is still serving data with reduced redundancy. Another failure could take it offline.',
-      evidence: { pool: p.name, health: p.health, capacityPct: p.capacityPct ?? null },
-      links: [{ label: 'Open the pool', href: `/infrastructure?tab=storage&pool=${encodeURIComponent(p.name)}` }],
-    }));
-  }
-  if (badPools.length > 8) {
-    out.push(alert({
-      signature: 'zfs.pool:overflow', severity: 'warning', area: 'storage',
-      title: `${badPools.length - 8} more ZFS pools need attention`,
-      detail: 'The list is capped so one bad shelf cannot flood this page — Storage → ZFS pools shows all of them.',
-      links: [{ label: 'Open Storage', href: '/infrastructure?tab=storage' }],
-    }));
-  }
-  for (const m of (storage?.filesystems?.mounts || [])) {
-    if (typeof m?.usedPct !== 'number' || m.usedPct < THRESHOLDS.warning) continue;
-    const critical = m.usedPct >= THRESHOLDS.critical;
-    out.push(alert({
-      signature: `storage.filesystem.${critical ? 'critical' : 'warning'}:${m.mount}`,
-      severity: critical ? 'critical' : 'warning',
-      area: 'storage',
-      title: `${m.mount} is ${Math.round(m.usedPct)}% full`,
+      title: `${d.mount} is ${Math.round(usedPct)}% full`,
       detail: `Above ${critical ? THRESHOLDS.critical : THRESHOLDS.warning}%. Containers, images and logs all write here.`,
-      evidence: { mount: m.mount, usedPct: Math.round(m.usedPct), free: m.free ?? null },
-      links: [{ label: 'Open Storage', href: '/infrastructure?tab=storage' }],
-    }));
-  }
-  const overQuota = (storage?.zfs?.datasets || []).filter((d) => typeof d?.quotaUsedPct === 'number' && d.quotaUsedPct >= THRESHOLDS.warning);
-  for (const d of overQuota.slice(0, 5)) {
-    const critical = d.quotaUsedPct >= THRESHOLDS.critical;
-    out.push(alert({
-      signature: `storage.quota.${critical ? 'critical' : 'warning'}:${d.name}`,
-      severity: critical ? 'critical' : 'warning',
-      area: 'storage',
-      title: `Dataset ${d.name} is at ${Math.round(d.quotaUsedPct)}% of its quota`,
-      detail: 'A quota is a hard limit: writes fail once the dataset reaches it.',
-      evidence: { dataset: d.name, usedPct: Math.round(d.quotaUsedPct), quota: d.quota ?? null },
-      links: [{ label: 'Open the dataset', href: `/infrastructure?tab=storage&dataset=${encodeURIComponent(d.name)}` }],
-    }));
-  }
-
-  /* ---- Phase 9: network ------------------------------------------------ */
-  // An interface with no address and no carrier is a spare port, not a fault. Only interfaces that
-  // carry an address and are not up are alerted on — that is what the kernel reported, twice.
-  const down = (network?.interfaces || []).filter((i) => i?.state && i.state !== 'up' && (i.addresses || []).length > 0);
-  for (const i of down.slice(0, 5)) {
-    out.push(alert({
-      signature: `network.interface.down:${i.name}`,
-      severity: 'warning',
-      area: 'network',
-      title: `Interface ${i.name} is ${i.state}`,
-      detail: 'It has an address configured but the link is not up, so anything reaching the host through it is unreachable.',
-      evidence: { interface: i.name, state: i.state, addresses: (i.addresses || []).map((a) => a.address).slice(0, 2) },
-      links: [{ label: 'Open Network', href: '/infrastructure?tab=network' }],
-    }));
-  }
-
-  /* ---- Phase 9: providers ---------------------------------------------- */
-  // A provider that is simply not configured is NOT an alert: an install without OPNsense is a
-  // choice, not a fault. Only a provider that was configured and then stopped answering is one.
-  for (const p of providers) {
-    if (p.status !== 'unavailable' && p.status !== 'degraded') continue;
-    if (p.status === 'unavailable' && p.optional) continue; // optional + absent is configuration, not failure
-    out.push(alert({
-      signature: `provider.${p.status}:${p.id}`,
-      severity: p.status === 'unavailable' ? 'warning' : 'warning',
-      area: p.domain === 'compute' ? 'docker' : p.domain === 'storage' ? 'storage'
-        : p.domain === 'network' ? 'network' : p.domain === 'power' ? 'power' : 'provider',
-      title: `${p.name} is ${p.status === 'unavailable' ? 'unavailable' : 'degraded'}`,
-      detail: p.error?.reason || 'OpusHub cannot read this provider right now.',
-      evidence: { provider: p.id, status: p.status },
-      links: [{ label: 'Open Connections', href: '/settings/connections' }],
+      evidence: { mount: d.mount, usedPct: Math.round(usedPct), free: d.free ?? null },
+      links: [{ label: 'Open System', href: '/system' }],
     }));
   }
 
@@ -267,22 +196,17 @@ export function evaluateAlerts({
   return out.slice(0, MAX_ALERTS);
 }
 
-function hashInputs({ dockerAvailable, services, stacks, system, authFailures, storage, network, providers, monitors }) {
+function hashInputs({ dockerAvailable, services, stacks, system, authFailures, monitors }) {
   const svc = (services || []).map((s) => `${s.group}/${s.name}:${s.health}:${s.state}`).sort().join(',');
   const st = (stacks || []).map((x) => `${x.project}:${x.running}/${Array.isArray(x.services) ? x.services.length : 0}`).sort().join(',');
   const mem = Math.round(system?.memory?.pct ?? -1);
   const disk = Math.round(system?.disk?.pct ?? -1);
-  // Phase 9: the infrastructure inputs, hashed the same way — a stable string over the facts that
-  // can actually change an alert, so a poll that changes nothing is not a re-evaluation.
-  const zfsPools = (storage?.zfs?.pools || []).map((p) => `${p.name}:${p.health}`).sort().join(',');
-  const mounts = (storage?.filesystems?.mounts || []).map((m) => `${m.mount}:${Math.round(m.usedPct ?? -1)}`).sort().join(',');
-  const quotas = (storage?.zfs?.datasets || []).filter((d) => d?.quotaUsedPct != null).map((d) => `${d.name}:${Math.round(d.quotaUsedPct)}`).sort().join(',');
-  const ifaces = (network?.interfaces || []).map((i) => `${i.name}:${i.state}:${(i.addresses || []).length}`).sort().join(',');
-  const provs = (providers || []).map((p) => `${p.id}:${p.status}`).sort().join(',');
+  // Every mount's rounded usage, so a disk crossing a threshold re-evaluates immediately.
+  const mounts = (system?.disks || []).map((d) => `${d.mount}:${d.total > 0 ? Math.round((d.used / d.total) * 100) : -1}`).sort().join(',');
   // Phase 10A: monitor verdicts participate in the hash, so a monitor going down re-evaluates the
   // alert set immediately instead of waiting out MIN_INTERVAL_MS.
   const mons = (monitors || []).map((m) => `${m.id}:${m.status}`).sort().join(',');
-  return `${dockerAvailable}|${svc}|${st}|${mem}|${disk}|${authFailures}|${zfsPools}|${mounts}|${quotas}|${ifaces}|${provs}|${mons}`;
+  return `${dockerAvailable}|${svc}|${st}|${mem}|${disk}|${authFailures}|${mounts}|${mons}`;
 }
 
 /**

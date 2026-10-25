@@ -1,9 +1,9 @@
-// Unified search: pages · services · stacks · infrastructure · alerts · bookmarks · settings · recent news.
+// Unified search: pages · services · stacks · alerts · bookmarks · settings · recent news.
 // Services and stacks come from the SAME canonical inventory the Hub, Services and Stacks pages
 // render — one model, so search can never offer something that isn't a container, or hide
 // something that is. (Bookmarks and pages are OpusHub's own surfaces, not infrastructure.)
 // A lightweight scoring pass — the client adds its own instant fuzzy layer on top.
-import { readBookmarks, readServices, getInventory, getLayout, getInfra } from './model.js';
+import { readBookmarks, readServices, getInventory, getLayout } from './model.js';
 import { readEvents } from './activity.js';
 import { getActiveAlerts } from './alerts.js';
 import { ACTIONS, ACTION_IDS } from './operations/registry.js';
@@ -20,13 +20,7 @@ const PAGES = [
   { title: 'Hub', href: '/', hint: 'Your digital home', kind: 'page', keywords: ['home', 'start', 'dashboard'] },
   { title: 'Services', href: '/services', hint: 'Everything you run', kind: 'page', keywords: ['apps', 'containers'] },
   { title: 'Stacks', href: '/stacks', hint: 'Groups of containers', kind: 'page', keywords: ['compose', 'projects'] },
-  { title: 'Infrastructure', href: '/infrastructure', hint: 'Engine, networks, volumes, images, topology', kind: 'page', keywords: ['docker', 'network', 'volume', 'image', 'topology', 'host', 'engine'] },
-  // Phase 9 — the OpusGrid infrastructure surfaces are destinations in their own right.
   { title: 'Host', href: '/host', hint: 'The machine OpusGrid runs on', kind: 'page', keywords: ['machine', 'server', 'node', 'cpu', 'memory', 'kernel', 'os', 'provider'] },
-  { title: 'Storage', href: '/infrastructure?tab=storage', hint: 'Filesystems, ZFS pools and datasets', kind: 'page', keywords: ['disk', 'zfs', 'pool', 'dataset', 'mount', 'quota', 'capacity'] },
-  { title: 'Network', href: '/infrastructure?tab=network', hint: 'Interfaces, routing, DNS, OPNsense', kind: 'page', keywords: ['interface', 'eth', 'route', 'gateway', 'dns', 'resolver', 'opnsense', 'firewall'] },
-  { title: 'Power', href: '/infrastructure?tab=power', hint: 'UPS and PDU', kind: 'page', keywords: ['ups', 'pdu', 'battery', 'outlet', 'electric'] },
-  { title: 'Topology', href: '/infrastructure?tab=topology', hint: 'How the OpusGrid fits together', kind: 'page', keywords: ['graph', 'map', 'layers', 'physical', 'relationship'] },
   { title: 'System', href: '/system', hint: 'Host vitals', kind: 'page', keywords: ['cpu', 'memory', 'disk', 'network', 'uptime'] },
   { title: 'Activity', href: '/activity', hint: 'What happened, when', kind: 'page', keywords: ['events', 'history', 'log'] },
   { title: 'Icon browser', href: '/icons', hint: 'Find an icon and apply it', kind: 'page', keywords: ['logo', 'glyph', 'symbol'] },
@@ -47,8 +41,7 @@ const SETTINGS = [
   { title: 'Notifications', href: '/settings/notifications', hint: 'Providers: webhook, Telegram · browser notifications', keywords: ['alerts', 'notify', 'webhook', 'email', 'telegram', 'slack', 'channels'] },
   { title: 'General', href: '/settings/general', hint: 'Name, greeting, this install', keywords: ['identity', 'title', 'name', 'greeting', 'app', 'about'] },
   { title: 'Environment', href: '/settings/environment', hint: 'Engine status, URL sources, Homepage-compatible files', keywords: ['docker', 'engine', 'socket', 'discovery', 'unmatched', 'env', 'paths', 'homepage', 'overlay'] },
-  // Phase 9 — provider connections: status and capabilities, never credentials.
-  { title: 'Connections', href: '/settings/connections', hint: 'Provider status, capabilities and the OPNsense address', keywords: ['provider', 'opnsense', 'ups', 'pdu', 'zfs', 'connect', 'capability', 'credential'] },
+  { title: 'Connections', href: '/settings/connections', hint: 'Docker connection status', keywords: ['docker', 'engine', 'socket', 'connect', 'status'] },
   { title: 'Account & sessions', href: '/settings/authentication', hint: 'Password, signed-in browsers, revocation', keywords: ['password', 'change password', 'sessions', 'sign out', 'security', 'login', 'revoke'] },
   { title: 'Advanced', href: '/settings/advanced', hint: 'Custom CSS & JS, refresh intervals, launch logging', keywords: ['custom css', 'custom js', 'theme.css', 'app.js', 'advanced', 'refresh', 'poll', 'launch log'] },
   // Phase 6 — the configuration surfaces themselves are destinations worth searching for.
@@ -93,7 +86,7 @@ export function scoreMatch(needle, ...fields) {
 const score = scoreMatch;
 
 /** Category weights — services and stacks rank highest: they are the point of the index. */
-const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, monitor: 0.98, incident: 0.99, page: 0.92, config: 0.9, setting: 0.88, operation: 0.86, infra: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75, notification: 0.94, event: 0.9 };
+const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, monitor: 0.98, incident: 0.99, page: 0.92, config: 0.9, setting: 0.88, operation: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75, notification: 0.94, event: 0.9 };
 
 /**
  * Which registered operations make sense to offer for a container in this state.
@@ -229,97 +222,6 @@ export async function searchAll(q, { newsItems = [], actor = null } = {}) {
       }, score(needle, al.title, al.detail, al.signature, 'alert', al.severity), KIND_WEIGHT.alert);
     }
   } catch { /* alerting is optional — search still answers without it */ }
-
-  // Phase 7F — infrastructure names: networks, volumes, images, straight from the cached
-  // infra document (the same one the Infrastructure page renders). Each hit deep-links to
-  // its tab. Cache-first with a long window — a keystroke must never trigger engine calls.
-  try {
-    const infra = await getInfra({ refreshMs: 300_000 });
-    const doc = infra.live ? infra : (infra.stale || infra);
-    for (const n of (doc.networks || []).slice(0, 40)) {
-      add({
-        title: n.name, subtitle: `Network · ${n.driver || 'unknown driver'} · ${n.containers ?? '?'} attached`,
-        href: '/infrastructure?tab=networks', kind: 'infra',
-      }, score(needle, n.name, n.driver, 'network'), KIND_WEIGHT.infra);
-    }
-    for (const v of (doc.volumes || []).slice(0, 40)) {
-      add({
-        title: v.name, subtitle: `Volume · ${v.driver || 'unknown driver'} · ${v.refCount ?? '?'} users`,
-        href: '/infrastructure?tab=volumes', kind: 'infra',
-      }, score(needle, v.name, v.driver, 'volume'), KIND_WEIGHT.infra);
-    }
-    for (const img of (doc.images || []).slice(0, 40)) {
-      const tag = (img.tags || [])[0] || img.id;
-      add({
-        title: tag, subtitle: `Image · ${(img.usedBy || []).length} container${(img.usedBy || []).length === 1 ? '' : 's'} use it`,
-        href: '/infrastructure?tab=images', kind: 'infra',
-      }, score(needle, tag, ...(img.tags || []), 'image'), KIND_WEIGHT.infra);
-    }
-  } catch { /* infra is optional — search still answers without it */ }
-
-  /**
-   * Phase 9 — infrastructure objects, and only the ones a provider actually proved.
-   *
-   * A pool, dataset, filesystem or interface is offered because it was measured. OPNsense, UPS and
-   * PDU are offered as *destinations* with their real status in the subtitle, because a pane that
-   * says "Not configured" is a legitimate place to navigate to. Nothing here invents an object.
-   */
-  try {
-    const infra = await import('./infrastructure/opusgrid.js');
-    const [storage, network, external, power] = await Promise.all([
-      infra.storageDocument({ detail: true }).catch(() => null),
-      infra.networkDocument().catch(() => null),
-      infra.externalDocument().catch(() => null),
-      infra.powerDocument().catch(() => null),
-    ]);
-    for (const m of (storage?.filesystems?.mounts || []).slice(0, 20)) {
-      add({
-        title: m.mount,
-        subtitle: `Filesystem · ${m.fs}${m.usedPct != null ? ` · ${Math.round(m.usedPct)}% used` : ''}`,
-        href: '/infrastructure?tab=storage', kind: 'infra',
-      }, score(needle, m.mount, m.fs, 'filesystem', 'mount'), KIND_WEIGHT.infra);
-    }
-    if (storage?.zfs?.available) {
-      for (const p of (storage.zfs.pools || []).slice(0, 20)) {
-        add({
-          title: p.name,
-          subtitle: `ZFS pool · ${p.health || 'health unknown'}${p.capacityPct != null ? ` · ${p.capacityPct}% used` : ''}`,
-          href: `/infrastructure?tab=storage&pool=${encodeURIComponent(p.name)}`, kind: 'infra',
-        }, score(needle, p.name, 'zfs', 'pool'), KIND_WEIGHT.infra);
-      }
-      for (const d of (storage.zfs.datasets || []).slice(0, 30)) {
-        add({
-          title: d.name,
-          subtitle: `ZFS dataset · ${d.pool}${d.mountpoint ? ` · ${d.mountpoint}` : ''}`,
-          href: `/infrastructure?tab=storage&dataset=${encodeURIComponent(d.name)}`, kind: 'infra',
-        }, score(needle, d.name, 'zfs', 'dataset'), KIND_WEIGHT.infra);
-      }
-    }
-    for (const i of (network?.interfaces || []).slice(0, 20)) {
-      add({
-        title: i.name,
-        subtitle: `Interface · ${i.kind} · ${i.state}${(i.addresses || [])[0] ? ` · ${i.addresses[0].address}` : ''}`,
-        href: '/infrastructure?tab=network', kind: 'infra',
-      }, score(needle, i.name, i.kind, 'interface', 'network'), KIND_WEIGHT.infra);
-    }
-    // Optional providers: destinations that state their own status.
-    if (external?.opnsense) {
-      add({
-        title: 'OPNsense',
-        subtitle: `External · ${external.opnsense.status === 'not-configured' ? 'Not configured' : (external.opnsense.status || 'unknown')}`,
-        href: '/infrastructure?tab=network', kind: 'infra',
-      }, score(needle, 'opnsense', 'firewall', 'router', 'gateway'), KIND_WEIGHT.infra);
-    }
-    if (power) {
-      for (const [label, device] of [['UPS', power.ups], ['PDU', power.pdu]]) {
-        add({
-          title: label,
-          subtitle: `Power · ${device?.status === 'not-configured' ? 'Not configured' : (device?.status || 'unknown')}`,
-          href: '/infrastructure?tab=power', kind: 'infra',
-        }, score(needle, label, 'power', 'ups', 'pdu'), KIND_WEIGHT.infra);
-      }
-    }
-  } catch { /* the infrastructure surface is optional — search still answers without it */ }
 
   try {
     const { overlays, groups } = readServices();

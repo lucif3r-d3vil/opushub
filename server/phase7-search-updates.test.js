@@ -165,12 +165,12 @@ test('searchAll surfaces active alerts as destinations', async () => {
   _resetAlerts();
 });
 
-test('searchAll indexes infrastructure names with tab deep-links', async () => {
-  const results = await searchAll('proxy');
-  const infra = results.filter((r) => r.kind === 'infra');
-  assert.ok(infra.some((r) => r.title === 'proxy'), 'the mock engine proxy network is indexed');
-  assert.ok(infra.every((r) => r.href.startsWith('/infrastructure?tab=')));
-  assert.ok(infra.every((r) => r.title && r.subtitle));
+test('searchAll no longer offers infrastructure objects or pages', async () => {
+  for (const needle of ['proxy', 'storage', 'zfs', 'topology', 'power', 'opnsense']) {
+    const results = await searchAll(needle);
+    assert.ok(results.every((r) => r.kind !== 'infra'), `${needle}: an infrastructure result came back`);
+    assert.ok(results.every((r) => !String(r.href).startsWith('/infrastructure')), `${needle}: a result links to the removed page`);
+  }
 });
 
 test('searchAll is bounded: at most 24 results, oversized needles truncated', async () => {

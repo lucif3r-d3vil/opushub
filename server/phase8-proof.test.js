@@ -266,20 +266,6 @@ test('no exec endpoint, shell helper or command runner exists in the server', ()
         for (const needle of ['docker.sock', 'DOCKER_HOST', '/containers/', 'exec(', 'spawn(']) {
           assert.ok(!src.includes(needle), `version.js must not use ${needle}`);
         }
-      } else if (rel === 'server/providers/zfs.js') {
-        // Phase 9 — the ZFS provider is the ONE module allowed to run a command, and only the
-        // frozen table inside it. These checks are stricter than the version.js exemption above,
-        // and server/phase9-security.test.js adds the dynamic half: a pool or dataset name that
-        // ZFS itself never reported is refused before a process is spawned.
-        for (const needle of ['shell:', 'execSync', 'spawnSync', 'spawn(', 'fork(', 'exec(', '/exec', 'new Function', 'eval(']) {
-          assert.ok(!src.includes(needle), `zfs.js must not use ${needle}`);
-        }
-        assert.ok(/execFile\(/.test(src), 'zfs.js runs commands with execFile (an argv array, never a shell)');
-        assert.ok(/Object\.freeze\(/.test(src), 'the ZFS command table is frozen');
-        for (const needle of ['docker.sock', 'DOCKER_HOST', '/containers/', 'req.', 'body.', 'query.']) {
-          assert.ok(!src.includes(needle), `zfs.js must know nothing about ${needle}`);
-        }
-        continue; // the generic process-call checks below are covered by the assertions above
       } else offenders.push(`${rel}: child_process`);
     }
     if (/\b(execSync|spawnSync)\s*\(/.test(src)) offenders.push(`${rel}: synchronous process call`);

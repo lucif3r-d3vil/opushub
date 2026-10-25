@@ -1,5 +1,5 @@
 // Phase 7B — infrastructure API: /api/host, /api/docker, /api/networks, /api/volumes,
-// /api/images, /api/storage, /api/version, /api/v1/* aliases, and degraded-mode lastKnown.
+// /api/images, /api/version, /api/v1/* aliases, and degraded-mode lastKnown.
 // Calls handleApi directly with stub req/res; docker joins run against the mock engine.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -101,16 +101,14 @@ test('GET /api/networks|volumes|images: live slices with counts', async () => {
   assert.doesNotMatch(blob, /hunter2/);
 });
 
-test('GET /api/storage + /api/version: providers and build identity', async () => {
-  const s = await get('/api/storage');
-  assert.deepEqual(s.json.providers.map((p) => p.id), ['filesystem', 'zfs']);
+test('GET /api/version: build identity', async () => {
   const v = await get('/api/version');
   assert.equal(v.json.name, 'OpusHub');
   assert.ok(v.json.version);
 });
 
 test('/api/v1/* mirrors the unversioned shapes exactly', async () => {
-  for (const name of ['host', 'docker', 'networks', 'volumes', 'images', 'storage', 'version']) {
+  for (const name of ['host', 'docker', 'networks', 'volumes', 'images', 'version']) {
     const a = await get(`/api/${name}`);
     const b = await get(`/api/v1/${name}`);
     assert.equal(b.status, 200, name);

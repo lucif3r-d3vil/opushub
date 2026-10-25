@@ -30,12 +30,11 @@ const listeners = new Set();
 const recentSignatures = new Map();
 
 export const SEVERITIES = EVENT_SEVERITIES; // one severity vocabulary, owned by the event model
-// Phase 9 adds the infrastructure areas. `provider` stays mapped to `docker` in the derived table
-// below: `provider.unavailable` has always meant "the Docker provider went away", and re-filing
-// six phases of history under a new heading would be a change nobody asked for. New Phase-9
-// events name their category explicitly instead.
+// `provider` stays mapped to `docker` in the derived table below: `provider.unavailable` has
+// always meant "the Docker provider went away", and re-filing history under a new heading would be
+// a change nobody asked for.
 export const CATEGORIES = ['service', 'stack', 'docker', 'system', 'security', 'config',
-  'storage', 'network', 'power', 'provider',
+  'storage', 'provider',
   // Phase 10A — monitor state changes and incidents are their own area: they are not service
   // state (a monitor can be down while the service is fine, and vice versa) and not operations.
   'monitoring'];
@@ -51,8 +50,6 @@ const CATEGORY_BY_TYPE = new Map(Object.entries({
   monitor: 'monitoring', incident: 'monitoring',
   // Phase 10C: container recovery & updates
   autoheal: 'docker', update: 'service',
-  network: 'network',
-  ups: 'power', pdu: 'power', power: 'power',
 }));
 
 /** Classify an event for filtering and display. Pure — also applied to pre-7E log lines on read. */
