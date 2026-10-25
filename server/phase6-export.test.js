@@ -23,11 +23,11 @@ const SERVICES = {
     },
   ],
 };
-const BOOKMARKS = { groups: [{ name: 'Reading', items: [{ name: 'Hacker News', href: 'https://news.ycombinator.com', description: 'The front page' }] }] };
+const BOOKMARKS = { groups: [{ name: 'Reading', items: [{ name: 'Hacker News', href: 'https://news.ycombinator.com', description: 'The front page' }, { name: 'Private feed', href: 'https://feeds.example.com/rss?token=PLANTED-TOKEN' }] }] };
 const SETTINGS = {
   app: { name: 'My Hub', tagline: 'The homelab' },
   appearance: { theme: 'dark', accent: 'teal', background: { mode: 'photo', photo: 'https://images.example.com/bg.jpg', blur: 16, scrim: 60 } },
-  integrations: { news: { feeds: [{ name: 'Private feed', url: 'https://feeds.example.com/rss?token=PLANTED-TOKEN' }] }, markets: { symbols: ['AAPL'] } },
+  integrations: { news: { feeds: [{ name: 'Old feed', url: 'https://feeds.example.com/old?token=PLANTED-TOKEN' }] }, weather: { place: 'LEGACY-PLACE' }, markets: { symbols: ['AAPL'] } },
   infrastructure: { hostAddress: '192.0.2.10', entrypointPorts: { web: '8080' } },
   advanced: { customCss: true, customJs: true },
 };
@@ -68,7 +68,7 @@ test('a native export contains no authentication, session or runtime state, on a
   }
   // Actual secret *values* must appear nowhere in the payload at all, metadata included.
   const whole = JSON.stringify(out);
-  for (const value of ['secret@', 'PLANTED-TOKEN', 'PLANTED-HASH', 'PLANTED-SECRET']) {
+  for (const value of ['secret@', 'PLANTED-TOKEN', 'PLANTED-HASH', 'PLANTED-SECRET', 'LEGACY-PLACE']) {
     assert.ok(!whole.includes(value), `an export leaked the value "${value}"`);
   }
   // and it says so, in the payload, rather than leaving the user to take our word for it

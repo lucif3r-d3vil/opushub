@@ -499,7 +499,7 @@ test('the draft validator answers for every area without writing', async () => {
 test('an invalid settings draft is refused with the reason, and the file is untouched', async () => {
   const settingsPath = path.join(CONFIG_DIR, 'settings.yaml');
   const before = fs.existsSync(settingsPath) ? fs.readFileSync(settingsPath, 'utf8') : '';
-  const r = await post('/api/config/validate', { area: 'settings', draft: { integrations: { markets: { symbols: ['NOT A SYMBOL!!'] } } } });
+  const r = await post('/api/config/validate', { area: 'settings', draft: { infrastructure: { hostAddress: 'not a host!!' } } });
   assert.equal(r.status, 200);
   assert.equal(r.json.ok, false);
   assert.equal(fs.existsSync(settingsPath) ? fs.readFileSync(settingsPath, 'utf8') : '', before);

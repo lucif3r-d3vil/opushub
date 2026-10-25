@@ -125,7 +125,6 @@ const FALLBACK: SettingsDoc = {
   app: { name: 'OpusHub', tagline: 'The OpusGrid homelab, at a glance.' },
   appearance: { theme: 'system', accent: 'sage', density: 'comfortable', transparency: true, fontScale: 1, background: { mode: 'quiet', photo: null, blur: 24, scrim: 62, position: 'center', fit: 'cover' } },
   hub: { greetingName: null, clock24h: false, showSeconds: false },
-  integrations: { news: { feeds: [] }, weather: { location: null, latitude: null, longitude: null, place: null, units: 'c' }, markets: { symbols: [] } },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
   infrastructure: { hostAddress: null, entrypointPorts: {} },
   advanced: { customCss: false, customJs: false },

@@ -19,30 +19,6 @@
         "config": {}
       },
       {
-        "id": "weather",
-        "type": "weather",
-        "zone": "rail",
-        "size": "md",
-        "visible": true,
-        "config": {}
-      },
-      {
-        "id": "markets",
-        "type": "markets",
-        "zone": "rail",
-        "size": "md",
-        "visible": true,
-        "config": {}
-      },
-      {
-        "id": "news",
-        "type": "news",
-        "zone": "rail",
-        "size": "md",
-        "visible": true,
-        "config": {}
-      },
-      {
         "id": "bookmarks",
         "type": "bookmarks",
         "zone": "rail",

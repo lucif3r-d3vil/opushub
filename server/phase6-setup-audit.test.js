@@ -10,7 +10,7 @@
 //
 //   · the route refuses to run at all once setup is complete, before it reads a body or writes
 //     anything;
-//   · the only value it accepts is `{ mode: 'detected' | 'template', template: <one of six ids> }`,
+//   · the only value it accepts is `{ mode: 'detected' | 'template', template: <one of five ids> }`,
 //     validated against a server-side constant list *before* the account is created;
 //   · `detected` writes nothing; `template` reaches exactly one writer, which writes exactly one
 //     file (`layout.json`) atomically;
@@ -236,7 +236,7 @@ test('the template the setup path applies writes layout.json and nothing else', 
 test('the setup template id is an identifier, never a path, and traversal is refused', async () => {
   const { templateIds } = await import('./templates.js');
   const ids = templateIds();
-  assert.equal(ids.length, 6, 'the template list should be the six built-ins');
+  assert.equal(ids.length, 5, 'the template list should be the five built-ins');
   for (const hostile of [
     '../../data/auth.json', '/etc/passwd', 'services.yaml', 'layout.json', '..', '.', '',
     'balanced/../../settings.yaml', 'BALANCED', 'balanced ', 'balanced\n', '__proto__',

@@ -1,6 +1,6 @@
 // Provider health registry — one honest answer to "which data sources are working right now?"
 //
-// Every provider that crosses the API boundary (docker, system, news, weather, markets) reports
+// Every provider that crosses the API boundary (docker, system) reports
 // the outcome of its last attempt here. The registry keeps:
 //   state      'available' | 'unavailable' | 'degraded' | 'idle' (never configured / never asked)
 //   lastOk     timestamp of the most recent successful answer (null → never succeeded)
@@ -26,7 +26,7 @@ function entry(name) {
 
 /**
  * Report the outcome of one provider attempt.
- * @param name    'docker' | 'system' | 'news' | 'weather' | 'markets'
+ * @param name    'docker' | 'system'
  * @param state   'available' | 'unavailable' | 'degraded'
  * @param opts    { reason, silent } — silent skips activity logging (used for steady-state polls)
  */
@@ -57,7 +57,7 @@ export function reportProvider(name, state, { reason = null, silent = false } = 
 
 /** A snapshot for the API: deterministic order, honest states, no internals. */
 export function providerHealthDoc(now = Date.now()) {
-  const names = ['docker', 'system', 'news', 'weather', 'markets'];
+  const names = ['docker', 'system'];
   return {
     at: now,
     providers: names.map((name) => {

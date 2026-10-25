@@ -136,8 +136,6 @@ export function HubSurface({ data, layout, interactive, onLayoutChange, onSearch
     <div className={`hub hub--${layout?.hub?.spacing || 'comfortable'}${preview ? ' hub--preview' : ''}`}>
       <HubHeader
         services={data.services.data}
-        weather={data.weather.data}
-        showWeather={data.weather.data?.status === 'ok'}
         onSearch={onSearch || (() => undefined)}
         frozenNow={frozenNow}
       />

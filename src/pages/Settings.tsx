@@ -44,7 +44,7 @@ import {
 //   Home          what this install is and how it looks
 //   Hub           the composition of the front page
 //   Content       what is presented, and how it is grouped
-//   Connections   the outside world (feeds, weather, markets)
+//   Connections   notifications and the Docker connection
 //   This install  the engine, the account and the escape hatches
 const TABS = [
   { id: 'general', label: 'General', section: 'Home' },
@@ -56,7 +56,6 @@ const TABS = [
   { id: 'services', label: 'Services', section: 'Content' },
   { id: 'groups', label: 'Groups', section: 'Content' },
   { id: 'bookmarks', label: 'Bookmarks', section: 'Content' },
-  { id: 'integrations', label: 'Integrations', section: 'Connections' },
   { id: 'notifications', label: 'Notifications', section: 'Connections' },
   // the Docker connection: whether the engine answers and lets OpusHub list containers
   { id: 'connections', label: 'Connections', section: 'Connections' },
@@ -129,7 +128,6 @@ export default function SettingsPage() {
           {tab === 'services' && <ServicesTab />}
           {tab === 'groups' && <GroupsTab />}
           {tab === 'bookmarks' && <BookmarksTab />}
-          {tab === 'integrations' && <IntegrationsTab />}
           {tab === 'notifications' && <NotificationsTab />}
           {tab === 'connections' && <ConnectionsTab />}
           {tab === 'authentication' && <AuthenticationTab />}
@@ -1634,30 +1632,7 @@ function cloneAt(groups: BmGroup[], fn: (d: BmGroup[]) => void): BmGroup[] {
   return next;
 }
 
-/* ============ Integrations ============ */
-const FEED_SUGGESTIONS = [
-  { name: 'Hacker News', url: 'https://hnrss.org/frontpage' },
-  { name: 'r/selfhosted', url: 'https://www.reddit.com/r/selfhosted.rss' },
-  { name: 'Ars Technica', url: 'https://feeds.arstechnica.com/arstechnica/index' },
-  { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml' },
-];
-const SYMBOL_SUGGESTIONS = ['AAPL', 'NVDA', 'MSFT', 'TSLA', 'RELIANCE.NS', 'TCS.NS', '^GSPC', '^NSEI', 'BTC-USD', 'EURUSD=X'];
-
-/**
- * The same rule the server applies (server/providers/market.js): symbols are letters and
- * digits with the Yahoo alphabet ( . ^ - = ) — never a URL or free text. A Stooq-era .US
- * suffix is migrated away. The UI mirrors it so a bad symbol is refused before the save
- * round-trip, with the reason next to the field.
- */
-const SYMBOL_RE = /^[A-Z0-9^](?:[A-Z0-9.^\-=]{0,23})$/;
-function normalizeSymbolInput(raw: string): { symbol: string | null; reason: string | null } {
-  const s = raw.trim().toUpperCase();
-  const symbol = s.endsWith('.US') ? s.slice(0, -3) : s;
-  if (!symbol) return { symbol: null, reason: 'empty' };
-  if (!SYMBOL_RE.test(symbol)) return { symbol: null, reason: 'symbols are letters/digits with . ^ - = only (e.g. AAPL, ^GSPC, BTC-USD)' };
-  return { symbol, reason: null };
-}
-
+/* ============ Notifications ============ */
 function NotificationsTab() {
   const { data: alertsData } = usePolled<AlertsDoc>('/api/alerts', 30_000);
   // One client per document, and they are the canonical ones from lib/notifications — this tab
@@ -1812,104 +1787,6 @@ function NotificationsTab() {
   );
 }
 
-function IntegrationsTab() {
-  const { settings, update } = useSettings();
-  const intg = settings?.integrations;
-  const [feedUrl, setFeedUrl] = useState('');
-  const [sym, setSym] = useState('');
-  const [symProblem, setSymProblem] = useState<string | null>(null);
-  if (!settings || !intg) return <Loading what="integration settings" />;
-  const feeds = intg.news.feeds || [];
-  const symbols = intg.markets.symbols || [];
-  const touch = () => { invalidateShared('/api/news'); invalidateShared('/api/weather'); invalidateShared('/api/market'); };
-  // Commit the symbol field: normalize every entry through the provider's rules, refuse the
-  // whole batch with a reason if one entry is not a symbol (no silent dropping, no URLs)
-  const commitSymbols = () => {
-    const parts = sym.toUpperCase().split(/[,\s]+/).filter(Boolean);
-    if (!parts.length) { setSym(''); setSymProblem(null); return; }
-    const norm = parts.map(normalizeSymbolInput);
-    const badIdx = norm.findIndex((n) => n.symbol == null);
-    if (badIdx !== -1) { setSymProblem(`“${parts[badIdx]}” — ${norm[badIdx].reason}`); return; }
-    const add = norm.map((n) => n.symbol as string).filter((x) => !symbols.includes(x));
-    if (add.length) { update({ integrations: { markets: { symbols: [...symbols, ...add] } } }, true); touch(); }
-    setSym(''); setSymProblem(null);
-  };
-  return (
-    <>
-      <p className="lede">Every value here is yours. OpusHub ships no defaults and never invents a reading — each widget shows its real provider state, and nothing is displayed that could not be fetched.</p>
-
-      <Block title="News" aside={<Link className="section-link" to="/">see it on the Hub →</Link>}>
-        <div className="editor-list">
-          {feeds.map((f, i) => (
-            <div className="editor-item" key={i}>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <b style={{ fontWeight: 560 }}>{f.name || URLSafe(f.url)}</b>
-                <div className="stale-note mono-meta" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.url}</div>
-              </span>
-              <button className="icon-btn" aria-label="Remove feed" onClick={() => { update({ integrations: { news: { feeds: feeds.filter((_, j) => j !== i) } } }, true); touch(); }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" /></svg>
-              </button>
-            </div>
-          ))}
-          {!feeds.length && <div className="editor-item stale-note">No feeds yet — the News widget will say so rather than show an empty box.</div>}
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 'var(--sp-3)' }}>
-          <input className="input" style={{ flex: 1 }} placeholder="https://example.com/feed.xml" value={feedUrl} onChange={(e) => setFeedUrl(e.target.value)} aria-label="Feed URL" />
-          <button className="btn" disabled={!feedUrl.trim()} onClick={() => { update({ integrations: { news: { feeds: [...feeds, { url: feedUrl.trim(), name: null }] } } }, true); touch(); setFeedUrl(''); }}>Add</button>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
-          {FEED_SUGGESTIONS.filter((s) => !feeds.some((f) => f.url === s.url)).map((s) => (
-            <button key={s.url} className="chip" onClick={() => { update({ integrations: { news: { feeds: [...feeds, s] } } }, true); touch(); }}>+ {s.name}</button>
-          ))}
-        </div>
-      </Block>
-
-      <Block title="Weather">
-        <Row label="Location" desc="City name or explicit coordinates — used with Open-Meteo (keyless)." tight>
-          <input className="input" style={{ width: 240 }} defaultValue={intg.weather.location || ''} placeholder="Amsterdam" aria-label="Weather location"
-            onBlur={(e) => { update({ integrations: { weather: { location: e.target.value.trim() || null } } }, true); touch(); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
-        </Row>
-        <Row label="Units" tight>
-          <Segmented value={intg.weather.units} onChange={(v) => { update({ integrations: { weather: { units: v } } }, true); touch(); }} ariaLabel="Units"
-            options={[{ value: 'c', label: '°C' }, { value: 'f', label: '°F' }]} />
-        </Row>
-        <Row label="Where it appears" desc="The Hub header shows the current temperature when weather is available; the sidebar widget shows the full reading." tight>
-          <Link className="btn btn-sm" to="/settings/widgets">Widget settings</Link>
-        </Row>
-      </Block>
-
-      <Block title="Markets" aside={<span className="stale-note">Yahoo Finance (keyless) — bare tickers are US, <code>.NS</code> NSE, <code>^</code> indices, <code>-USD</code> crypto, <code>=X</code> FX, <code>=F</code> futures</span>}>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 'var(--sp-3)' }}>
-          {symbols.map((s, i) => (
-            <span className="chip" key={s}>
-              {s}
-              <button className="x" aria-label={`Remove ${s}`} onClick={() => { update({ integrations: { markets: { symbols: symbols.filter((_, j) => j !== i) } } }, true); touch(); }}>
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" /></svg>
-              </button>
-            </span>
-          ))}
-          {!symbols.length && <span className="stale-note">No symbols configured.</span>}
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input className="input" style={{ width: 200 }} placeholder="AAPL, RELIANCE.NS, ^GSPC…" value={sym}
-            onChange={(e) => { setSym(e.target.value); setSymProblem(null); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') commitSymbols(); }}
-            onBlur={commitSymbols}
-            aria-label="Add symbol" />
-          <button className="btn" disabled={!sym.trim()} onClick={commitSymbols}>Add</button>
-        </div>
-        {symProblem && <span className="stale-note" style={{ color: 'var(--fail)', display: 'inline-block', marginTop: 6 }}>✗ {symProblem}</span>}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
-          {SYMBOL_SUGGESTIONS.filter((s) => !symbols.includes(s)).map((s) => (
-            <button key={s} className="chip" onClick={() => { update({ integrations: { markets: { symbols: [...symbols, s] } } }, true); touch(); }}>+ {s}</button>
-          ))}
-        </div>
-      </Block>
-    </>
-  );
-}
-function URLSafe(u: string) { try { return new URL(u).host; } catch { return u.slice(0, 30); } }
 function hostOf(u: string) { try { return new URL(u).hostname; } catch { return u; } }
 
 /* ============ Advanced ============ */

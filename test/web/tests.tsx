@@ -36,8 +36,8 @@ import { NotificationBell } from '../../src/components/Notifications';
 import { safeHref } from '../../src/lib/notifications';
 import { __emitLiveEventForTests, __setLiveStatusForTests } from '../../src/lib/sse';
 import {
-  activityDoc, bookmarksDoc, catalogue, layoutWith, marketDoc, newsDoc, servicesDoc, stacksDoc,
-  systemSnapshot, weatherDoc,
+  activityDoc, bookmarksDoc, catalogue, layoutWith, servicesDoc, stacksDoc,
+  systemSnapshot,
 } from '../../src/ssr-fixtures';
 
 export interface WebResult { passed: number; failed: number; failures: string[] }
@@ -46,7 +46,6 @@ const settings = {
   app: { name: 'OpusHub', tagline: 'The OpusGrid homelab, at a glance.' },
   appearance: { theme: 'dark', accent: 'sage', density: 'comfortable', transparency: true, fontScale: 1, background: { mode: 'quiet', photo: null, blur: 24, scrim: 62 } },
   hub: { greetingName: 'Nora', clock24h: true, showSeconds: false },
-  integrations: { news: { feeds: [] }, weather: { location: null, latitude: null, longitude: null, place: null, units: 'c' }, markets: { symbols: [] } },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
   advanced: { customCss: false, customJs: false },
 };
@@ -163,9 +162,8 @@ const providersFixture = {
   providers: [
     { name: 'docker', state: 'available' as const, lastOk: Date.now() - 2000, lastTry: Date.now() - 2000, staleMs: 2000, reason: null },
     { name: 'system', state: 'available' as const, lastOk: Date.now() - 2000, lastTry: Date.now() - 2000, staleMs: 2000, reason: null },
-    { name: 'news', state: 'unavailable' as const, lastOk: null, lastTry: Date.now() - 2000, staleMs: null, reason: 'feeds unreachable' },
-    { name: 'weather', state: 'idle' as const, lastOk: null, lastTry: null, staleMs: null, reason: null },
-    { name: 'markets', state: 'idle' as const, lastOk: null, lastTry: null, staleMs: null, reason: null },
+    { name: 'registry', state: 'unavailable' as const, lastOk: null, lastTry: Date.now() - 2000, staleMs: null, reason: 'registry unreachable' },
+    { name: 'telegram', state: 'idle' as const, lastOk: null, lastTry: null, staleMs: null, reason: null },
   ],
 };
 
@@ -251,9 +249,6 @@ function stubRoutes(): Record<string, unknown | ((body: unknown, path: string) =
     '/api/system': systemSnapshot,
     '/api/activity': activityDoc,
     '/api/bookmarks': bookmarksDoc,
-    '/api/weather': weatherDoc,
-    '/api/news': newsDoc,
-    '/api/market': marketDoc,
     '/api/search': (_body, path) => searchResults(decodeURIComponent(path.split('q=')[1] || '')),
     // the same shape GET /api/templates returns (templates are composition only)
     '/api/templates': {
@@ -897,9 +892,6 @@ export async function runWebTests(): Promise<WebResult> {
       stacks: { data: stacksDoc, error: null, loading: false, fetchedAt: Date.now(), refresh: () => undefined },
       activity: { data: activityDoc, error: null, loading: false, fetchedAt: Date.now(), refresh: () => undefined },
       bookmarks: { data: bookmarksDoc, error: null, loading: false, fetchedAt: Date.now(), refresh: () => undefined },
-      weather: { data: weatherDoc, error: null, loading: false, fetchedAt: Date.now(), refresh: () => undefined },
-      news: { data: newsDoc, error: null, loading: false, fetchedAt: Date.now(), refresh: () => undefined },
-      markets: { data: marketDoc, error: null, loading: false, fetchedAt: Date.now(), refresh: () => undefined },
       widgets: { data: widgetDoc, error: null, loading: false, fetchedAt: Date.now(), refresh: () => undefined },
     } as HubData;
     await h.mount(
@@ -950,8 +942,8 @@ export async function runWebTests(): Promise<WebResult> {
         ...layout.hub,
         widgets: [
           ...layout.hub.widgets.filter((w) => w.type !== 'activity'),
-          { id: 'weather', type: 'weather', zone: 'rail', size: 'md', visible: false, config: {} },
-          { id: 'news', type: 'news', zone: 'rail', size: 'md', visible: false, config: {} },
+          { id: 'attention', type: 'attention', zone: 'main', size: 'sm', visible: false, config: {} },
+          { id: 'monitoring', type: 'monitoring', zone: 'main', size: 'md', visible: false, config: {} },
         ],
       },
     };
@@ -960,9 +952,8 @@ export async function runWebTests(): Promise<WebResult> {
       await h2.mount(<TestApp><Hub /></TestApp>);
       await h2.waitFor(() => !!q('.launcher-items'), 'the launcher');
       await h2.flush(120);
-      expect(!h2.calls.some((c) => c.path.startsWith('/api/weather')), 'a hidden weather widget was still polled');
-      expect(!h2.calls.some((c) => c.path.startsWith('/api/news')), 'a hidden news widget was still polled');
-      expect(!text().includes('Partly cloudy'), 'hidden widget content leaked into the page');
+      expect(!h2.calls.some((c) => c.path.startsWith('/api/providers')), 'a hidden attention widget still polled provider health');
+      expect(!h2.calls.some((c) => c.path.startsWith('/api/monitoring')), 'a hidden monitoring widget was still polled');
     } finally {
       await h2.unmount();
     }
@@ -1113,7 +1104,7 @@ export async function runWebTests(): Promise<WebResult> {
     expect(qa('.sys-band--providers .prov-row').length >= 3, 'the provider band did not render');
     expect(text().includes('read 2s ago'), 'provider freshness is not shown');
     expect(text().includes('nothing on this page needs it'), 'an idle provider is not described as idle');
-    expect(text().includes('feeds unreachable'), 'a failing provider hides its reason');
+    expect(text().includes('registry unreachable'), 'a failing provider hides its reason');
     expect(text().includes('no discrete GPU'), 'the GPU row invented a device');
     expect(text().includes('41°C'), 'a real thermal reading was not shown');
     // two measured charts (cpu + load), each in its own box
@@ -1210,9 +1201,9 @@ export async function runWebTests(): Promise<WebResult> {
   await test('settings: the System tab shows honest provider health', async (h) => {
     await h.mount(<TestApp entry="/settings/system"><Settings /></TestApp>);
     await h.waitFor(() => text().includes('Providers'), 'the providers block');
-    expect(text().includes('Docker') && text().includes('News'), 'provider rows are missing');
+    expect(text().includes('Docker') && text().includes('registry'), 'provider rows are missing');
     expect(text().includes('Unavailable'), 'the failed provider is not marked unavailable');
-    expect(text().includes('feeds unreachable'), 'the failure reason is hidden');
+    expect(text().includes('registry unreachable'), 'the failure reason is hidden');
     expect(h.calls.some((c) => c.path.startsWith('/api/providers')), 'the settings page never asked for provider health');
   });
 
@@ -1229,7 +1220,7 @@ export async function runWebTests(): Promise<WebResult> {
     }
     // every section of the IA is reachable, including the three Phase 5 panes and Phase 6's four
     const navText = text(q('.settings-nav')!);
-    for (const item of ['General', 'Appearance', 'Services', 'Groups', 'Bookmarks', 'Widgets', 'Integrations', 'Import & migration', 'History', 'Export', 'Account & sessions', 'Environment', 'Advanced']) {
+    for (const item of ['General', 'Appearance', 'Services', 'Groups', 'Bookmarks', 'Widgets', 'Import & migration', 'History', 'Export', 'Account & sessions', 'Environment', 'Advanced']) {
       expect(navText.includes(item), `“${item}” is missing from the settings navigation`);
     }
     // the item you are on says so — visually and to assistive tech
@@ -1793,32 +1784,6 @@ export async function runWebTests(): Promise<WebResult> {
     await act(async () => { img.dispatchEvent(new window.Event('error')); });
     await h.flush(20);
     expect(!q('.bg-img'), 'a dead image left the layer in place instead of falling back');
-  });
-
-  /* 28 — market symbols: provider syntax stays in the provider, not the user */
-  await test('markets: a non-symbol is refused in the field, valid entries are normalized and saved', async (h) => {
-    await h.mount(<TestApp entry="/settings/integrations"><Settings /></TestApp>);
-    await h.waitFor(() => !!q('[aria-label="Add symbol"]'), 'the symbol field');
-    const input = () => q<HTMLInputElement>('[aria-label="Add symbol"]')!;
-    const symbolWrites = () => h.writes('PUT', '/api/settings').filter((c) => (c.body as { integrations?: { markets?: { symbols?: string[] } } })?.integrations?.markets?.symbols);
-
-    // a URL is not a symbol: refused inline, and nothing is saved
-    type(input(), 'https://evil.example/aapl');
-    key(input(), 'Enter');
-    await h.flush(40);
-    expect(text().includes('✗'), 'the refusal is not shown');
-    expect(/letters\/digits with \. \^ - = only/i.test(text()), `the refusal does not state the rule: ${text().slice(0, 300)}`);
-    expect(symbolWrites().length === 0, 'an invalid symbol was saved');
-    expect(input().value === 'https://evil.example/aapl', 'the refused draft was thrown away instead of left to fix');
-
-    // valid mixed entries are normalized (case, .US migration) and de-duplicated
-    type(input(), 'aapl, btc-usd, MSFT.us');
-    key(input(), 'Enter');
-    await h.waitFor(() => symbolWrites().length > 0, 'the symbol write');
-    const put = symbolWrites()[symbolWrites().length - 1];
-    expect((put.body as { integrations: { markets: { symbols: string[] } } }).integrations.markets.symbols.join() === 'AAPL,BTC-USD,MSFT',
-      `symbols were not normalized (got ${JSON.stringify((put.body as { integrations: { markets: { symbols: string[] } } }).integrations.markets.symbols)})`);
-    expect(input().value === '', 'the field was not cleared after a successful add');
   });
 
   /* 30 — Phase 5: the Authentication pane changes the password and audits sessions */

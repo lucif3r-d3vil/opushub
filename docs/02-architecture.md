@@ -43,9 +43,6 @@ opushub/
 │       ├── system.js          /proc + /sys host metrics (real, always available on Linux)
 │       ├── docker.js          Docker Engine via unix socket/DOCKER_HOST, read-only
 │       ├── dockerLabels.js      label grammar: compose, curated Traefik routers, opushub.* overlay keys
-│       ├── news.js            server-side RSS/Atom fetch + cache (CORS-free)
-│       ├── weather.js         Open-Meteo (no key needed), configurable location
-│       ├── market.js          Yahoo Finance chart quotes + daily history for sparklines (keyless)
 │       ├── background.js      background URL validation/resolution (https-only, public hosts only)
 │       └── icons.js           local @iconify-json collections first, Iconify API proxy fallback
 └── src/                     # React 19 + TypeScript (Vite)
@@ -98,7 +95,7 @@ observable instead of silent.
 `unavailable` is honest and styled (it is *not* an error dialog); data is only shown when `ok`.
 Providers cache on the server; the browser polls on sensible intervals and pauses when the tab is
 hidden. Nothing polls Docker or /proc harder than needed: system 5s (cheap /proc reads + in-memory
-buffer), services/stacks 30s, news 10min, markets 5min, weather 15min.
+buffer), services/stacks 30s.
 
 Caching is an in-memory `TimedCache` per provider with bounded size and per-source TTLs; failure
 results are cached briefly (60s) so an unreachable source is retried gently rather than hammered.
@@ -121,9 +118,8 @@ results are cached briefly (60s) so an unreachable source is retried gently rath
 | `GET/PUT /api/bookmarks` | |
 | `GET /api/system` · `GET /api/system/history?window=` | real host metrics + chart history |
 | `GET /api/docker/containers` · `GET /api/docker/containers/:id/logs?tail=` | read-only; `unavailable` without socket |
-| `GET /api/news` · `/api/weather` · `/api/market` | provider passthrough with cache |
 | `GET /api/activity?limit&source` | timeline events (config writes, app lifecycle, docker events, provider state changes — all real) |
-| `GET /api/search?q=` | pages · services · stacks · bookmarks · settings keys · news (debounced by client) |
+| `GET /api/search?q=` | pages · services · stacks · bookmarks · settings keys (debounced by client) |
 | `GET /api/icons/search?q=` | local collections, then Iconify; `GET /api/icon?ref=` returns SVG |
 | `GET /user/icons/*`, `/user/backgrounds/*` | static, path-traversal guarded |
 
@@ -169,7 +165,7 @@ socket's `:ro` mount does not restrict API writes; see `OPUSHUB_OPERATIONS_SOCKE
   Reordering widgets, launcher groups and services — one mechanism. Sortables nest (groups inside
   the launcher), so measurement is scoped to direct children.
 - **Search**: `/` or ⌘K opens the command overlay. Index built client-side from data already on
-  the page + `/api/search` for anything remote (news). Fuzzy subsequence scoring, grouped results,
+  the page + `/api/search`. Fuzzy subsequence scoring, grouped results,
   arrows/Enter navigation; actions ("Toggle theme", "Edit services.yaml") appear as results.
 - **Icons**: `IconRef` resolution order: absolute URL → `/user/icons/` path → `set:name` (local
   collections via `/api/icon`) → letter monogram fallback (deterministic muted hue). Never a broken

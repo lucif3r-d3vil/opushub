@@ -574,7 +574,7 @@ export function ExportTab() {
     ['services.yaml', 'Groups, service presentation, icons, URL overrides'],
     ['stacks.yaml', 'Stack names and descriptions'],
     ['bookmarks.yaml', 'All bookmark groups'],
-    ['settings.yaml', 'Appearance, background, markets, feeds'],
+    ['settings.yaml', 'Appearance, background, host address'],
     ['layout.json', 'Hub composition: widgets, order, visibility'],
     ['theme.css', 'Custom CSS'],
     ['app.js', 'Custom JS'],

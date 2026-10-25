@@ -249,26 +249,6 @@ export interface ActivityGroup {
   events: ActivityEvent[];
 }
 
-export interface NewsItem { title: string; link: string; source: string | null; publishedAt: string | null; summary: string | null; image: string | null }
-export interface NewsDoc { status: ProviderStatus; reason?: string | null; items: NewsItem[]; errors?: { url: string; name: string | null; error: string }[]; fetchedAt?: number }
-
-export interface WeatherDoc {
-  status: ProviderStatus; reason?: string | null;
-  place?: string;
-  current?: { tempC: number; feelsC: number; humidity: number; windKph: number; precipMm: number; code: number; label: string; icon: string; isDay: boolean };
-  today?: { highC: number | null; lowC: number | null; sunrise: string | null; sunset: string | null; precipChance: number | null };
-  forecast?: { date: string; label: string; code: number | null; highC: number | null; lowC: number | null; precipChance: number | null }[];
-  units?: 'c' | 'f';
-}
-
-export interface MarketItem {
-  symbol: string; status: 'ok' | 'no-data' | string;
-  price?: number; change?: number | null; changePct?: number | null;
-  dayHigh?: number | null; dayLow?: number | null; volume?: number | null;
-  quoteDate?: string; spark?: number[] | null; reason?: string;
-}
-export interface MarketDoc { status: ProviderStatus; reason?: string | null; items: MarketItem[] }
-
 export interface SettingsDoc {
   app: { name: string; tagline: string };
   appearance: {
@@ -283,11 +263,6 @@ export interface SettingsDoc {
     };
   };
   hub: { greetingName: string | null; clock24h: boolean; showSeconds: boolean };
-  integrations: {
-    news: { feeds: { url: string; name?: string | null }[] };
-    weather: { location: string | null; latitude: number | null; longitude: number | null; place: string | null; units: 'c' | 'f' };
-    markets: { symbols: string[] };
-  };
   behavior: { logLaunches: boolean; refresh: { system: number; services: number } };
   infrastructure: {
     hostAddress: string | null;
@@ -329,7 +304,7 @@ export interface WidgetCategory { id: string; label: string; description: string
 
 export interface WidgetCatalogueEntry {
   type: string;
-  /** where this widget's information comes from — system · grid · information · personal */
+  /** where this widget's information comes from — system · grid · personal */
   category?: string;
   title: string;
   description: string;
@@ -341,7 +316,7 @@ export interface WidgetCatalogueEntry {
 
 export interface WidgetDoc {
   catalogue: WidgetCatalogueEntry[];
-  /** the picker's organisation: system · grid · information · personal */
+  /** the picker's organisation: system · grid · personal */
   categories?: WidgetCategory[];
   widgets: WidgetInstance[];
   spacing: HubSpacing;
@@ -428,7 +403,7 @@ export interface ServiceHistoryDoc {
 }
 
 export interface ProviderHealth {
-  name: 'docker' | 'system' | 'news' | 'weather' | 'markets' | string;
+  name: 'docker' | 'system' | string;
   state: 'available' | 'unavailable' | 'degraded' | 'idle';
   lastOk: number | null;
   lastTry: number | null;

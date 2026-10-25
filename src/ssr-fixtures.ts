@@ -5,7 +5,7 @@
 // to. They are never imported by the application, never served, and contain no measurement
 // presented as real: every value is obviously a fixture.
 import type {
-  ActivityEvent, LayoutDoc, NewsDoc, ProvidersDoc, ServicesDoc, StacksDoc, SystemSnapshot, WeatherDoc, WidgetCatalogueEntry, WidgetInstance,
+  ActivityEvent, LayoutDoc, ProvidersDoc, ServicesDoc, StacksDoc, SystemSnapshot, WidgetCatalogueEntry, WidgetInstance,
 } from './lib/types';
 import type { BookmarkDoc, HubData } from './lib/hubData';
 
@@ -121,40 +121,11 @@ export const bookmarksDoc: BookmarkDoc = {
   groups: [{ name: 'Reading', items: [{ name: 'Hacker News', href: 'https://news.ycombinator.com', description: 'Front page' }] }],
 };
 
-export const weatherDoc: WeatherDoc = {
-  status: 'ok',
-  place: 'Fixtureville',
-  units: 'c',
-  current: { tempC: 18.4, feelsC: 17.2, humidity: 61, windKph: 9, precipMm: 0, code: 2, label: 'Partly cloudy', icon: 'cloud-sun', isDay: true },
-  today: { highC: 21, lowC: 11, sunrise: null, sunset: null, precipChance: 10 },
-  forecast: [
-    { date: '2026-09-12', label: 'Sat', code: 2, highC: 21, lowC: 11, precipChance: 10 },
-    { date: '2026-09-13', label: 'Sun', code: 3, highC: 19, lowC: 10, precipChance: 20 },
-  ],
-};
-
-export const newsDoc: NewsDoc = {
-  status: 'ok',
-  items: [
-    { title: 'Something happened', link: 'https://example.com/a', source: 'Fixture Wire', publishedAt: new Date(Date.now() - 3600_000).toISOString(), summary: null, image: null },
-    { title: 'Then something else', link: 'https://example.com/b', source: 'Fixture Wire', publishedAt: new Date(Date.now() - 7200_000).toISOString(), summary: null, image: null },
-  ],
-  fetchedAt: Date.now(),
-};
-
-export const marketDoc = {
-  status: 'ok' as const,
-  items: [{ symbol: 'AAPL', status: 'ok', price: 231.4, change: 1.2, changePct: 0.52, spark: [1, 2, 3, 2.6, 3.4] }],
-};
-
 export const providersDoc: ProvidersDoc = {
   at: Date.now(),
   providers: [
     { name: 'docker', state: 'available' as const, lastOk: Date.now() - 5000, lastTry: Date.now() - 5000, staleMs: 5000, reason: null },
     { name: 'system', state: 'available' as const, lastOk: Date.now() - 5000, lastTry: Date.now() - 5000, staleMs: 5000, reason: null },
-    { name: 'news', state: 'available' as const, lastOk: Date.now() - 60_000, lastTry: Date.now() - 60_000, staleMs: 60_000, reason: null },
-    { name: 'weather', state: 'idle' as const, lastOk: null, lastTry: null, staleMs: null, reason: null },
-    { name: 'markets', state: 'idle' as const, lastOk: null, lastTry: null, staleMs: null, reason: null },
   ],
 };
 
@@ -165,9 +136,6 @@ export const catalogue: WidgetCatalogueEntry[] = [
   { type: 'stacks', title: 'Stacks', description: 'Compose projects', zone: 'main', size: 'md', sizes: ['sm', 'md'], config: [] },
   { type: 'attention', title: 'Needs attention', description: 'Not running', zone: 'main', size: 'sm', sizes: ['sm', 'md'], config: [] },
   { type: 'clock', title: 'Clock', description: 'Time and date', zone: 'rail', size: 'sm', sizes: ['sm', 'md'], config: [] },
-  { type: 'weather', title: 'Weather', description: 'Current conditions', zone: 'rail', size: 'md', sizes: ['sm', 'md'], config: [] },
-  { type: 'news', title: 'News', description: 'Headlines', zone: 'rail', size: 'md', sizes: ['sm', 'md', 'lg'], config: [] },
-  { type: 'markets', title: 'Markets', description: 'Watchlist', zone: 'rail', size: 'md', sizes: ['sm', 'md', 'lg'], config: [] },
   { type: 'bookmarks', title: 'Bookmarks', description: 'Your links', zone: 'rail', size: 'sm', sizes: ['sm', 'md', 'lg'], config: [{ key: 'group', label: 'Only this group', type: 'text' }] },
   { type: 'activity', title: 'Activity', description: 'What happened', zone: 'rail', size: 'md', sizes: ['sm', 'md', 'lg'], config: [{ key: 'sources', label: 'Sources', type: 'list', options: ['docker', 'config', 'user', 'system'] }] },
 ];

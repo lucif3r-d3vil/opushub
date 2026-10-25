@@ -10,9 +10,9 @@ import { TEMPLATES, applyTemplate, templateList, hasTemplate } from '../server/t
 /* ---------------- widget model ---------------- */
 
 test('widget instances carry id, type, zone, size, visibility and config', () => {
-  const w = makeWidget('news', { size: 'lg' });
+  const w = makeWidget('activity', { size: 'lg' });
   assert.deepEqual(Object.keys(w).sort(), ['config', 'id', 'size', 'type', 'visible', 'zone']);
-  assert.equal(w.type, 'news');
+  assert.equal(w.type, 'activity');
   assert.equal(w.size, 'lg');
   assert.equal(w.zone, 'rail');
   assert.equal(w.visible, true);
@@ -25,10 +25,10 @@ test('unknown widget types are dropped, not rendered as blanks', () => {
 
 test('sizes outside a type\'s ladder fall back to its default; ids are deduped', () => {
   const seen = new Set();
-  const a = normWidget({ id: 'news', type: 'news', size: 'colossal' }, seen);
-  const b = normWidget({ id: 'news', type: 'news' }, seen);
-  assert.equal(a.size, WIDGET_TYPES.news.size);
-  assert.equal(b.id, 'news-2');
+  const a = normWidget({ id: 'activity', type: 'activity', size: 'colossal' }, seen);
+  const b = normWidget({ id: 'activity', type: 'activity' }, seen);
+  assert.equal(a.size, WIDGET_TYPES.activity.size);
+  assert.equal(b.id, 'activity-2');
 });
 
 test('widget config is whitelisted per type — unknown keys never survive', () => {
@@ -53,7 +53,7 @@ test('the default layout is balanced: system + services, then the rail', () => {
   const l = defaultLayout();
   assert.equal(l.version, LAYOUT_VERSION);
   assert.deepEqual(l.hub.widgets.filter((w) => w.zone === 'main').map((w) => w.type), ['system', 'services']);
-  assert.deepEqual(l.hub.widgets.filter((w) => w.zone === 'rail').map((w) => w.type), ['weather', 'news', 'markets', 'bookmarks', 'activity']);
+  assert.deepEqual(l.hub.widgets.filter((w) => w.zone === 'rail').map((w) => w.type), ['bookmarks', 'activity']);
 });
 
 test('garbage input never throws and always yields a usable layout', () => {
@@ -70,8 +70,8 @@ test('a v1 layout.json migrates: order, zone, size and hidden flags survive', ()
     hub: {
       main: ['overview', 'services'],
       rail: ['weather', 'markets', 'news', 'bookmarks', 'activity'],
-      hidden: ['news'],
-      sizes: { overview: 'md', services: 'lg', news: 'sm' },
+      hidden: ['activity'],
+      sizes: { overview: 'md', services: 'lg', activity: 'sm' },
       setupDismissed: true,
     },
     services: { groupOrder: ['Media'], order: { Media: ['jellyfin'] } },
@@ -80,7 +80,9 @@ test('a v1 layout.json migrates: order, zone, size and hidden flags survive', ()
   assert.equal(l.hub.setupDismissed, true);
   assert.deepEqual(l.hub.widgets.filter((w) => w.zone === 'main').map((w) => w.type), ['system', 'services']);
   assert.equal(l.hub.widgets.find((w) => w.type === 'services').size, 'lg');
-  assert.equal(l.hub.widgets.find((w) => w.type === 'news').visible, false);
+  assert.equal(l.hub.widgets.find((w) => w.type === 'activity').visible, false);
+  // the removed weather / markets / news ids from an old file are dropped, not rendered blank
+  assert.deepEqual(l.hub.widgets.filter((w) => w.zone === 'rail').map((w) => w.type), ['bookmarks', 'activity']);
   assert.deepEqual(l.services.groupOrder, ['Media']);
   assert.deepEqual(l.services.order.Media, ['jellyfin']);
 });
@@ -107,7 +109,7 @@ test('layout change summaries describe what actually changed', () => {
 
 test('every widget type belongs to exactly one category the client can label', () => {
   const ids = WIDGET_CATEGORIES.map((c) => c.id);
-  assert.deepEqual(ids, ['system', 'grid', 'information', 'personal'], 'the four categories, in order');
+  assert.deepEqual(ids, ['system', 'grid', 'personal'], 'the three categories, in order');
   for (const c of WIDGET_CATEGORIES) {
     assert.ok(c.label && c.description, `${c.id} is labelled`);
   }
@@ -116,7 +118,7 @@ test('every widget type belongs to exactly one category the client can label', (
   }
   // the picker groups by category: every category with a type must be reachable
   const used = new Set(widgetCatalogue().map((e) => e.category));
-  assert.equal(used.size, 4, 'no category is left empty');
+  assert.equal(used.size, 3, 'no category is left empty');
 });
 
 test('every template is presentational: widget ids reference the catalogue only', () => {

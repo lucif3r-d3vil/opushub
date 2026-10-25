@@ -13,9 +13,6 @@ import * as auth from './auth.js';
 import * as model from './model.js';
 import { collect as collectSystem, History } from './providers/system.js';
 import * as docker from './providers/docker.js';
-import { getNews } from './providers/news.js';
-import { getWeather, cToF } from './providers/weather.js';
-import { getMarket } from './providers/market.js';
 import { checkBackgroundUrl } from './providers/background.js';
 import { URL_REASONS } from './urlResolver.js';
 import { iconSvg, search as iconSearch, listLocalFiles } from './providers/icons.js';
@@ -77,7 +74,6 @@ function resolveServiceContainer(inv, group, name) {
 
 export const history = new History({ intervalMs: 5000, samples: 720, file: path.join(DATA_DIR, 'metrics.json') });
 
-let lastNews = { status: 'idle', items: [] };
 let bootAt = Date.now();
 
 /**
@@ -892,40 +888,6 @@ export async function handleApi(req, res, url) {
     return send(res, 200, resourcesDocument({ system, points: history.window(3600_000) }));
   }
 
-  // ---------- integrations ----------
-  if (route === 'GET /api/news') {
-    const s = model.getSettings();
-    const r = await getNews(s.integrations?.news?.feeds || [], { limit: Number(url.searchParams.get('limit')) || 40 });
-    lastNews = r;
-    reportProvider('news', r.status === 'ok' ? 'available' : r.status === 'partial' ? 'degraded' : 'unavailable', {
-      reason: r.status === 'unconfigured' ? 'No news feeds configured.' : r.reason || null, silent: r.status === 'unconfigured',
-    });
-    return send(res, 200, r);
-  }
-  if (route === 'GET /api/weather') {
-    const s = model.getSettings();
-    const r = await getWeather(s.integrations?.weather || {});
-    if (r.status === 'ok' && s.integrations?.weather?.units === 'f') {
-      r.current.feelsC = cToF(r.current.feelsC);
-      r.current.tempC = cToF(r.current.tempC);
-      r.today.highC = cToF(r.today.highC); r.today.lowC = cToF(r.today.lowC);
-      for (const f of r.forecast) { f.highC = cToF(f.highC); f.lowC = cToF(f.lowC); }
-      r.units = 'f';
-    }
-    reportProvider('weather', r.status === 'ok' ? 'available' : 'unavailable', {
-      reason: r.status === 'unconfigured' ? 'No weather location configured.' : r.reason || null, silent: r.status === 'unconfigured',
-    });
-    return send(res, 200, r);
-  }
-  if (route === 'GET /api/market') {
-    const s = model.getSettings();
-    const r = await getMarket(s.integrations?.markets?.symbols || []);
-    reportProvider('markets', r.status === 'ok' ? 'available' : 'unavailable', {
-      reason: r.status === 'unconfigured' ? 'No market symbols configured.' : r.reason || null, silent: r.status === 'unconfigured',
-    });
-    return send(res, 200, r);
-  }
-
   // ---------- activity ----------
   if (route === 'GET /api/activity') {
     const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 100));
@@ -999,7 +961,7 @@ export async function handleApi(req, res, url) {
     const q = (url.searchParams.get('q') || '').slice(0, 80);
     return send(res, 200, {
       query: q,
-      results: await searchAll(q, { newsItems: lastNews.items || [], actor: session?.username ?? null }),
+      results: await searchAll(q, { actor: session?.username ?? null }),
     });
   }
 

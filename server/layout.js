@@ -12,7 +12,7 @@ import { defaultWidgets, makeWidget, normWidget, HUB_SPACING, WIDGET_TYPES } fro
 export const LAYOUT_VERSION = 2;
 
 /** v1 ids → v2 widget types. `overview` was the system strip; everything else kept its name. */
-const LEGACY_TYPES = { overview: 'system', services: 'services', weather: 'weather', news: 'news', markets: 'markets', bookmarks: 'bookmarks', activity: 'activity', clock: 'clock', stacks: 'stacks', attention: 'attention' };
+const LEGACY_TYPES = { overview: 'system', services: 'services', bookmarks: 'bookmarks', activity: 'activity', clock: 'clock', stacks: 'stacks', attention: 'attention' };
 
 export function defaultLayout() {
   return {

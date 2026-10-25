@@ -8,7 +8,7 @@ import { useMemo } from 'react';
 import { useSharedQuery, type QueryState } from './api';
 import { useSettings } from './theme';
 import type {
-  ActivityEvent, NewsDoc, ProvidersDoc, ServicesDoc, StacksDoc, SystemSnapshot, WeatherDoc, WidgetDoc, MarketDoc,
+  ActivityEvent, ProvidersDoc, ServicesDoc, StacksDoc, SystemSnapshot, WidgetDoc,
   MonitoringOverview,
 } from './types';
 
@@ -21,9 +21,6 @@ export interface HubData {
   stacks: QueryState<StacksDoc>;
   activity: QueryState<{ items: ActivityEvent[] }>;
   bookmarks: QueryState<BookmarkDoc>;
-  weather: QueryState<WeatherDoc>;
-  news: QueryState<NewsDoc>;
-  markets: QueryState<MarketDoc>;
   widgets: QueryState<WidgetDoc>;
   providers: QueryState<ProvidersDoc>;
   /** Phase 10A — only polled while a monitoring widget is actually on the Hub */
@@ -49,9 +46,6 @@ export function useHubData({ types, activityLimit = 12 }: HubNeedOptions): HubDa
   const widgets = useSharedQuery<WidgetDoc>('/api/widgets', 0);
 
   const wants = useMemo(() => ({
-    weather: types.has('weather'),
-    news: types.has('news'),
-    markets: types.has('markets'),
     // provider health only matters while the attention widget is actually on screen
     providers: types.has('attention'),
     // and the monitor summary only while a monitoring widget is on screen
@@ -59,13 +53,10 @@ export function useHubData({ types, activityLimit = 12 }: HubNeedOptions): HubDa
   }), [types]);
 
   // Optional providers are only polled while something on screen actually shows them.
-  const weather = useSharedQuery<WeatherDoc>(wants.weather ? '/api/weather' : null, 15 * 60_000);
-  const news = useSharedQuery<NewsDoc>(wants.news ? '/api/news' : null, 10 * 60_000);
-  const markets = useSharedQuery<MarketDoc>(wants.markets ? '/api/market' : null, 5 * 60_000);
   const providers = useSharedQuery<ProvidersDoc>(wants.providers ? '/api/providers' : null, 60_000);
   // 30s, matching the server's own default interval floor: the Hub never polls a monitor faster
   // than the engine checks it.
   const monitoring = useSharedQuery<MonitoringOverview>(wants.monitoring ? '/api/monitoring' : null, 30_000);
 
-  return { system, services, stacks, activity, bookmarks, weather, news, markets, widgets, providers, monitoring };
+  return { system, services, stacks, activity, bookmarks, widgets, providers, monitoring };
 }

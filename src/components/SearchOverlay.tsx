@@ -24,17 +24,17 @@ const KIND_LABEL: Record<string, string> = {
   action: 'Actions', page: 'Pages', service: 'Services', stack: 'Stacks', setting: 'Settings',
   // Phase 6: a *thing you can configure* (a service's presentation, a group) is a different kind of
   // result from a page about configuring things — it opens the editor on that row.
-  config: 'Configuration', activity: 'Recent activity', bookmark: 'Bookmarks', news: 'News',
+  config: 'Configuration', activity: 'Recent activity', bookmark: 'Bookmarks',
   // Phase 8: operations are destinations, not triggers — selecting one opens the confirmation.
   alert: 'Alerts', operation: 'Operations',
   // Phase 10A: a monitor and an incident are different kinds of result — one is a thing being
   // watched, the other is a thing that went wrong — and both are destinations.
   monitor: 'Monitors', incident: 'Incidents',
 };
-const ORDER = ['Actions', 'Operations', 'Alerts', 'Incidents', 'Monitors', 'Services', 'Stacks', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks', 'News'];
+const ORDER = ['Actions', 'Operations', 'Alerts', 'Incidents', 'Monitors', 'Services', 'Stacks', 'Configuration', 'Pages', 'Settings', 'Recent activity', 'Bookmarks'];
 
 const KIND_ICON: Record<string, string> = {
-  page: 'lucide:house', stack: 'lucide:layers', bookmark: 'lucide:bookmark', news: 'lucide:newspaper',
+  page: 'lucide:house', stack: 'lucide:layers', bookmark: 'lucide:bookmark',
   action: 'lucide:command', setting: 'lucide:sliders-horizontal', activity: 'lucide:activity',
   config: 'lucide:settings-2', alert: 'lucide:triangle-alert',
   operation: 'lucide:power', monitor: 'lucide:activity', incident: 'lucide:triangle-alert',
@@ -104,7 +104,6 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     { title: 'Arrange Hub widgets', subtitle: 'Add, hide, resize, reorder', kind: 'action', href: '/settings/widgets' },
     { title: 'Customize a service', subtitle: 'Name, icon, group, URL', kind: 'action', href: '/settings/services' },
     { title: 'Browse icons', subtitle: 'Find one and apply it to a service', kind: 'action', href: '/icons' },
-    { title: 'Integrations', subtitle: 'News, weather, markets', kind: 'action', href: '/settings/integrations' },
     { title: 'Account & sessions', subtitle: 'Password and signed-in browsers', kind: 'action', href: '/settings/authentication', keywords: ['password', 'security', 'sessions', 'sign out', 'revoke'] },
     { title: 'Install identity', subtitle: 'Name and greeting', kind: 'action', href: '/settings/general', keywords: ['name', 'title', 'about'] },
     { title: 'Environment', subtitle: 'Engine status and URL sources', kind: 'action', href: '/settings/environment', keywords: ['docker', 'engine', 'socket', 'discovery', 'homepage'] },

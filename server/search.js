@@ -1,4 +1,4 @@
-// Unified search: pages · services · stacks · alerts · bookmarks · settings · recent news.
+// Unified search: pages · services · stacks · alerts · bookmarks · settings.
 // Services and stacks come from the SAME canonical inventory the Hub, Services and Stacks pages
 // render — one model, so search can never offer something that isn't a container, or hide
 // something that is. (Bookmarks and pages are OpusHub's own surfaces, not infrastructure.)
@@ -32,12 +32,11 @@ const SETTINGS = [
   { title: 'Appearance', href: '/settings/appearance', hint: 'Theme, accent, density, type scale', keywords: ['dark', 'light', 'theme', 'accent', 'colour', 'color', 'compact', 'font'] },
   { title: 'Background', href: '/settings/background', hint: 'Quiet, horizon, or your own photo', keywords: ['wallpaper', 'photo', 'blur', 'scrim', 'image'] },
   { title: 'Hub layout', href: '/settings/hub', hint: 'Sections, spacing, greeting, clock', keywords: ['home screen', 'composition', 'sections', 'greeting', 'name', 'clock', '24 hour'] },
-  { title: 'Widgets', href: '/settings/widgets', hint: 'Add, hide, resize and configure Hub widgets', keywords: ['widget', 'rail', 'weather', 'news', 'markets', 'bookmarks', 'activity', 'clock', 'system'] },
+  { title: 'Widgets', href: '/settings/widgets', hint: 'Add, hide, resize and configure Hub widgets', keywords: ['widget', 'rail', 'bookmarks', 'activity', 'clock', 'system'] },
   { title: 'Templates', href: '/settings/templates', hint: 'Layout presets: minimal, balanced, media…', keywords: ['preset', 'layout', 'theme pack'] },
   { title: 'Services', href: '/settings/services', hint: 'Names, icons, groups, URLs, visibility', keywords: ['overlay', 'services.yaml', 'rename', 'icon'] },
   { title: 'Groups', href: '/settings/groups', hint: 'Create, rename, reorder and hide groups', keywords: ['grouping', 'categories', 'folders'] },
   { title: 'Bookmarks', href: '/settings/bookmarks', hint: 'Flat links, no status', keywords: ['links', 'shortcuts'] },
-  { title: 'Integrations', href: '/settings/integrations', hint: 'News feeds, weather location, watchlist', keywords: ['rss', 'feed', 'weather', 'stocks', 'markets', 'symbols'] },
   { title: 'Notifications', href: '/settings/notifications', hint: 'In-app and Telegram notifications', keywords: ['alerts', 'notify', 'telegram', 'channels'] },
   { title: 'General', href: '/settings/general', hint: 'Name, greeting, this install', keywords: ['identity', 'title', 'name', 'greeting', 'app', 'about'] },
   { title: 'Environment', href: '/settings/environment', hint: 'Engine status, URL sources, Homepage-compatible files', keywords: ['docker', 'engine', 'socket', 'discovery', 'unmatched', 'env', 'paths', 'homepage', 'overlay'] },
@@ -57,7 +56,7 @@ const SETTINGS = [
  *    90 word match         a word inside the field starts with the query ("ass" → home assistant)
  *    70 substring          the query appears mid-word, penalised by position
  *    ≤30 subsequence       characters in order, heavily penalised by gaps ("wdgt" → widgets)
- * A kind weight then orders categories: services/stacks > pages > settings > bookmarks > news,
+ * A kind weight then orders categories: services/stacks > pages > settings > bookmarks,
  * so infrastructure names outrank navigation for the same textual match.
  */
 export function scoreMatch(needle, ...fields) {
@@ -85,7 +84,7 @@ export function scoreMatch(needle, ...fields) {
 const score = scoreMatch;
 
 /** Category weights — services and stacks rank highest: they are the point of the index. */
-const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, monitor: 0.98, incident: 0.99, page: 0.92, config: 0.9, setting: 0.88, operation: 0.86, activity: 0.8, bookmark: 0.85, news: 0.75, notification: 0.94, event: 0.9 };
+const KIND_WEIGHT = { service: 1, stack: 1, alert: 0.96, monitor: 0.98, incident: 0.99, page: 0.92, config: 0.9, setting: 0.88, operation: 0.86, activity: 0.8, bookmark: 0.85, notification: 0.94, event: 0.9 };
 
 /**
  * Which registered operations make sense to offer for a container in this state.
@@ -100,7 +99,7 @@ const operationsForState = (state) => ACTION_IDS.filter((id) => (ACTIONS[id].off
 /** Docker subjects whose events are worth offering as destinations — the same names the pages use. */
 const ACTIVITY_WINDOW_MS = 7 * 24 * 3600_000;
 
-export async function searchAll(q, { newsItems = [], actor = null } = {}) {
+export async function searchAll(q, { actor = null } = {}) {
   const needle = String(q || '').toLowerCase().trim().slice(0, 80);
   const out = [];
   const add = (item, s, weight = 1) => { if (s > 8) out.push({ ...item, _s: s * weight }); };
@@ -290,10 +289,6 @@ export async function searchAll(q, { newsItems = [], actor = null } = {}) {
       add({ title: b.name, subtitle: b.group, href: b.href, kind: 'bookmark' }, score(needle, b.name, b.description, b.group), KIND_WEIGHT.bookmark);
     }
   } catch { /* ok */ }
-
-  for (const n of newsItems.slice(0, 120)) {
-    add({ title: n.title, subtitle: `News · ${n.source || ''}`.trim(), href: n.link, kind: 'news', external: true }, score(needle, n.title, n.source), KIND_WEIGHT.news);
-  }
 
   return out.sort((a, b) => b._s - a._s).slice(0, 24).map(({ _s, ...item }) => item);
 }

@@ -44,7 +44,7 @@ async function main() {
     process.exit(1);
   }
 
-  const [settings, system, services, stacks, activity, bookmarks, widgets, weather, news, markets] = await Promise.all([
+  const [settings, system, services, stacks, activity, bookmarks, widgets] = await Promise.all([
     get<unknown>('/api/settings'),
     get<HubData['system']['data']>('/api/system'),
     get<HubData['services']['data']>('/api/services'),
@@ -52,16 +52,12 @@ async function main() {
     get<{ items: unknown[] }>('/api/activity?limit=12'),
     get<HubData['bookmarks']['data']>('/api/bookmarks'),
     get<HubData['widgets']['data']>('/api/widgets'),
-    get<HubData['weather']['data']>('/api/weather'),
-    get<HubData['news']['data']>('/api/news'),
-    get<HubData['markets']['data']>('/api/market'),
   ]);
   check('layout and settings answer', !!settings && Array.isArray(layout.hub.widgets), `${layout.hub.widgets.length} widgets`);
 
   const data = {
     system: q(system), services: q(services), stacks: q(stacks),
     activity: q(activity as never), bookmarks: q(bookmarks), widgets: q(widgets),
-    weather: q(weather), news: q(news), markets: q(markets),
     providers: q(null),
   } as HubData;
 
@@ -104,24 +100,6 @@ async function main() {
   const frames = count(html, 'class="widget ') + count(html, 'class="widget"');
   check('every visible widget renders a frame', frames >= zones.length, `${frames} frames for ${zones.length} widgets`);
 
-  // 3. providers: real content, or the documented unavailable state — never invented values
-  const weatherOk = weather && weather.status === 'ok';
-  check('weather widget matches its provider state', weatherOk
-    ? text.includes(`${Math.round((weather as { current: { tempC: number } }).current.tempC)}°`)
-    : text.includes('Not set up yet.') || text.includes('weather service') || text.includes('unavailable'),
-    weatherOk ? 'expected the real reading' : 'expected an unavailable state');
-  const newsOk = news && news.status === 'ok' && news.items.length > 0;
-  check('news widget matches its provider state', newsOk
-    ? text.includes((news as { items: { title: string }[] }).items[0].title.slice(0, 24))
-    : text.includes('Not set up yet.') || text.includes('feed') || text.includes('unavailable'));
-  const marketsOk = markets && markets.status === 'ok' && markets.items.length > 0;
-  check('markets widget matches its provider state', marketsOk
-    ? text.includes((markets as { items: { symbol: string }[] }).items[0].symbol)
-    : text.includes('Not set up yet.') || text.includes('provider') || text.includes('unavailable'));
-
-  // 4. an unavailable provider must not be dressed up with numbers
-  const unavailableCopy = ['Not set up yet.', 'unavailable', 'could not', 'Could not', 'not connected'];
-  check('no provider is faked when it is not answering', weatherOk || newsOk || marketsOk || unavailableCopy.some((c) => text.includes(c)));
 
   console.log(`\n${failures ? `${failures} live check(s) failed` : 'live checks passed'} (${BASE})`);
   process.exit(failures ? 1 : 0);

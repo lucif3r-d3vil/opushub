@@ -32,7 +32,7 @@ const {
 } = await import('./homepageImport.js');
 
 /** Widget types this build knows — the same list the API passes in. */
-const WIDGET_TYPES = ['services', 'system', 'stacks', 'attention', 'clock', 'weather', 'news', 'markets', 'bookmarks', 'activity'];
+const WIDGET_TYPES = ['services', 'system', 'stacks', 'attention', 'clock', 'bookmarks', 'activity'];
 
 /** The icon probe, stubbed: only these two names resolve in the "bundled collections". */
 const suggestIcon = (ref) => (['si:jellyfin', 'si:sonarr'].includes(ref) ? ref : null);

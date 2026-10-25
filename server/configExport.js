@@ -88,16 +88,9 @@ function redactSettings(settings, redactions) {
     }
     delete out.infrastructure;
   }
-  const feeds = out?.integrations?.news?.feeds;
-  if (Array.isArray(feeds)) {
-    out.integrations.news.feeds = feeds
-      .map((f) => {
-        const r = redactUrl(f?.url);
-        redactions.push(...r.redactions.map((x) => ({ ...x, where: `news feed “${f?.name || r.url}”` })));
-        return { ...f, url: r.url };
-      })
-      .filter((f) => f?.url);
-  }
+  // News, weather and market settings were removed. An older file may still carry them (a feed URL
+  // can embed a credential), so the section is never exported.
+  delete out.integrations;
   delete out._raw;
   delete out._rejected;
   return out;

@@ -4,7 +4,7 @@
 // in?" — and it must be able to ask it *before an account exists*. That makes two properties
 // load-bearing:
 //
-//   · the answer is bounded. `detected` writes nothing; `template` applies one of six built-in
+//   · the answer is bounded. `detected` writes nothing; `template` applies one of five built-in
 //     templates, whose ids are a server-side constant. There is no way to hand the wizard a
 //     document, a path or a URL, and importing is deliberately *not* offered here: it is an
 //     authenticated configuration write and this screen has no session.
@@ -90,7 +90,7 @@ test('the wizard can see the presentation choice before an account exists', asyn
 
   const p = status.json.discovery.presentation;
   assert.ok(p, 'the presentation block is part of the pre-auth summary');
-  assert.deepEqual(p.templates.map((t) => t.id), ['minimal', 'balanced', 'media', 'information', 'classic', 'operations']);
+  assert.deepEqual(p.templates.map((t) => t.id), ['minimal', 'balanced', 'media', 'classic', 'operations']);
   for (const t of p.templates) {
     assert.ok(t.name && t.tagline, `${t.id} is described`);
     assert.ok(t.widgets.length > 0, `${t.id} arranges something`);
@@ -100,8 +100,8 @@ test('the wizard can see the presentation choice before an account exists', asyn
     }
   }
   // The default composition is the constant a fresh install starts with.
-  assert.equal(p.widgets.length, 7);
-  assert.deepEqual(p.widgets.map((w) => w.type), ['system', 'services', 'weather', 'news', 'markets', 'bookmarks', 'activity']);
+  assert.equal(p.widgets.length, 4);
+  assert.deepEqual(p.widgets.map((w) => w.type), ['system', 'services', 'bookmarks', 'activity']);
   // Counts, not names.
   assert.equal(typeof p.detected.groups, 'number');
   assert.equal(typeof p.detected.services, 'number');
@@ -152,7 +152,7 @@ test('choosing a template applies exactly that template', async () => {
 
   const layout = readLayout();
   assert.equal(layout.hub.spacing, 'comfortable');
-  assert.equal(layout.hub.widgets.length, 5, 'the media arrangement, not the default one');
+  assert.equal(layout.hub.widgets.length, 4, 'the media arrangement, not the default one');
   // A version was recorded, so the choice is undoable like every other configuration write.
   const versions = fs.readdirSync(path.join(DATA, 'config-history'));
   assert.ok(versions.length >= 1, 'applying a template at setup records a configuration version');

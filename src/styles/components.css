@@ -257,10 +257,6 @@ input[type='range'] { accent-color: var(--accent); width: 180px; }
 .form-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-4) 0; border-top: 1px solid var(--hair); }
 .form-row .fr-label { font-weight: 570; }
 .form-row .fr-desc { color: var(--ink-3); font-size: var(--fs-meta); margin-top: 2px; max-width: 46ch; }
-.editor-list { border: 1px solid var(--hair); border-radius: var(--r-md); overflow: hidden; }
-.editor-list .editor-item { display: flex; align-items: center; gap: var(--sp-3); padding: 9px var(--sp-3); }
-.editor-list .editor-item + .editor-item { border-top: 1px solid var(--hair); }
-.editor-list .editor-item:hover { background: color-mix(in srgb, var(--ink) 3.5%, transparent); }
 @media (max-width: 860px) {
   .settings-grid { grid-template-columns: 1fr; gap: var(--sp-5); }
   .settings-nav { position: static; flex-direction: row; overflow: auto; padding-bottom: 6px; scrollbar-width: none; }

@@ -1,8 +1,7 @@
 // The widget renderers.
 //
 // One component per catalogue type. Each one picks the *form* the information wants — a clock is
-// typography, weather is atmospheric, news is a list, markets a compact table, system a status
-// strip, activity a timeline — instead of the same bordered card repeated fifteen times.
+// typography, system a status strip, activity a timeline — instead of the same bordered card repeated fifteen times.
 //
 // Two hard rules hold everywhere in this file:
 //   1. no invented values — a provider that is not configured or not reachable renders its own
@@ -11,8 +10,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type {
-  ActivityEvent, LayoutDoc, MarketItem, Monitor, NewsDoc, Service, ServicesDoc, StacksDoc, SystemSnapshot,
-  WeatherDoc, WidgetCatalogueEntry, WidgetInstance,
+  ActivityEvent, LayoutDoc, Monitor, Service, ServicesDoc, StacksDoc, SystemSnapshot,
+  WidgetCatalogueEntry, WidgetInstance,
 } from '../../lib/types';
 import type { DeepPartial } from '../../lib/theme';
 import { bytes, num, pct, relTime, uptime } from '../../lib/format';
@@ -292,162 +291,6 @@ function isoWeek(d: Date): number {
   return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
 }
 
-/* ---------------- weather: a compact atmospheric element ---------------- */
-
-const weatherIcon = (code: number | null, isDay: boolean) =>
-  code == null ? 'cloud'
-    : code === 0 ? (isDay ? 'sun' : 'moon')
-      : code === 1 ? (isDay ? 'sun-dim' : 'moon')
-        : code === 2 ? 'cloud-sun'
-          : code === 3 ? 'cloud'
-            : code < 50 ? 'cloud-fog'
-              : code < 58 ? 'cloud-drizzle'
-                : code < 66 ? 'cloud-rain'
-                  : code < 68 ? 'cloud-hail'
-                    : code < 78 ? 'cloud-snow'
-                      : code < 83 ? 'cloud-rain'
-                        : code < 87 ? 'snowflake'
-                          : 'cloud-lightning';
-
-function WeatherWidget({ widget, data }: WidgetProps) {
-  const w: WeatherDoc | null = data.weather.data;
-  if (!w) {
-    if (data.weather.error) return <ProviderNote compact status="error" reason="The weather service didn't answer." details={data.weather.error} />;
-    return <div className="widget-quiet" role="status">Looking outside…</div>;
-  }
-  if (w.status !== 'ok' || !w.current) {
-    return (
-      <ProviderNote
-        compact
-        status={w.status}
-        reason={w.reason || (w.status === 'unconfigured' ? 'No location configured yet.' : undefined)}
-        fixHref={w.status === 'unconfigured' ? '/settings/integrations' : undefined}
-        fixLabel="Set a location →"
-      />
-    );
-  }
-  const c = w.current;
-  const unit = w.units === 'f' ? 'F' : 'C';
-  return (
-    <div className={`wx${widget.size === 'sm' ? ' wx--sm' : ''}`}>
-      <div className="wx-row">
-        <div className="wx-temp">{Math.round(c.tempC)}<sup>°{unit}</sup></div>
-        <span className="wx-hero-ico"><Icon ref={`lucide:${weatherIcon(c.code, c.isDay)}`} name={c.label} size={widget.size === 'sm' ? 34 : 44} plain /></span>
-      </div>
-      <div className="wx-cond">{c.label}{w.today?.highC != null ? ` · H ${Math.round(w.today.highC)}° L ${Math.round(w.today.lowC ?? w.today.highC)}°` : ''}</div>
-      {widget.size !== 'sm' && (
-        <div className="wx-strip">
-          <span>feels {Math.round(c.feelsC)}°</span>
-          <span>{c.windKph} km/h</span>
-          <span>{c.humidity}% humidity</span>
-          {w.today?.precipChance != null && <span>{w.today.precipChance}% rain</span>}
-        </div>
-      )}
-      {widget.size !== 'sm' && (w.forecast?.length || 0) > 1 && (
-        <div className="wx-forecast">
-          {w.forecast!.slice(1, 5).map((f) => (
-            <div className="wx-day" key={f.date}>
-              <div className="d">{f.label}</div>
-              <Icon ref={`lucide:${weatherIcon(f.code ?? 3, true)}`} name={String(f.code)} size={17} plain />
-              <div className="hi">{f.highC != null ? `${Math.round(f.highC)}°` : '—'}</div>
-              <div className="lo">{f.lowC != null ? Math.round(f.lowC) + '°' : ''}</div>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="wx-place">{w.place || 'configured location'}</div>
-    </div>
-  );
-}
-
-/* ---------------- news: a list, never article cards ---------------- */
-
-function NewsWidget({ widget, data }: WidgetProps) {
-  const doc: NewsDoc | null = data.news.data;
-  const cap = widget.size === 'sm' ? 4 : widget.size === 'lg' ? 10 : 6;
-  if (!doc) {
-    if (data.news.error) return <ProviderNote compact status="error" reason="News feeds didn't answer." details={data.news.error} />;
-    return <div className="widget-quiet" role="status">Reading feeds…</div>;
-  }
-  if (doc.status === 'unconfigured') {
-    return <ProviderNote compact status="unconfigured" reason="No feeds have been added." fixHref="/settings/integrations" fixLabel="Add feeds →" />;
-  }
-  if (doc.status === 'error' || (!doc.items.length && doc.errors?.length)) {
-    return <ProviderNote compact status="error" reason={doc.reason || 'Every feed failed to load.'} fixHref="/settings/integrations" fixLabel="Review feeds →" details={doc.errors?.map((e) => `${e.name || e.url}: ${e.error}`).join('\n')} />;
-  }
-  if (!doc.items.length) return <WidgetEmpty href="/settings/integrations" linkLabel="Feeds →">Feeds are reachable but carry nothing right now.</WidgetEmpty>;
-  return (
-    <>
-      <ul className="news-list">
-        {doc.items.slice(0, cap).map((n, i) => {
-          const inner = (
-            <>
-              <span className="n-title">{n.title}</span>
-              <span className="n-meta">
-                {n.source && <span className="n-src">{n.source}</span>}
-                {n.publishedAt && <span>{relTime(new Date(n.publishedAt).getTime())}</span>}
-              </span>
-            </>
-          );
-          // the server blanks non-http(s) links — those render as text, never as an empty <a>
-          return n.link
-            ? <li key={`${n.link}-${i}`}><a className="news-item" href={n.link} target="_blank" rel="noreferrer">{inner}</a></li>
-            : <li key={`nolink-${i}`}><span className="news-item">{inner}</span></li>;
-        })}
-      </ul>
-      {(doc.status === 'partial' || doc.errors?.length) && (
-        <div className="widget-quiet">{doc.errors?.length} feed{doc.errors?.length === 1 ? '' : 's'} unreachable · <Link className="section-link" to="/settings/integrations">review</Link></div>
-      )}
-    </>
-  );
-}
-
-/* ---------------- markets: a compact table ---------------- */
-
-function MarketsWidget({ widget, data }: WidgetProps) {
-  const doc = data.markets.data;
-  const cap = widget.size === 'sm' ? 4 : widget.size === 'lg' ? 12 : 7;
-  if (!doc) {
-    if (data.markets.error) return <ProviderNote compact status="error" reason="The quote provider didn't answer." details={data.markets.error} />;
-    return <div className="widget-quiet" role="status">Reading quotes…</div>;
-  }
-  if (doc.status === 'unconfigured') {
-    return <ProviderNote compact status="unconfigured" reason="No symbols in the watchlist yet." fixHref="/settings/integrations" fixLabel="Add symbols →" />;
-  }
-  if (doc.status === 'unavailable' || doc.status === 'error') {
-    return <ProviderNote compact status={doc.status} reason={doc.reason || 'Quotes are unavailable right now.'} />;
-  }
-  if (!doc.items.length) return <ProviderNote compact status="unavailable" reason="No symbols resolved to quotes." />;
-  return (
-    <table className="mkt-table">
-      <thead>
-        <tr><th scope="col">Symbol</th><th scope="col" className="num">Last</th><th scope="col" className="num">Change</th><th scope="col" aria-label="Trend" /></tr>
-      </thead>
-      <tbody>
-        {doc.items.slice(0, cap).map((m) => <MarketRow key={m.symbol} m={m} />)}
-      </tbody>
-    </table>
-  );
-}
-
-function MarketRow({ m }: { m: MarketItem }) {
-  const chg = m.changePct ?? null;
-  const dir = chg == null ? 'flat' : chg > 0.05 ? 'up' : chg < -0.05 ? 'down' : 'flat';
-  const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '·';
-  const price = m.status === 'ok' && m.price != null ? m.price.toLocaleString('en', { maximumFractionDigits: 2 }) : null;
-  return (
-    <tr>
-      <td className="mkt-sym">{m.symbol}</td>
-      <td className="num">{price ?? <span className="stale-note">n/a</span>}</td>
-      <td className={`num mkt-chg ${dir}`}>{chg == null ? <span className="stale-note">—</span> : `${chg > 0 ? '+' : ''}${chg.toFixed(2)}%`}</td>
-      <td className="mkt-spark">
-        {m.spark?.length ? <Sparkline values={m.spark} width={54} height={18} color={dir === 'down' ? 'var(--fail)' : dir === 'up' ? 'var(--ok)' : 'var(--accent)'} />
-          : <span className={`mkt-arrow ${dir}`} aria-hidden="true">{arrow}</span>}
-      </td>
-    </tr>
-  );
-}
-
 /* ---------------- bookmarks: quiet chips, grouped ---------------- */
 
 function BookmarksWidget({ widget, data }: WidgetProps) {
@@ -542,9 +385,6 @@ export const WIDGET_RENDERERS: Record<string, (props: WidgetProps) => ReactNode>
   monitoring: MonitoringWidget,
   attention: AttentionWidget,
   clock: ClockWidget,
-  weather: WeatherWidget,
-  news: NewsWidget,
-  markets: MarketsWidget,
   bookmarks: BookmarksWidget,
   activity: ActivityWidget,
 };

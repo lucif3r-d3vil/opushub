@@ -73,7 +73,7 @@ export default function SystemPage() {
                   state={p.state === 'available' ? 'up' : p.state === 'degraded' ? 'unstable' : p.state === 'unavailable' ? 'down' : 'unknown'}
                   note={p.state === 'available' ? undefined : p.state === 'idle' ? 'not used yet' : p.state}
                 />
-                <span className="prov-name">{p.name === 'markets' ? 'market data' : p.name}</span>
+                <span className="prov-name">{p.name}</span>
                 <span className="stale-note">
                   {p.state === 'available' && p.staleMs != null
                     ? `read ${p.staleMs < 90_000 ? `${Math.round(p.staleMs / 1000)}s ago` : relTime(Date.now() - p.staleMs)}`

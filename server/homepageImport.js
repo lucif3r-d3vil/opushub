@@ -286,11 +286,7 @@ function readWidgets(doc, { widgetTypes }) {
     for (const k of Object.keys(body)) if (isSecretKey(k)) credentials.push(`widgets.yaml → ${key}.${k}`);
     const mapped = HOMEPAGE_WIDGET_MAP[slug];
     if (mapped && widgetTypes.includes(mapped)) {
-      const config = {};
-      // the few non-secret knobs that survive the crossing
-      if (mapped === 'weather' && typeof body.label === 'string') config.label = boundedString(body.label, 40);
-      if (mapped === 'markets' && Array.isArray(body.symbols)) config.symbols = body.symbols.slice(0, 24).map((s) => boundedString(s, 24)).filter(Boolean);
-      instances.push({ from: key, type: mapped, config });
+      instances.push({ from: key, type: mapped, config: {} });
     } else {
       unmapped.push({
         name: key,
@@ -307,9 +303,6 @@ export const HOMEPAGE_WIDGET_MAP = {
   'system-resources': 'system',
   datetime: 'clock',
   clock: 'clock',
-  weather: 'weather',
-  markets: 'markets',
-  stocks: 'markets',
   bookmarks: 'bookmarks',
 };
 
@@ -317,9 +310,12 @@ const UNMAPPED_WIDGET_REASONS = {
   search: 'OpusHub search is the command palette (⌘K), not a widget',
   docker: 'Docker state is discovered, never configured — see Services and Stacks',
   glances: 'a credentialed integration, not a presentation block',
-  openmeteo: 'folded into the Weather block, which uses the configured location',
+  openmeteo: 'OpusHub has no weather block',
+  weather: 'OpusHub has no weather block',
+  markets: 'OpusHub has no markets block',
+  stocks: 'OpusHub has no markets block',
   calendar: 'no calendar block in the OpusHub Hub yet',
-  rss: 'folded into the News block, which uses the configured feeds',
+  rss: 'OpusHub has no news block',
   sonarr: 'a credentialed integration, not a presentation block',
   radarr: 'a credentialed integration, not a presentation block',
   jellyfin: 'a credentialed integration, not a presentation block',

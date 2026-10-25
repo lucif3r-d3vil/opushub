@@ -23,7 +23,7 @@ You do **not** need to be a developer or know React/Node to use it.
 
 | Area | What it shows you |
 |------|-------------------|
-| **Hub** | A personalized home page with a greeting, live host summary, draggable service launcher, and useful widgets (clock, weather, news, bookmarks, activity, attention items…) |
+| **Hub** | A personalized home page with a greeting, live host summary, draggable service launcher, and useful widgets (clock, bookmarks, activity, attention items…) |
 | **Services** | Every container Docker knows about, automatically grouped. Click any service for a real detail page with stats, ports, volumes, networks, and logs |
 | **Stacks** | Your Compose projects exactly as Docker reports them, with member containers and aggregate health |
 | **Monitoring** | OpusHub’s own uptime engine. Create monitors for HTTP, TCP, or Docker state. It records incidents with real durations and never pretends a service is up when it isn’t |
@@ -106,7 +106,7 @@ Everything lives in the `config/` folder. You can start with an empty folder —
 |------|---------|
 | `services.yaml` | Optional: rename services, set icons, descriptions, groups, order, or override URLs |
 | `stacks.yaml` | Optional: rename or describe Compose projects |
-| `settings.yaml` | Appearance, weather location, news feeds, markets, host address, etc. |
+| `settings.yaml` | Appearance, host address, etc. |
 | `bookmarks.yaml` | Simple list of links |
 | `layout.json` | Hub composition (written automatically when you drag widgets) |
 | `icons/` | Your own icon files |

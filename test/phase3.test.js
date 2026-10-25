@@ -302,10 +302,10 @@ test('activity: looking at pages and polling never writes an event', async () =>
     'a view-shaped event type exists');
 
   // a provider that keeps failing is reported once, not once per poll
-  healthMod.reportProvider('weather', 'unavailable', { reason: 'fixture outage' });
-  healthMod.reportProvider('weather', 'unavailable', { reason: 'fixture outage' });
-  healthMod.reportProvider('weather', 'unavailable', { reason: 'fixture outage' });
-  const outages = (await get('/api/activity?limit=200')).json.items.filter((e) => e.type === 'provider.unavailable' && e.subject === 'weather');
+  healthMod.reportProvider('fixture', 'unavailable', { reason: 'fixture outage' });
+  healthMod.reportProvider('fixture', 'unavailable', { reason: 'fixture outage' });
+  healthMod.reportProvider('fixture', 'unavailable', { reason: 'fixture outage' });
+  const outages = (await get('/api/activity?limit=200')).json.items.filter((e) => e.type === 'provider.unavailable' && e.subject === 'fixture');
   assert.equal(outages.length, 1, `a steady-state failure logged ${outages.length} times`);
 });
 
@@ -391,8 +391,8 @@ test('activity: a compose-wide burst groups into one summary that keeps its even
 
 test('activity: health changes and provider transitions are worded events', async () => {
   activity.logEvent({ source: 'docker', type: 'container.health', subject: 'navidrome', message: 'health: unhealthy', meta: { project: 'opustream', health: 'unhealthy' } });
-  healthMod.reportProvider('news', 'unavailable', { reason: 'feeds unreachable' });
-  healthMod.reportProvider('news', 'available');
+  healthMod.reportProvider('fixture', 'unavailable', { reason: 'feeds unreachable' });
+  healthMod.reportProvider('fixture', 'available');
   const { json } = await get('/api/activity?limit=50');
   const kinds = json.items.map((e) => e.type);
   assert.ok(kinds.includes('container.health'));
@@ -465,7 +465,7 @@ test('providers: every source reports a state and its last success', async () =>
   await get('/api/system'); // system reports itself on a successful collect
   const { json } = await get('/api/providers');
   const names = json.providers.map((p) => p.name);
-  assert.deepEqual(names, ['docker', 'system', 'news', 'weather', 'markets']);
+  assert.deepEqual(names, ['docker', 'system']);
   const sys = json.providers.find((p) => p.name === 'system');
   assert.equal(sys.state, 'available');
   assert.ok(sys.lastTry > 0);

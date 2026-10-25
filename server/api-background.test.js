@@ -162,12 +162,10 @@ test('PUT /api/settings: clearing the photo is always allowed', async () => {
   assert.equal(json.appearance.background.photo, null);
 });
 
-test('PUT /api/settings: invalid market symbols are refused, valid ones normalized', async () => {
-  const { status, json } = await call('PUT', '/api/settings', { integrations: { markets: { symbols: ['AAPL', 'https://evil.example/x', 'BTC-USD', 'aapl.us', 'AAPL'] } } });
-  assert.equal(status, 400, 'one bad symbol refuses the whole save, with the reason');
-  assert.match(json.error, /https:\/\/evil\.example\/x/);
-
-  const ok = await call('PUT', '/api/settings', { integrations: { markets: { symbols: ['aapl', 'BTC-USD', 'aapl.us'] } } });
-  assert.equal(ok.status, 200);
-  assert.deepEqual(ok.json.integrations.markets.symbols, ['AAPL', 'BTC-USD'], 'normalized, de-duplicated, .US migrated');
+test('PUT /api/settings: news, weather and market keys from an older file are ignored, not rejected', async () => {
+  const ok = await call('PUT', '/api/settings', { integrations: { markets: { symbols: ['aapl'] }, weather: { units: 'f' } } });
+  assert.equal(ok.status, 200, 'an old settings file with integrations keys still saves');
+  assert.equal(ok.json.integrations, undefined, 'the removed integrations section is not served');
+  const read = await call('GET', '/api/settings');
+  assert.equal(read.json.integrations, undefined);
 });

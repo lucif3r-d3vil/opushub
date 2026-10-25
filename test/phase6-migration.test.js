@@ -360,7 +360,7 @@ test('no server module outside the Docker client opens a socket to the engine', 
       // http.get / net.connect outside the provider would mean a second, unaudited Docker client.
       if (/providers[/\\]docker\.js$/.test(p)) continue;
       if (/\bhttp\.(get|request)\s*\(/.test(text) || /\bnet\.connect\s*\(/.test(text)) {
-        // lib/net.js is the generic outbound fetch guard used by the news/weather/market providers,
+        // lib/net.js is the generic outbound fetch guard,
         // not a Docker client; it must still never carry a Docker path.
         if (/lib[/\\]net\.js$/.test(p)) {
           assert.ok(!text.includes('docker'), 'the generic network helper mentions docker');

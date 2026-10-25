@@ -200,16 +200,16 @@ async function main() {
       const w = await get('/api/widgets');
       check('widget catalogue covers the promised categories', (() => {
         const types = new Set((w.body?.catalogue || []).map((c) => c.type));
-        const want = ['services', 'system', 'stacks', 'attention', 'clock', 'weather', 'news', 'markets', 'bookmarks', 'activity'];
+        const want = ['services', 'system', 'stacks', 'attention', 'clock', 'bookmarks', 'activity'];
         return want.every((t) => types.has(t));
       })(), `${(w.body?.catalogue || []).length} entries`);
       check('widget catalogue carries real config fields, not free text only',
         (w.body?.catalogue || []).some((c) => c.config?.length > 0));
-      check('widget catalogue is organised into the four categories, each with a label',
+      check('widget catalogue is organised into the three categories, each with a label',
         (() => {
           const ids = (w.body?.categories || []).map((c) => c.id);
           const types = w.body?.catalogue || [];
-          return JSON.stringify(ids) === JSON.stringify(['system', 'grid', 'information', 'personal'])
+          return JSON.stringify(ids) === JSON.stringify(['system', 'grid', 'personal'])
             && types.every((c) => ids.includes(c.category));
         })(), JSON.stringify((w.body?.categories || []).map((c) => c.id)));
 
@@ -246,19 +246,11 @@ async function main() {
     check('stacks: the projection answers with the same engine state as services',
       stacks.status === 200 && stacks.body?.live === engineLive, `live=${stacks.body?.live}`);
 
-    // ---- 3. providers: unavailable states carry reasons, never values ----------
-    const weather = await get('/api/weather');
-    const news = await get('/api/news');
-    const market = await get('/api/market');
-    check('weather: unconfigured means unconfigured (no reading is invented)',
-      weather.body?.status !== 'unconfigured' || (!weather.body.current && typeof weather.body.reason === 'string'),
-      JSON.stringify(weather.body).slice(0, 120));
-    check('news: an unconfigured feed list returns no items, with a reason',
-      news.body?.status !== 'unconfigured' || (news.body.items.length === 0 && typeof news.body.reason === 'string'),
-      JSON.stringify(news.body).slice(0, 120));
-    check('markets: an empty watchlist returns no quotes, with a reason',
-      market.body?.status !== 'unconfigured' || (market.body.items.length === 0 && typeof market.body.reason === 'string'),
-      JSON.stringify(market.body).slice(0, 120));
+    // ---- 3. the news / weather / market routes are gone ----------
+    for (const gone of ['/api/weather', '/api/news', '/api/market']) {
+      const r = await get(gone);
+      check(`${gone}: removed with the widgets it fed`, r.status === 404, `status ${r.status}`);
+    }
 
     // ---- 4. the widget model: unknown types are dropped, sizes are clamped ----------
     {
@@ -622,8 +614,8 @@ async function main() {
     }
     {
       const prov = await get('/api/providers');
-      check('providers: one honest health doc for docker/system/news/weather/markets',
-        prov.status === 200 && JSON.stringify(prov.body?.providers?.map((p) => p.name)) === JSON.stringify(['docker', 'system', 'news', 'weather', 'markets'])
+      check('providers: one honest health doc for docker/system',
+        prov.status === 200 && JSON.stringify(prov.body?.providers?.map((p) => p.name)) === JSON.stringify(['docker', 'system'])
         && prov.body.providers.every((p) => ['available', 'unavailable', 'degraded', 'idle'].includes(p.state)),
         JSON.stringify(prov.body?.providers || {}).slice(0, 140));
       check('providers: docker state matches the engine we are talking to',

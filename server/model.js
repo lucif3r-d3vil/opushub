@@ -14,7 +14,6 @@ import { hostAddress } from './lib/hostAddress.js';
 import { normalizeLayout, describeLayoutPatch } from './layout.js';
 import { applyTemplate, hasTemplate, templateList } from './templates.js';
 import { WIDGET_CATEGORIES, WIDGET_TYPES, widgetCatalogue } from './widgets.js';
-import { validateSymbol as validateMarketSymbol } from './providers/market.js';
 
 export const DEFAULT_SETTINGS = {
   app: { name: 'OpusHub', tagline: 'The homelab, at a glance.' },
@@ -27,11 +26,6 @@ export const DEFAULT_SETTINGS = {
     background: { mode: 'quiet', photo: null, blur: 24, scrim: 62, position: 'center', fit: 'cover' },
   },
   hub: { greetingName: null, clock24h: false, showSeconds: false },
-  integrations: {
-    news: { feeds: [] },
-    weather: { location: null, latitude: null, longitude: null, place: null, units: 'c' },
-    markets: { symbols: [] },
-  },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
   // Infrastructure access + the two optional knobs the URL resolver can't read off Docker itself.
   // hostAddress: the name/port a browser should use for published ports (else auto-detected).
@@ -627,6 +621,9 @@ export function getSettings() {
   merged.behavior.refresh.system = clampInt(merged.behavior.refresh.system, 2, 300, 5);
   merged.behavior.refresh.services = clampInt(merged.behavior.refresh.services, 5, 600, 30);
   merged.infrastructure = merged.infrastructure || {};
+  // News, weather and market settings were removed with those widgets. An older settings.yaml may
+  // still carry them; they are ignored rather than rejected, so the file keeps loading.
+  delete merged.integrations;
   merged._raw = raw || {}; // raw file content (for the YAML view)
   return merged;
 }
@@ -646,27 +643,6 @@ function sanitizeSettings(s) {
   const out = structuredClone(s);
   const rejected = [];
   delete out._raw;
-  const feeds = out?.integrations?.news?.feeds;
-  if (Array.isArray(feeds)) {
-    out.integrations.news.feeds = feeds
-      .map((f) => {
-        try { return { url: safeHref(f?.url), name: str(f?.name, 60) }; }
-        catch (e) { rejected.push(`feed ${e.message}`); return null; }
-      })
-      .filter((f) => f?.url);
-  }
-  const sym = out?.integrations?.markets?.symbols;
-  if (Array.isArray(sym)) {
-    const clean = [];
-    for (const x of sym.slice(0, 24)) {
-      const v = str(x, 24);
-      if (!v) continue;
-      const r = validateMarketSymbol(v);
-      if (!r.ok) { rejected.push(`market symbol “${v}”: ${r.reason}`); continue; }
-      if (!clean.includes(r.symbol)) clean.push(r.symbol);
-    }
-    out.integrations.markets.symbols = clean;
-  }
   // The background photo is the one setting whose value becomes a URL the browser fetches,
   // so it is clamped here too (the deep check happens on the API route): only https image
   // URLs, Unsplash photo pages, or same-origin files under /user/backgrounds/ may be stored.

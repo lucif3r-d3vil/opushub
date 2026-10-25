@@ -1,6 +1,6 @@
 // The top of the Hub: words, time, search. One display moment per page, and it belongs here.
 import { useEffect, useState } from 'react';
-import type { ServicesDoc, WeatherDoc } from '../../lib/types';
+import type { ServicesDoc } from '../../lib/types';
 import { useSettings } from '../../lib/theme';
 import { StatusDot } from '../ui';
 import { Icon } from '../Icon';
@@ -25,14 +25,12 @@ export function greetingFor(name: string | null, hour: number): { lead: string; 
 
 export interface HubHeaderProps {
   services: ServicesDoc | null;
-  weather?: WeatherDoc | null;
-  showWeather: boolean;
   onSearch: () => void;
   /** preview surfaces freeze the clock so the frame stays stable */
   frozenNow?: Date;
 }
 
-export function HubHeader({ services, weather, showWeather, onSearch, frozenNow }: HubHeaderProps) {
+export function HubHeader({ services, onSearch, frozenNow }: HubHeaderProps) {
   const { settings } = useSettings();
   const [now, setNow] = useState(() => frozenNow || new Date());
   useEffect(() => {
@@ -44,7 +42,6 @@ export function HubHeader({ services, weather, showWeather, onSearch, frozenNow 
   const { lead, name } = greetingFor(settings?.hub?.greetingName ?? null, now.getHours());
   const stats = services?.stats;
   const live = !!services?.live;
-  const wx = weather?.status === 'ok' ? weather.current : null;
 
   return (
     <header className="hub-head">
@@ -79,13 +76,6 @@ export function HubHeader({ services, weather, showWeather, onSearch, frozenNow 
           </div>
           <div className="hub-clock-date">{now.toLocaleDateString('en', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
         </div>
-        {showWeather && wx && (
-          <div className="hub-head-wx" title={weather?.place ? `Weather for ${weather.place}` : undefined}>
-            <Icon ref={`lucide:${wx.code === 0 ? (wx.isDay ? 'sun' : 'moon') : wx.code < 3 ? 'cloud-sun' : wx.code < 50 ? 'cloud' : wx.code < 60 ? 'cloud-drizzle' : 'cloud-rain'}`} name={wx.label} size={16} plain />
-            <span>{Math.round(wx.tempC)}°</span>
-            <span className="hub-head-wx-label">{wx.label}</span>
-          </div>
-        )}
       </div>
     </header>
   );

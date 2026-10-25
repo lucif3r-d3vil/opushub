@@ -14,13 +14,12 @@ export const HUB_SPACING = ['cozy', 'comfortable', 'airy'];
 
 /**
  * Categories are how the picker is organised — they say where a widget's information comes from:
- * this machine, the grid you run on it, the world outside, or you. They are not a second data
+ * this machine, the grid you run on it, or you. They are not a second data
  * model: nothing else in the layout depends on them.
  */
 export const WIDGET_CATEGORIES = [
   { id: 'system', label: 'System', description: 'This machine, as it is right now' },
   { id: 'grid', label: 'OpusGrid', description: 'What the grid is running' },
-  { id: 'information', label: 'Information', description: 'The world outside, when a provider is configured' },
   { id: 'personal', label: 'Personal', description: 'Time, links and what actually happened' },
 ];
 
@@ -84,33 +83,6 @@ export const WIDGET_TYPES = {
     zone: 'rail',
     size: 'sm',
     sizes: ['sm', 'md'],
-    config: {},
-  },
-  weather: {
-    category: 'information',
-    title: 'Weather',
-    description: 'Current conditions from the configured location',
-    zone: 'rail',
-    size: 'md',
-    sizes: ['sm', 'md'],
-    config: {},
-  },
-  news: {
-    category: 'information',
-    title: 'News',
-    description: 'Headlines from your feeds',
-    zone: 'rail',
-    size: 'md',
-    sizes: ['sm', 'md', 'lg'],
-    config: {},
-  },
-  markets: {
-    category: 'information',
-    title: 'Markets',
-    description: 'Your watchlist, as a compact table',
-    zone: 'rail',
-    size: 'md',
-    sizes: ['sm', 'md', 'lg'],
     config: {},
   },
   bookmarks: {
@@ -235,9 +207,6 @@ export function defaultWidgets() {
   return [
     makeWidget('system', { size: 'md' }),
     makeWidget('services', { size: 'lg' }),
-    makeWidget('weather', { size: 'md' }),
-    makeWidget('news', { size: 'md' }),
-    makeWidget('markets', { size: 'md' }),
     makeWidget('bookmarks', { size: 'sm' }),
     makeWidget('activity', { size: 'md' }),
   ].filter(Boolean);

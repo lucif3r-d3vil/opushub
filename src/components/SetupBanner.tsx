@@ -28,16 +28,12 @@ export default function SetupBanner({ sys, services }: { sys: SystemSnapshot | n
   const serviceCount = services?.groups.reduce((a, g) => a + g.services.length, 0) ?? null;
   const dockerOn = !!docker.data?.ok;
   const dockerKnown = docker.data != null;
-  // The banner earns its place only while something required is missing. Optional
-  // integrations keep their own quiet empty states and never summon it.
+  // The banner earns its place only while something required is missing.
   if (dockerKnown && dockerOn && serviceCount != null && serviceCount > 0) return null;
 
   const configured =
     (sys ? 1 : 0) + (serviceCount ? 1 : 0) + (dockerOn ? 1 : 0);
-  const wx = !!(settings.integrations.weather.location || (settings.integrations.weather.latitude != null && settings.integrations.weather.longitude != null));
-  const news = (settings.integrations.news.feeds || []).length > 0;
-  const markets = (settings.integrations.markets.symbols || []).length > 0;
-  const configureHref = !dockerKnown || !dockerOn ? '/settings/environment' : serviceCount === 0 ? '/settings/services' : '/settings/integrations';
+  const configureHref = !dockerKnown || !dockerOn ? '/settings/environment' : serviceCount === 0 ? '/settings/services' : '/settings/environment';
 
   return (
     <section className="setup-banner" aria-label="Finish setting up OpusHub">
@@ -51,14 +47,6 @@ export default function SetupBanner({ sys, services }: { sys: SystemSnapshot | n
               <li><Tick on={!!sys} /> System <span className="setup-hint">{sys ? sys.host.hostname : 'reading…'}</span></li>
               <li><Tick on={!!serviceCount} /> Configuration <span className="setup-hint">{serviceCount == null ? 'reading…' : serviceCount ? `${serviceCount} services` : 'no services yet'}</span></li>
               <li><Tick on={dockerOn} /> Docker <span className="setup-hint">{!dockerKnown ? 'checking…' : dockerOn ? `engine ${docker.data?.version || ''}`.trim() : 'not connected'}</span></li>
-            </ul>
-          </div>
-          <div className="setup-col">
-            <div className="micro-label">Optional</div>
-            <ul>
-              <li><Tick on={wx} /> Weather</li>
-              <li><Tick on={news} /> News</li>
-              <li><Tick on={markets} /> Markets</li>
             </ul>
           </div>
         </div>

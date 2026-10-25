@@ -24,9 +24,6 @@
 .hub-head-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; text-align: right; }
 .hub-head .hub-clock-time { font-size: 30px; font-weight: 620; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1; }
 .hub-head .hub-clock-date { color: var(--ink-2); font-size: var(--fs-meta); margin-top: 6px; }
-.hub-head-wx { display: flex; align-items: center; gap: 7px; color: var(--ink-2); font-size: var(--fs-meta); }
-.hub-head-wx .icon-frame { color: var(--ink-2); }
-.hub-head-wx-label { color: var(--ink-3); }
 
 /* search: an inline field, not a hero banner */
 .hub-search {
@@ -151,32 +148,6 @@
 .hub-clock-date { color: var(--ink-2); font-size: var(--fs-meta); margin-top: 6px; }
 .hub-clock-extra { color: var(--ink-3); font-size: var(--fs-micro); margin-top: 3px; }
 .hub-clock--sm .hub-clock-time { font-size: 26px; }
-
-/* ---------- weather ---------- */
-.wx-row { display: flex; align-items: center; gap: var(--sp-4); }
-.wx-place { color: var(--ink-3); font-size: var(--fs-micro); margin-top: 6px; }
-.wx--sm .wx-temp { font-size: 30px; }
-
-/* ---------- markets table ---------- */
-.mkt-table { width: 100%; font-variant-numeric: tabular-nums; }
-.mkt-table th {
-  text-align: left; font-size: var(--fs-micro); letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--ink-3); font-weight: 600; padding: 0 0 6px; border-bottom: 1px solid var(--hair);
-}
-.mkt-table td { padding: 8px 0; border-bottom: 1px solid var(--hair); }
-.mkt-table tr:last-child td { border-bottom: 0; }
-.mkt-table .num { text-align: right; }
-.mkt-table .mkt-sym { font-weight: 600; letter-spacing: 0.01em; }
-.mkt-table .mkt-chg.up { color: var(--ok); }
-.mkt-table .mkt-chg.down { color: var(--fail); }
-.mkt-table .mkt-chg.flat { color: var(--ink-3); }
-.mkt-table .mkt-spark { width: 60px; text-align: right; }
-.mkt-arrow.up { color: var(--ok); }
-.mkt-arrow.down { color: var(--fail); }
-.mkt-arrow.flat { color: var(--ink-3); }
-
-/* ---------- news list ---------- */
-.news-list { display: flex; flex-direction: column; }
 
 /* ---------- bookmarks ---------- */
 .bm { display: flex; flex-direction: column; gap: var(--sp-3); }

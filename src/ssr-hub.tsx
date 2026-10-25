@@ -12,11 +12,11 @@
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import type { LayoutDoc, NewsDoc, ServicesDoc, StacksDoc, WeatherDoc, WidgetInstance } from './lib/types';
+import type { LayoutDoc, ServicesDoc, StacksDoc, WidgetInstance } from './lib/types';
 import type { HubData } from './lib/hubData';
 import {
-  activityDoc, bookmarksDoc, catalogue, layoutWith, marketDoc, newsDoc, providersDoc, servicesDoc, stacksDoc,
-  systemSnapshot, weatherDoc,
+  activityDoc, bookmarksDoc, catalogue, layoutWith, providersDoc, servicesDoc, stacksDoc,
+  systemSnapshot,
 } from './ssr-fixtures';
 import { HubSurface } from './components/hub/HubSurface';
 import { GREETINGS } from './components/hub/HubHeader';
@@ -60,9 +60,6 @@ function hubData(overrides: Partial<HubData> = {}): HubData {
     stacks: query(stacksDoc),
     activity: query(activityDoc),
     bookmarks: query(bookmarksDoc),
-    weather: query(weatherDoc),
-    news: query(newsDoc),
-    markets: query(marketDoc),
     widgets: query({ catalogue, widgets: [], spacing: 'comfortable' }),
     providers: query(providersDoc),
     ...overrides,
@@ -95,19 +92,16 @@ const W = (type: string, extra: Partial<WidgetInstance> = {}): WidgetInstance =>
   check('first run: a welcome, not a wall of placeholders', html, 'Your Hub is ready.', '/settings/templates', '/settings/widgets');
 }
 
-// 2. the populated Hub — services, system, and the information rail
+// 2. the populated Hub — services, system, and the rail
 {
   const layout: LayoutDoc = layoutWith([
     W('system', { size: 'md' }), W('services', { size: 'lg' }),
-    W('weather'), W('news'), W('markets'), W('bookmarks'), W('activity'),
+    W('bookmarks'), W('activity'),
   ]);
   const html = render(<HubSurface data={hubData()} layout={layout} interactive onLayoutChange={() => undefined} />);
   checkAny('populated hub: greeting, counts, launcher, rail widgets', html, [...GREETINGS], [
     '3 services', 'running',
     'Wave', 'Photos',            // launcher entries, from the fixture inventory
-    '18°',                       // weather, from the fixture reading
-    'Something happened',        // news headline
-    'AAPL',                      // market row
     'Hacker News',               // bookmark chip
     'container started',         // activity wording
     'week ',
@@ -128,15 +122,12 @@ const W = (type: string, extra: Partial<WidgetInstance> = {}): WidgetInstance =>
   else console.log('✓ docker unavailable: nothing is invented');
 }
 
-// 4. every external provider down — each widget degrades alone
+// 4. the host metrics provider down — its widget degrades alone
 {
-  const layout = layoutWith([W('services'), W('weather'), W('news'), W('markets'), W('activity'), W('system')]);
+  const layout = layoutWith([W('services'), W('activity'), W('system')]);
   const html = render(
     <HubSurface
       data={hubData({
-        weather: dead('fetch failed'),
-        news: dead('fetch failed'),
-        markets: dead('fetch failed'),
         system: dead('permission denied'),
       })}
       layout={layout}
@@ -144,25 +135,7 @@ const W = (type: string, extra: Partial<WidgetInstance> = {}): WidgetInstance =>
       onLayoutChange={() => undefined}
     />,
   );
-  check('providers down: each widget owns its failure', html, ['The weather service', 'News feeds', 'quote provider', 'Host metrics', 'Wave']);
-}
-
-// 5. providers never configured — quiet absence, with the way to fix it
-{
-  const layout = layoutWith([W('services'), W('weather'), W('news'), W('markets')]);
-  const html = render(
-    <HubSurface
-      data={hubData({
-        weather: query({ status: 'unconfigured', reason: 'no location' } as WeatherDoc),
-        news: query({ status: 'unconfigured', items: [] } as NewsDoc),
-        markets: query({ status: 'unconfigured', items: [] } as unknown as typeof marketDoc),
-      })}
-      layout={layout}
-      interactive
-      onLayoutChange={() => undefined}
-    />,
-  );
-  check('unconfigured providers: Not set up yet + a link, never a fake reading', html, ['Not set up yet.', '/settings/integrations', 'Add feeds', 'Set a location']);
+  check('provider down: the widget owns its failure', html, ['Host metrics', 'Wave']);
 }
 
 // 6. hidden + reordered: the user's arrangement is respected, hidden things stay reachable
@@ -171,10 +144,10 @@ const W = (type: string, extra: Partial<WidgetInstance> = {}): WidgetInstance =>
     version: 2,
     hub: {
       widgets: [
-        W('news', { visible: false }),
+        W('activity', { visible: false }),
         W('services', { size: 'lg' }),
         W('system', { visible: false }),
-        W('markets', { zone: 'main' }),
+        W('bookmarks', { zone: 'main' }),
       ],
       spacing: 'airy',
       setupDismissed: false,
@@ -182,7 +155,7 @@ const W = (type: string, extra: Partial<WidgetInstance> = {}): WidgetInstance =>
     services: { groupOrder: ['Rails', 'Media'], order: { Media: ['photos', 'wave'] }, hiddenGroups: [] },
   };
   const html = render(<HubSurface data={hubData()} layout={layout} interactive onLayoutChange={() => undefined} />);
-  check('hidden widgets stay reachable, not lost', html, ['2 hidden widgets', '+ News', '+ System']);
+  check('hidden widgets stay reachable, not lost', html, ['2 hidden widgets', '+ Activity', '+ System']);
   check('spacing from the layout reaches the surface', html, 'hub--airy');
   const photos = html.indexOf('Photos');
   const wave = html.indexOf('>Wave<');
@@ -216,10 +189,10 @@ const W = (type: string, extra: Partial<WidgetInstance> = {}): WidgetInstance =>
 
 // 9. loading: the page keeps its shape while providers answer
 {
-  const layout = layoutWith([W('services'), W('system'), W('weather'), W('news'), W('activity')]);
+  const layout = layoutWith([W('services'), W('system'), W('activity')]);
   const html = render(
     <HubSurface
-      data={hubData({ services: waiting(), system: waiting(), weather: waiting(), news: waiting(), activity: waiting() })}
+      data={hubData({ services: waiting(), system: waiting(), activity: waiting() })}
       layout={layout}
       interactive
       onLayoutChange={() => undefined}
@@ -255,16 +228,13 @@ const W = (type: string, extra: Partial<WidgetInstance> = {}): WidgetInstance =>
     at: Date.now(),
     providers: [
       { name: 'docker', state: 'available', lastOk: Date.now(), lastTry: Date.now(), staleMs: 0, reason: null },
-      { name: 'system', state: 'available', lastOk: Date.now(), lastTry: Date.now(), staleMs: 0, reason: null },
-      { name: 'news', state: 'unavailable', lastOk: null, lastTry: Date.now(), staleMs: null, reason: 'feeds unreachable' },
-      { name: 'weather', state: 'idle', lastOk: null, lastTry: null, staleMs: null, reason: null },
-      { name: 'markets', state: 'idle', lastOk: null, lastTry: null, staleMs: null, reason: null },
+      { name: 'system', state: 'unavailable', lastOk: null, lastTry: Date.now(), staleMs: null, reason: 'host metrics unreadable' },
     ],
   };
   const layout = layoutWith([W('attention')]);
   const html = render(<HubSurface data={hubData({ services: query(doc as ServicesDoc), providers: query(provs) })} layout={layout} interactive={false} />);
   check('attention: stopped and paused services are surfaced', html, ['DownSvc', 'Offline', 'PauSvc', 'Paused']);
-  check('attention: a failed provider is surfaced too', html, ['News provider', 'unavailable', 'feeds unreachable']);
+  check('attention: a failed provider is surfaced too', html, ['System provider', 'unavailable', 'host metrics unreadable']);
   if (visibleText(html).includes('Wave')) { failures++; console.error('✗ a healthy service must not demand attention'); }
   else console.log('✓ attention: healthy services stay off the list');
 }
