@@ -99,13 +99,19 @@ All safe to remove, with the dependencies that have to be handled in the same co
 
 Total: roughly **14,000 lines** out of about 60,000.
 
-### Uncertain: decide before the relevant commit
+### Decisions
 
-1. **Bookmarks** (commit 14): not in the target, but a Homepage feature. Keep as a small list on Home, or drop?
-2. **Per-service presentation** (names, icons, URL overrides, hide) and **group order** (`layout.json`): where should they live after the Services and Groups tabs go? Proposal: edit on the Containers detail page; groups are Compose stacks, alphabetical.
-3. **Browser notifications** (commit 2): the bell already covers in-app; this is a native permission prompt.
-4. **Alert ack** (commit 10): today it lives on the Activity page. Does the bell need it?
-5. **Config History UI** (commit 8): backups stay on disk either way. Is a restore button worth keeping?
-6. **Health probing vs monitors** (section 2): confirm `probe.js` and `monitoring/checks/http.js` can merge without changing how Home's health dots are derived.
-7. **First-run wizard** (commit 12): it currently offers templates and an import step; its replacement flow needs a decision.
-8. **Custom group names and `opushub.*` labels** stay valid (Docker labels are source of truth); only the Settings UI for them goes.
+Made:
+
+1. **Bookmarks stay** as a small flat list on Home. Their Settings editor stays too, until the Settings reshape (commit 14).
+2. **Per-service overrides** (name, icon, group, URL, visibility) live on the Containers detail page, not in Settings.
+3. **Browser notifications are dropped** (commit 2). In-app and Telegram stay.
+4. **Config History restore button is dropped**; backups stay on disk (commit 8).
+5. **`probe.js` and `monitoring/checks/http.js` merge only if tests prove identical behavior**, including the private-address checks. Otherwise both stay.
+
+### Still uncertain
+
+1. **Alert ack** (commit 10): today it lives on the Activity page. Does the bell need it?
+2. **First-run wizard** (commit 12): it currently offers templates and an import step; its replacement flow needs a decision.
+3. **Group order**: groups are Compose stacks, alphabetical, unless you want custom order kept in `layout.json`.
+4. **Custom group names and `opushub.*` labels** stay valid (Docker labels are source of truth); only the Settings UI for them goes.
