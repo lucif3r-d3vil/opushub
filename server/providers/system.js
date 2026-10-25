@@ -226,51 +226,121 @@ async function collectFresh() {
   };
 }
 
-// ---- sampled history ring buffer (for charts; real samples only) ----
+// ---- sampled history (for charts; real samples only) ----
+//
+// One sampler, three resolutions, so the Home chart can answer 1 h / 24 h / 7 d without a second
+// collector: raw 5 s samples for the last hour, 5-minute averages for 24 h, hourly averages for 7
+// days. Averages skip missing readings, and a bucket with none of a field reports null (never 0).
+const FIELDS = ['cpu', 'memUsedPct', 'load', 'rx', 'tx', 'temp', 'procs', 'diskUsedPct'];
+const TIERS = [
+  { name: 'm5', stepMs: 5 * 60_000, keepMs: 24 * 3600_000 },
+  { name: 'h1', stepMs: 3600_000, keepMs: 7 * 24 * 3600_000 },
+];
+export const HISTORY_RAW_MS = 3600_000;
+
+/** One sample from a `collect()` document; the disk figure is the root mount (or the first disk). */
+export function sampleFrom(s) {
+  const root = (s.disks || []).find((d) => d.mount === '/') || (s.disks || [])[0] || null;
+  return {
+    t: s.at,
+    cpu: s.cpu.usage,
+    memUsedPct: s.memory ? 100 * (1 - s.memory.available / s.memory.total) : null,
+    load: s.cpu.load1,
+    rx: s.network.reduce((a, n) => a + (n.rxPerSec || 0), 0) || null,
+    tx: s.network.reduce((a, n) => a + (n.txPerSec || 0), 0) || null,
+    temp: s.cpu.temperature?.[0]?.celsius ?? null,
+    procs: s.processes,
+    diskUsedPct: root && root.total ? 100 * (root.used / root.total) : null,
+  };
+}
+
 export class History {
-  constructor({ intervalMs = 5000, samples = 720, file = null } = {}) {
+  constructor({ intervalMs = 5000, samples = HISTORY_RAW_MS / 5000, file = null } = {}) {
     this.intervalMs = intervalMs; this.samples = samples; this.file = file;
-    this.points = [];
+    this.points = [];                                   // raw
+    this.tiers = Object.fromEntries(TIERS.map((t) => [t.name, { done: [], open: null }]));
     this.timer = null;
   }
   async load() {
     if (!this.file) return;
     try {
       const data = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      const cutoff = Date.now() - 24 * 3600 * 1000;
-      this.points = (Array.isArray(data) ? data : []).filter((p) => p.t > cutoff).slice(-this.samples * 4);
+      const now = Date.now();
+      const raw = Array.isArray(data) ? data : data?.raw;           // a v1 file is a bare array of raw points
+      this.points = (Array.isArray(raw) ? raw : []).filter((p) => p && p.t > now - HISTORY_RAW_MS).slice(-this.samples);
+      for (const t of TIERS) {
+        const done = Array.isArray(data?.[t.name]) ? data[t.name] : [];
+        this.tiers[t.name].done = done.filter((p) => p && p.t > now - t.keepMs);
+      }
     } catch { /* fresh start */ }
+  }
+  /** Add one sample to the raw ring and to the open bucket of every tier. */
+  add(point) {
+    this.points.push(point);
+    if (this.points.length > this.samples) this.points = this.points.slice(-this.samples);
+    for (const t of TIERS) {
+      const tier = this.tiers[t.name];
+      const start = Math.floor(point.t / t.stepMs) * t.stepMs;
+      if (tier.open && tier.open.start !== start) {
+        const closed = finishBucket(tier.open);
+        const last = tier.done[tier.done.length - 1];
+        if (!last || closed.t > last.t) tier.done.push(closed);
+        tier.open = null;
+        const cutoff = point.t - t.keepMs;
+        if (tier.done[0] && tier.done[0].t < cutoff) tier.done = tier.done.filter((p) => p.t >= cutoff);
+      }
+      if (!tier.open) tier.open = { start, step: t.stepMs, sums: {}, counts: {} };
+      for (const f of FIELDS) {
+        const v = point[f];
+        if (typeof v === 'number' && Number.isFinite(v)) {
+          tier.open.sums[f] = (tier.open.sums[f] || 0) + v;
+          tier.open.counts[f] = (tier.open.counts[f] || 0) + 1;
+        }
+      }
+    }
+  }
+  save() {
+    if (!this.file) return;
+    const doc = { v: 2, raw: this.points };
+    for (const t of TIERS) doc[t.name] = this.tiers[t.name].done;
+    writeFileAtomic(this.file, JSON.stringify(doc));
   }
   async start(collectFn) {
     await this.load();
     const tick = async () => {
       try {
-        const s = await collectFn();
-        this.points.push({
-          t: s.at,
-          cpu: s.cpu.usage,
-          memUsedPct: s.memory ? 100 * (1 - s.memory.available / s.memory.total) : null,
-          load: s.cpu.load1,
-          rx: s.network.reduce((a, n) => a + (n.rxPerSec || 0), 0) || null,
-          tx: s.network.reduce((a, n) => a + (n.txPerSec || 0), 0) || null,
-          temp: s.cpu.temperature?.[0]?.celsius ?? null,
-          procs: s.processes,
-        });
-        if (this.points.length > this.samples * 4) this.points = this.points.slice(-this.samples * 4);
-        if (this.file) {
-          this.fileTick = (this.fileTick || 0) + 1;
-          if (this.fileTick % 12 === 0) {
-            writeFileAtomic(this.file, JSON.stringify(this.points.slice(-2880)));
-          }
-        }
+        this.add(sampleFrom(await collectFn()));
+        this.fileTick = (this.fileTick || 0) + 1;
+        if (this.fileTick % 12 === 0) this.save();
       } catch { /* next tick */ }
     };
     await tick();
     this.timer = setInterval(tick, this.intervalMs);
     this.timer.unref?.();
   }
+  /** The tier a window is read from: raw for up to an hour, then 5-minute, then hourly points. */
+  tierFor(ms) { return ms <= HISTORY_RAW_MS ? 'raw' : ms <= TIERS[0].keepMs ? 'm5' : 'h1'; }
   window(ms) {
     const cutoff = Date.now() - ms;
-    return this.points.filter((p) => p.t >= cutoff);
+    const tier = this.tierFor(ms);
+    if (tier === 'raw') return this.points.filter((p) => p.t >= cutoff);
+    const t = this.tiers[tier];
+    const out = t.done.filter((p) => p.t >= cutoff);
+    if (t.open) {
+      const partial = finishBucket(t.open);
+      if (partial.t >= cutoff) out.push(partial);
+    }
+    return out;
   }
+  stepMs(ms) {
+    const tier = this.tierFor(ms);
+    return tier === 'raw' ? this.intervalMs : TIERS.find((t) => t.name === tier).stepMs;
+  }
+}
+
+/** Mid-bucket timestamp, so a point sits where its samples were rather than at the bucket edge. */
+function finishBucket(b) {
+  const point = { t: b.start + b.step / 2 };
+  for (const f of FIELDS) point[f] = b.counts[f] ? b.sums[f] / b.counts[f] : null;
+  return point;
 }

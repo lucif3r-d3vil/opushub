@@ -217,7 +217,7 @@ export interface SystemSnapshot {
   gpu: { present: boolean; vendor?: string; driver?: string; devices?: string[] };
 }
 
-export interface HistoryPoint { t: number; cpu: number | null; memUsedPct: number | null; load: number | null; rx: number | null; tx: number | null; temp: number | null; procs: number | null }
+export interface HistoryPoint { t: number; cpu: number | null; memUsedPct: number | null; load: number | null; rx: number | null; tx: number | null; temp: number | null; procs: number | null; diskUsedPct?: number | null }
 
 export type EventSeverity = 'info' | 'notice' | 'warning' | 'critical';
 export type EventCategory = 'service' | 'stack' | 'docker' | 'system' | 'security' | 'config' | 'storage' | 'provider';

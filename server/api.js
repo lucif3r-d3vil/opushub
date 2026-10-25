@@ -64,7 +64,7 @@ function resolveServiceContainer(inv, group, name) {
   return { service, ref };
 }
 
-export const history = new History({ intervalMs: 5000, samples: 720, file: path.join(DATA_DIR, 'metrics.json') });
+export const history = new History({ intervalMs: 5000, file: path.join(DATA_DIR, 'metrics.json') });
 
 let bootAt = Date.now();
 
@@ -688,9 +688,9 @@ export async function handleApi(req, res, url) {
     return send(res, 200, s);
   }
   if (route === 'GET /api/system/history') {
-    const ms = Math.min(24 * 3600_000, Math.max(60_000, Number(url.searchParams.get('window')) || 3600_000));
+    const ms = Math.min(7 * 24 * 3600_000, Math.max(60_000, Number(url.searchParams.get('window')) || 3600_000));
     const points = history.window(ms);
-    const body = JSON.stringify({ window: ms, points });
+    const body = JSON.stringify({ window: ms, stepMs: history.stepMs(ms), points });
     if (req.headers['if-none-match'] && req.headers['if-none-match'].includes(hashOf(body))) {
       res.writeHead(304); res.end(); return;
     }
