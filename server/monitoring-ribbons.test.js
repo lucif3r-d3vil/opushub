@@ -28,11 +28,16 @@ test('24 h: raw checks on a 5-minute grid, hourly buckets for the part older tha
   for (let t = ringStart; t <= at; t += MIN) ring.push(sample(t, t > at - 20 * MIN && t < at - 10 * MIN ? 'fail' : 'ok'));
   const hours = [];
   for (let h = Math.floor((at - 10 * HOUR) / HOUR) * HOUR; h + HOUR <= ringStart; h += HOUR) hours.push(hour(h));
+  hours.push(hour(Math.floor(ringStart / HOUR) * HOUR));            // the hour that holds the first raw check
   const segs = segmentsFor({ samples: ring, hours }, { from, to: at, stepMs: 5 * MIN });
   assert.ok(segs[0].a >= at - 10 * HOUR - HOUR, 'nothing is drawn before the first recorded hour');
-  const coarse = segs.filter((s) => s.b - s.a === HOUR);
+  const edgeSeg = segs.filter((s) => s.edge);
+  assert.equal(edgeSeg.length, 1, 'the hour holding the first raw check is drawn up to it');
+  assert.equal(edgeSeg[0].b, ringStart, 'and no further, so there is no hole and no overlap');
+  const coarse = segs.filter((s) => s.b - s.a === HOUR && !s.edge);
   const fine = segs.filter((s) => s.b - s.a === 5 * MIN);
-  assert.ok(coarse.length >= 6 && coarse.every((s) => s.b <= ringStart), 'hourly buckets stop where the raw ring begins');
+  assert.ok(coarse.length >= 5 && coarse.every((s) => s.b <= ringStart), 'hourly buckets stop where the raw ring begins');
+  assert.equal(summarise(segs).checks, summarise(segs.filter((s) => !s.edge)).checks, 'an edge segment is not counted twice');
   assert.ok(fine.length >= 30, `raw checks give 5-minute segments (${fine.length})`);
   assert.ok(fine.some((s) => s.k === 'fail') && fine.some((s) => s.k === 'ok'), 'a failure window is drawn as a different state');
   for (let i = 1; i < segs.length; i++) assert.ok(segs[i].a >= segs[i - 1].b - 1, 'segments never overlap');
@@ -139,13 +144,14 @@ test.describe('the route', () => {
     const r24 = (await call('GET', '/api/monitoring/ribbons?range=24h')).json;
     assert.equal(r24.slowMs, 1000);
     assert.equal(r24.monitors.length, 1);
-    assert.equal(r24.monitors[0].segments.length, 1);
-    assert.equal(r24.monitors[0].segments[0].slow, true, '2.5 s is over the 1 s threshold');
+    const raw24 = r24.monitors[0].segments.filter((x) => !x.edge);
+    assert.equal(raw24.length, 1);
+    assert.equal(raw24[0].slow, true, '2.5 s is over the 1 s threshold');
     const r7 = (await call('GET', '/api/monitoring/ribbons?range=7d')).json;
     assert.equal(r7.stepMs, HOUR);
     assert.equal(r7.monitors[0].segments[0].ms, 2550);
     await call('PUT', '/api/settings', { monitoring: { slowMs: 5000 } });
-    assert.equal((await call('GET', '/api/monitoring/ribbons?range=24h')).json.monitors[0].segments[0].slow, false, 'raising the threshold clears slow');
+    assert.equal((await call('GET', '/api/monitoring/ribbons?range=24h')).json.monitors[0].segments.find((x) => !x.edge).slow, false, 'raising the threshold clears slow');
     assert.equal((await call('PUT', '/api/settings', { monitoring: { slowMs: 5 } })).json.monitoring.slowMs, 100, 'the threshold is bounded');
   });
 });

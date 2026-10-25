@@ -28,6 +28,9 @@ import {
 } from '../../src/lib/homeModel';
 import { resetSharedCache } from '../../src/lib/api';
 import { chartStats, downsample } from '../../src/components/home/HostChart';
+import {
+  baseline, buildRuns, durText, pctText, ribbonSummary, segmentAt, sortRows, thickness, visibleWindow, type RibbonMonitor, type RibbonsDoc, type Segment,
+} from '../../src/lib/uptimeModel';
 import { GroupNameField } from '../../src/components/GroupNameField';
 import { MenuButton } from '../../src/components/ui';
 import { AreaChart } from '../../src/components/Charts';
@@ -2498,6 +2501,157 @@ export async function runWebTests(): Promise<WebResult> {
     click(qa('.hm-hb')[3]);
     await h.waitFor(() => text(q('.hm-hx') || document.body).includes('Not enough'), 'the short-history message');
     expect(!q('.hm-chart'), 'a chart was drawn from no data');
+  });
+
+  /* ==================================================================
+     Uptime (rebuild slice 2): ribbons over what the engine recorded
+     ================================================================== */
+  const NOW = Date.now();
+  const STEP = 300_000;
+  const seg = (i: number, k: Segment['k'], ms: number | null, over: Partial<Segment> = {}): Segment => ({
+    a: NOW - (60 - i) * STEP, b: NOW - (59 - i) * STEP, k, slow: false, ms, n: 5,
+    ok: k === 'ok' ? 5 : 0, degraded: k === 'degraded' ? 5 : 0, fail: k === 'fail' ? 5 : 0, unknown: k === 'unknown' ? 5 : 0, ...over,
+  });
+  const run = (n: number, ms = 50, from = 60 - n) => Array.from({ length: n }, (_, i) => seg(from + i, 'ok', ms));
+  const rm = (id: string, name: string, status: string, segments: Segment[], over: Partial<RibbonMonitor> = {}): RibbonMonitor => ({
+    id, name, type: 'docker', status, enabled: true, latencyMs: status === 'up' ? 50 : null, service: null, intervalMs: 60_000,
+    checks: segments.length * 5, judged: segments.length * 5, uptimePct: segments.length ? 99.5 : null, avgMs: segments.length ? 50 : null, p95Ms: null,
+    coverageFrom: segments.length ? segments[0].a : null, segments, ...over,
+  });
+  const ribbonsDoc = (monitors: RibbonMonitor[], over: Partial<RibbonsDoc> = {}): RibbonsDoc => ({
+    at: NOW, range: '24h', from: NOW - 24 * 3_600_000, to: NOW, stepMs: STEP, slowMs: 1000,
+    summary: { uptimePct: 99.4, avgMs: 75, monitors: monitors.length, up: monitors.filter((m) => m.status === 'up').length, slow: 1, down: monitors.filter((m) => m.status === 'down').length, incidents: 1, downtimeMs: 38 * 60_000 },
+    monitors,
+    incidents: [{ id: 'inc-1', monitorId: 'mon-b', monitorName: 'Beta', startedAt: NOW - 38 * 60_000, recoveredAt: null, durationMs: 38 * 60_000, open: true, reason: 'Connection refused' }],
+    ...over,
+  });
+
+  await test('uptime model: down first, then slow, then up, and monitors with no verdict last', async () => {
+    const mk = (n: string, st: string) => rm(`mon-${n}`, n, st, []);
+    expect(sortRows([mk('up2', 'up'), mk('new', 'pending'), mk('slow', 'degraded'), mk('up1', 'up'), mk('dead', 'down')]).map((r) => r.name).join(',') === 'dead,slow,up1,up2,new', 'ribbon order');
+  });
+
+  await test('uptime model: thickness is relative to the monitor\'s own normal, and a missing latency is never a thick bar', async () => {
+    const segs = run(10, 100);
+    expect(baseline(segs) === 100, 'the baseline is the median answer');
+    expect(baseline(run(2, 100)) === null, 'two points are not a "normal"');
+    expect(thickness(100, 100) === 0.1 && thickness(500, 100) === 1 && thickness(300, 100) > 0.4 && thickness(300, 100) < 0.6, 'thickness runs from a hairline at normal to full at five times');
+    expect(thickness(null, 100) < 0.2 && thickness(80, null) < 0.2, 'no latency or no baseline draws a thin line');
+  });
+
+  await test('uptime model: a gap ends a run, no verdict is dotted not drawn, and down is a thin line', async () => {
+    const ok = run(5, 50, 0);
+    const gapped = [...ok, ...run(5, 50, 20)];                                  // a hole of 15 steps
+    const geo = { from: NOW - 60 * STEP, to: NOW, width: 1000, height: 46, stepMs: STEP };
+    expect(buildRuns(gapped, geo).runs.length === 2, 'a hole in the history did not break the ribbon in two');
+    expect(buildRuns(ok, geo).runs.length === 1 && buildRuns([], geo).runs.length === 0, 'runs for contiguous data, none for no data');
+    const withUnknown = [...ok, seg(5, 'unknown', null), ...run(5, 50, 6)];
+    const u = buildRuns(withUnknown, geo);
+    expect(u.unknown.length === 1 && u.runs.length === 2, 'a stretch with no verdict should be a dotted line between two runs, not a bar');
+    const dead = buildRuns([...ok, seg(5, 'fail', null), seg(6, 'fail', null), ...run(3, 50, 7)], geo).runs[0];
+    const mid = dead.top.length >> 1;
+    const heights = dead.bot.map((b, i) => b - dead.top[i]);
+    expect(Math.min(...heights) < 6, 'a down stretch is not a thin line');
+    expect(heights[0] < Math.max(...heights), 'the left edge is not tapered');
+    expect(segmentAt(ok, ok[2].a + 1) === ok[2] && segmentAt(ok, NOW + 1000) === null && segmentAt(ok, ok[0].a - 1) === null, 'segmentAt finds a segment or nothing');
+    expect(mid > 0, 'run has no vertices');
+  });
+
+  await test('uptime model: words, numbers and the window never overstate', async () => {
+    expect(pctText(99.999) === '99.99' && pctText(100) === '100' && pctText(null) === '—' && pctText(99.5) === '99.50', 'a miss was rounded up to 100');
+    expect(durText(30_000) === '30 s' && durText(38 * 60_000) === '38 min' && durText(90 * 60_000) === '1 h 30 min' && durText(26 * 3_600_000) === '1 d 2 h', 'durations');
+    const few = ribbonsDoc([rm('mon-a', 'Alpha', 'up', run(36))]);                // three hours of history in a 24 h window
+    const w = visibleWindow(few);
+    expect(w.trimmed && w.from > few.from && w.to === few.to && w.to - w.from >= 2 * 3_600_000, 'a few hours of history should zoom in rather than draw a sliver');
+    const full = ribbonsDoc([rm('mon-a', 'Alpha', 'up', [seg(-200, 'ok', 50, { a: NOW - 23 * 3_600_000, b: NOW - 22 * 3_600_000 })])]);
+    expect(!visibleWindow(full).trimmed, 'a window that is mostly filled was trimmed');
+    expect(!visibleWindow(ribbonsDoc([])).trimmed, 'with no monitors nothing is trimmed');
+    const sum = ribbonSummary(rm('mon-b', 'Beta', 'down', run(20)), '24h', ribbonsDoc([]).incidents);
+    expect(sum.includes('Beta') && sum.includes('99.50% up') && sum.includes('1 incident, one ongoing') && sum.includes('currently down'), `ribbon summary: ${sum}`);
+    expect(ribbonSummary(rm('mon-c', 'Gamma', 'pending', []), '24h', []).includes('no checks recorded'), 'an empty ribbon should say so');
+  });
+
+  const uptimeRoutes = (monitors: RibbonMonitor[], extra: Record<string, unknown> = {}) => ({
+    ...stubRoutes(), ...AUTH_ROUTES,
+    '/api/monitoring/ribbons': (_b: unknown, path: string) => ribbonsDoc(monitors, path.includes('range=7d') ? { range: '7d', stepMs: 3_600_000 } : {}),
+    '/api/monitoring/engine': { state: 'running', reason: null },
+    '/api/monitoring/settings': { settings: { intervalMs: 60000, timeoutMs: 5000, retentionHours: 336, retentionSamples: 360 }, bounds: {} },
+    '/api/services': servicesDoc, '/api/operations': { docker: { operations: false }, actions: [] },
+    ...extra,
+  });
+  const upMonitors = () => [
+    rm('mon-a', 'Alpha', 'up', run(40, 50)),
+    rm('mon-b', 'Beta', 'down', [...run(28, 50, 30), seg(58, 'fail', null), seg(59, 'fail', null)]),
+    rm('mon-c', 'Gamma', 'pending', []),
+  ];
+
+  await test('uptime: the summary, ribbons sorted down-first, each with a text summary, a gap for a monitor with no checks, and the incident', async (h) => {
+    h.setRoutes(uptimeRoutes(upMonitors()));
+    await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);
+    await h.waitFor(() => qa('.ur-row').length === 3, 'the ribbon rows');
+    expect(text(q('.ur-head')!).includes('Uptime') && text(q('.ur-head')!).includes('3 monitors') && text(q('.ur-head')!).includes('checked every 1 min'), `header: ${text(q('.ur-head')!)}`);
+    const sum = text(q('.ur-sum')!);
+    expect(sum.includes('99.40') && sum.includes('1 / 3') && sum.includes('38 min of downtime') && sum.includes('75'), `summary: ${sum}`);
+    expect(qa('.ur-nm b').map((b) => text(b)).join(',') === 'Beta,Alpha,Gamma', 'the down monitor is not first');
+    for (const rb of qa('.ur-rb')) {
+      expect((rb.getAttribute('aria-label') || '').length > 30 && rb.getAttribute('role') === 'img' && rb.tabIndex === 0, 'a ribbon needs a text summary and to be focusable');
+    }
+    expect((qa('.ur-rb')[0].getAttribute('aria-label') || '').includes('Beta') && (qa('.ur-rb')[0].getAttribute('aria-label') || '').includes('1 incident, one ongoing'), 'the label does not name the incident');
+    expect(qa('.ur-rb')[0].querySelectorAll('polygon').length > 0, 'a ribbon with data was not drawn');
+    expect(qa('.ur-rb')[2].querySelectorAll('polygon').length === 0 && text(qa('.ur-rb')[2]).includes('waiting for the first check'), 'a monitor with no checks must be a quiet gap, not a bar');
+    expect(qa('.ur-notch').length === 1 && (qa('.ur-notch')[0].getAttribute('aria-label') || '').includes('Beta'), 'the incident notch is missing');
+    expect(text(q('.ur-il')!).includes('Beta') && text(q('.ur-il')!).includes('Connection refused') && text(q('.ur-il')!).includes('ongoing'), 'the incident is not listed');
+    expect(!!q('.ur-legend') && text(q('.ur-legend')!).includes('No verdict'), 'the legend does not explain the gap');
+  });
+
+  await test('uptime: the arrow keys scrub every row to the same moment, with an exact readout, and Escape clears', async (h) => {
+    h.setRoutes(uptimeRoutes(upMonitors()));
+    await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);
+    await h.waitFor(() => qa('.ur-rb').length === 3, 'the ribbons');
+    const rb = qa('.ur-rb')[1];                                                 // Alpha
+    expect(!q('.ur-guide') && !q('.ur-tip'), 'a scrub guide is shown before anyone scrubs');
+    key(rb, 'ArrowLeft');
+    await h.waitFor(() => !!q('.ur-guide') && !!q('.ur-tip'), 'the guide and the readout');
+    expect(text(q('.ur-tip')!).includes('Alpha') && text(q('.ur-tip')!).includes('Up') && /\d+ ms/.test(text(q('.ur-tip')!)), `tooltip: ${text(q('.ur-tip')!)}`);
+    expect(!!q('.ur-axis .bub') && /\d\d:\d\d/.test(text(q('.ur-axis .bub')!)), 'the time bubble is missing');
+    const rows = qa('.ur-c3').map((c) => text(c));
+    expect(rows[0].includes('Down') && !rows[0].includes('now'), `every row should read the scrubbed moment, not now: ${rows[0]}`);
+    expect(rows[2].includes('no data'), `a monitor with no history says no data at that moment: ${rows[2]}`);
+    expect(qa('.ur-row')[1].className.includes('hot'), 'the scrubbed row is not marked');
+    const first = text(q('.ur-axis .bub')!);
+    key(rb, 'ArrowLeft', { shiftKey: true });
+    await h.waitFor(() => text(q('.ur-axis .bub')!) !== first, 'Shift to move twelve steps');
+    key(rb, 'Home');
+    await h.waitFor(() => text(q('.ur-axis .bub')!) !== first, 'Home to jump to the start');
+    key(rb, 'Escape');
+    await h.waitFor(() => !q('.ur-guide'), 'Escape to clear');
+    expect(qa('.ur-c3').map((c) => text(c))[0].includes('now'), 'the readout did not return to now');
+  });
+
+  await test('uptime: the range switch asks for 7 days, and Defaults and Add monitor are offered', async (h) => {
+    h.setRoutes(uptimeRoutes(upMonitors()));
+    await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);
+    await h.waitFor(() => qa('.ur-row').length === 3, 'the rows');
+    click(qa('.ur-head .seg-sm button')[1]);
+    await h.waitFor(() => h.calls.some((c) => c.path.includes('/api/monitoring/ribbons?range=7d')), 'the 7-day request');
+    await h.waitFor(() => text(q('.ur-sum')!).includes('7 days'), 'the 7-day summary');
+  });
+
+  await test('uptime: no monitors, a stopped engine, and a short history are each said plainly', async (h) => {
+    h.setRoutes(uptimeRoutes([], { '/api/monitoring/ribbons': ribbonsDoc([], { incidents: [], summary: { uptimePct: null, avgMs: null, monitors: 0, up: 0, slow: 0, down: 0, incidents: 0, downtimeMs: 0 } }), '/api/monitoring/engine': { state: 'stopped', reason: 'The engine was stopped.' } }));
+    await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('.ur-empty'), 'the empty state');
+    expect(text(q('.ur-empty')!).includes('Nothing is being watched yet'), 'empty state wording');
+    expect(text(q('.ur-sum')!).includes('no judged checks yet'), 'the summary invented a number');
+    expect(!q('.ur-row'), 'rows were drawn for no monitors');
+    expect(text().includes('Monitoring is not running'), 'a stopped engine is not announced');
+  });
+
+  await test('uptime: only a few hours of history zoom in and say so', async (h) => {
+    h.setRoutes(uptimeRoutes([rm('mon-a', 'Alpha', 'up', run(36))], { '/api/monitoring/ribbons': ribbonsDoc([rm('mon-a', 'Alpha', 'up', run(36))], { incidents: [] }) }));
+    await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);
+    await h.waitFor(() => !!q('.ur-trim'), 'the short-history note');
+    expect(text(q('.ur-trim')!).includes('first recorded check') && text(q('.ur-trim')!).includes('fills in as history builds'), `note: ${text(q('.ur-trim')!)}`);
   });
 
   for (const r of results) {

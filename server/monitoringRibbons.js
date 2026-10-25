@@ -54,6 +54,10 @@ export function segmentsFor(entry, { from, to, stepMs, slowMs = null }) {
 
   // a fine range is the raw checks, plus the hourly buckets for whatever part of the window is older than the ring
   const out = hours.filter((h) => ringStart == null || h.h + HOUR <= ringStart).map(hourSeg);
+  // the hour that contains the first raw check is drawn up to that check so the ribbon has no hole there;
+  // it is marked `edge` because its counts overlap the raw checks, and the summaries skip it
+  const edge = ringStart == null ? null : hours.find((h) => h.h < ringStart && h.h + HOUR > ringStart);
+  if (edge) out.push({ ...hourSeg(edge), b: ringStart, edge: true });
   const buckets = new Map();
   for (const sm of ring) {
     if (sm.t < from || sm.t > to) continue;
@@ -76,6 +80,7 @@ function p95(samples) {
 export function summarise(segments) {
   let ok = 0; let judged = 0; let msSum = 0; let msCount = 0; let checks = 0;
   for (const s of segments) {
+    if (s.edge) continue;
     ok += s.ok; judged += s.ok + s.degraded + s.fail; checks += s.n;
     if (s.ms != null) { msSum += s.ms * (s.ok + s.degraded + s.fail || 1); msCount += s.ok + s.degraded + s.fail || 1; }
   }

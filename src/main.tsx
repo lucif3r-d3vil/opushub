@@ -12,6 +12,7 @@ import './styles/pages.css';
 import './styles/hub.css';
 import './styles/shell.css';
 import './styles/home.css';
+import './styles/uptime.css';
 import App from './App';
 
 createRoot(document.getElementById('root')!).render(

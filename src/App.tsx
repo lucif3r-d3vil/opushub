@@ -14,6 +14,7 @@ import { useLiveEvents } from './lib/sse';
 const Home = lazy(() => import('./pages/Home'));
 const Services = lazy(() => import('./pages/Services'));
 const ServiceDetail = lazy(() => import('./pages/ServiceDetail'));
+const Uptime = lazy(() => import('./pages/Uptime'));
 const Monitoring = lazy(() => import('./pages/Monitoring'));
 const MonitorDetail = lazy(() => import('./pages/MonitorDetail'));
 const Stacks = lazy(() => import('./pages/Stacks'));
@@ -115,8 +116,10 @@ function ShellWithRoutes() {
             <Route index element={<Home />} />
             <Route path="services" element={<Services />} />
             <Route path="services/:group/:name" element={<ServiceDetail />} />
-            <Route path="monitoring" element={<Monitoring />} />
-            <Route path="monitoring/incidents" element={<Monitoring />} />
+            <Route path="monitoring" element={<Uptime />} />
+            {/* the list with pause, maintenance and suggestions stays until a later slice folds it in */}
+            <Route path="monitoring/manage" element={<Monitoring />} />
+            <Route path="monitoring/incidents" element={<Navigate to="/monitoring" replace />} />
             <Route path="monitoring/:id" element={<MonitorDetail />} />
             <Route path="stacks" element={<Stacks />} />
             <Route path="stacks/new" element={<ManagedStack />} />
