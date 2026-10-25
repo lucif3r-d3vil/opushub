@@ -2658,6 +2658,19 @@ export async function runWebTests(): Promise<WebResult> {
     expect(text().includes('Monitoring is not running'), 'a stopped engine is not announced');
   });
 
+  await test('uptime: a monitor with only minutes of history is still visible, and says how long it has been recording', async (h) => {
+    const alpha = rm('mon-a', 'Alpha', 'up', run(50));
+    const fresh = rm('mon-n', 'Newbie', 'up', [seg(59, 'ok', 40)]);
+    h.setRoutes(uptimeRoutes([alpha, fresh]));
+    await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);
+    await h.waitFor(() => qa('.ur-row').length === 2, 'the rows');
+    const rb = qa('.ur-rb').find((r) => (r.getAttribute('aria-label') || '').includes('Newbie'))!;
+    expect(rb.querySelectorAll('polygon').length > 0, 'a few minutes of history drew nothing at all');
+    expect(text(rb).includes('recording for'), `the gap before it does not say why: ${text(rb)}`);
+    const full = qa('.ur-rb').find((r) => (r.getAttribute('aria-label') || '').includes('Alpha'))!;
+    expect(!text(full).includes('recording for'), 'a monitor with a long history says it just started');
+  });
+
   await test('uptime: only a few hours of history zoom in and say so', async (h) => {
     h.setRoutes(uptimeRoutes([rm('mon-a', 'Alpha', 'up', run(36))], { '/api/monitoring/ribbons': ribbonsDoc([rm('mon-a', 'Alpha', 'up', run(36))], { incidents: [] }) }));
     await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);

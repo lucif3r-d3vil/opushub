@@ -71,7 +71,10 @@ export function buildRuns(segments: Segment[], { from, to, width, height, stepMs
     // a five-tap smoothing so a spike swells and eases instead of stepping
     const sm = raw.map((_, i) => { let sum = 0; let w = 0; for (let d = -2; d <= 2; d++) { const v = raw[i + d]; if (v != null) { const k = 3 - Math.abs(d); sum += v * k; w += k; } } return sum / w; });
     const xs = segs.map((s) => x((s.a + s.b) / 2));
-    const first = x(segs[0].a); const last = x(segs[segs.length - 1].b);
+    // a run that is only a few minutes wide is still drawn at a visible minimum, anchored where its data is
+    const MIN_W = 5;
+    let first = x(segs[0].a); const last = Math.max(x(segs[segs.length - 1].b), first + MIN_W);
+    if (last > width) first = width - Math.max(MIN_W, width - first);
     const vx = [first, ...xs, last];
     const vh = [sm[0] * 0.4, ...sm.map((h, i) => (segs[i].k === 'fail' ? 0.07 : h)), sm[sm.length - 1] * 0.4];
     return {

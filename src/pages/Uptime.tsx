@@ -142,6 +142,7 @@ export default function UptimePage() {
                       onPointerMove={(e) => at(e, m.id)} onPointerLeave={clear} onBlur={clear} onKeyDown={(e) => key(e, m.id)}
                     >
                       {m.segments.length === 0 && <span className="ur-none">{m.status === 'pending' ? 'waiting for the first check' : 'no checks recorded yet'}</span>}
+                      {m.coverageFrom != null && frac(m.coverageFrom) > 35 && <span className="ur-none ur-since" style={{ width: `${frac(m.coverageFrom)}%` }}>recording for {durText(Date.now() - m.coverageFrom)}</span>}
                       <RibbonShape segments={m.segments} from={win.from} to={win.to} stepMs={data.stepMs} height={46} glow />
                       <RibbonShape segments={m.segments} from={win.from} to={win.to} stepMs={data.stepMs} height={46} />
                       <Notches incidents={own} from={win.from} to={win.to} label={(i: RibbonIncident) => `${m.name}: incident ${i.open ? 'ongoing, since' : 'of ' + durText(i.durationMs) + ', from'} ${whenText(i.startedAt, range)}${i.reason ? `: ${i.reason}` : ''}`} />

@@ -1,6 +1,6 @@
 # OpusHub UI overhaul: design direction
 
-Status: **slice 1 is built** (shell and Home, branch `rebuild/1-shell-home`; see "Slice 1" below). The
+Status: **slices 1 and 2 are built** (shell and Home; Uptime, branch `rebuild/2-uptime`; see "Slice 1" and "Slice 2" below). The
 other pages are still the old ones, running inside the new shell. This extends
 [`../03-design-system.md`](../03-design-system.md) and says where it proposes to overrule it, and why.
 
@@ -54,6 +54,47 @@ Differences, all because the page may only show data that exists:
   the Containers page. Start and Restart still use the existing confirmation dialog; dropping it for those two
   (a round 2 decision) lands with the Containers slice, which owns that flow.
 - Stacks, System and Activity are listed in the account menu as "until rebuilt" so nothing becomes unreachable.
+
+## Slice 2: Uptime, what was built and where it differs
+
+Built: the Uptime page (`/monitoring`), `GET /api/monitoring/ribbons`, the Defaults panel, the Add
+monitor flow and the Home mini ribbons. The engine, its settings model and its data are unchanged;
+it gained one read-only accessor (`recordedData()`), and the reader is `server/monitoringRibbons.js`,
+outside `server/monitoring/`.
+
+- **Data.** 24 h is 5-minute segments from the raw checks, plus the hourly buckets for the part of
+  the day older than the ring; 7 d is the hourly buckets (the engine keeps 336 of them by default, so
+  14 days). A segment exists only where checks were recorded. The hour that holds the first raw check
+  is drawn up to that check and excluded from the counts, so nothing is drawn twice or left as a hole.
+  Uptime counts `ok` over judged checks only, like the engine's own figure.
+- **States.** A segment is down when most judged checks failed, unhealthy when some failed or were
+  degraded, no-verdict when checks ran but none was judged (a faint dotted line), and slow when every
+  check answered but the average was over the slow threshold. A monitor with no history is a quiet gap
+  with a label, never a bar; a few minutes of history is drawn at a minimum visible width and the gap
+  before it says "recording for 3 min". With only a few hours of history the whole axis zooms in and
+  says so.
+- **Slow threshold is display only.** The engine has no latency threshold (a check is `degraded` only
+  when it answers wrongly), and the brief was to leave the engine alone, so `monitoring.slowMs`
+  (default 1 s) lives in `settings.yaml` and only colours ribbons amber. A slow answer alone never
+  opens an incident, and the panel says so. Raising the engine's behaviour to match is a separate,
+  deliberate change.
+- **Defaults** has four settings: check every, timeout, slow threshold, keep history. Interval and
+  timeout apply to new monitors; keeping history sets the hourly summaries (days × 24) and sizes the
+  detail ring to about a day of checks (at most 2000, the engine's cap). The timeout must stay at
+  least a second under the interval, as the engine already insists.
+- **Add monitor** is a discovered service, a web address or host:port, the check (only valid ones are
+  offered: a service can be a web check or a container-state check) and a name. The server's refusal
+  is shown as is.
+- **Incidents** are the engine's incidents, so the list says "incident" and the reason the engine
+  recorded, not "down": the engine also records soft incidents for unhealthy containers. Open ones are
+  amber and pulse; resolved ones are red.
+- **Accessibility.** Each ribbon is focusable with a one-sentence text summary (uptime, incidents,
+  average, current state); the arrow keys scrub every row to the same moment (Shift moves twelve steps,
+  Home and End jump, Esc clears) and a live region announces the value. The table view the design
+  mentions is not built yet.
+- **Phone.** The readout moves under the ribbon and the scrub guide spans the stacked rows.
+- Not built: the monitor suggestions panel and pause, maintenance and bulk actions still live on the old
+  list, now at `/monitoring/manage`, linked under the incidents.
 
 ## 1. Direction
 
