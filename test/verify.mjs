@@ -582,7 +582,7 @@ async function main() {
       const noStats = await get('/api/services/Other/paperless/stats');
       check('stats: a stopped container reports unavailable, never zeros-as-data', noStats.body?.status === 'unavailable' && noStats.body?.stats === null);
       const hist = await get('/api/services/Other/jellyfin/stats/history');
-      check('stats history: samples exist only because somebody asked', Array.isArray(hist.body?.samples) && hist.body.samples.length >= 1);
+      check('stats history: per-container history is gone, so nothing is kept about a container nobody is looking at', hist.status === 404);
 
       // logs: read-only, bounded, timestamps optional
       const logs = await get('/api/services/Other/nextcloud/logs?tail=50');
