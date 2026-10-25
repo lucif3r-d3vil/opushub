@@ -42,7 +42,7 @@ Sizes are approximate lines of code, to show the scale of each removal.
 | `Monitoring.tsx`, `MonitorDetail.tsx` | KEEP | Becomes Uptime (rename, trim). |
 | `Activity.tsx` | MERGE | Decided: becomes the bell panel's recent-activity list, including the audit record. No page. |
 | `System.tsx`, `Host.tsx` | REMOVE | Replaced by the host strip on Home. |
-| `Infrastructure.tsx` | REMOVE | ZFS, OPNsense and topology are not one of the five tools. **Open:** whether to keep a one-line ZFS status on Home (see Decisions). |
+| `Infrastructure.tsx` | REMOVE | ZFS, OPNsense and topology are not one of the five tools. Decided: remove all, no ZFS line on Home. |
 | `Files.tsx` | REMOVE | A file explorer replaces none of the five (~5.0k lines with its server side). |
 | `Catalog.tsx`, `CatalogInstall.tsx` | REMOVE | "Add a compose block" covers installing. |
 | `Icons.tsx` | REMOVE | A picker page. Icon resolution stays; the page does not. |
@@ -95,9 +95,9 @@ Made:
 - **Config export/import** and **container charts** are dropped.
 - **Updates stay manual.** Native checking only detects and badges; "Update" is a button you press.
 
-**Open: Infrastructure.** Choose one: (a) remove it all, including ZFS, or (b) remove it all but keep
-a one-line ZFS pool status on Home. Phase 4 waits on this. Option (b) means keeping a slice of
-`providers/zfs.js` and the `/proc` mount-to-pool join, roughly 400 lines.
+- **Infrastructure is removed entirely**, ZFS included. No ZFS line on Home. What stays is the host
+  vitals read from `/proc` and `/sys` (CPU, memory, storage use, temperature, uptime) for the host
+  strip.
 
 ## Still unsure: confirm before deleting
 
@@ -115,12 +115,12 @@ a one-line ZFS pool status on Home. Phase 4 waits on this. Option (b) means keep
 
 ## Roadmap
 
-Order: **remove, then split, then build.** Phases 1 and 2 (truth pass and dead code) are done.
+Order: **remove, then split, then build.** Phases 1 and 2 (truth pass and dead code) are done; phase 3 (Files) is done on its own branch.
 
 | # | Phase | Risk |
 |---|---|---|
 | 3 | **Remove Files.** Page, server module, API, tests, compose example, README and env vars. | Low |
-| 4 | **Remove Infrastructure** (blocked on the open decision above) and its providers, `proxy/provider.js`, tests and settings keys. Config loader tolerates old keys. | Low |
+| 4 | **Remove Infrastructure** (decided: everything, ZFS included) and its providers, `proxy/provider.js`, tests and settings keys. Config loader tolerates old keys. | Low |
 | 5 | **Remove Hub extras:** news, weather, market, background, widget composition, templates, Icons page; container charts (`statsHistory.js`); config export/import; the webhook notification channel. Search stays. Home keeps the stack-grouped launcher. | Low |
 | 6 | **Remove Catalog** and its manifests. | Low |
 | 7 | **Merge pages:** Home, Containers (with "add compose block"), Uptime. Remove System, Host, Stacks, Activity pages. Redirect old routes. | Low |
