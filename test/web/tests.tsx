@@ -27,6 +27,7 @@ import {
   buildAttention, buildStacks, buildUpdates, hostNow, stackHue, stateOf, updateFor, uptimeSummary,
 } from '../../src/lib/homeModel';
 import { resetSharedCache } from '../../src/lib/api';
+import { classifyTarget, defaultName, monitorDraft, typesFor, validateDefaults, toForm } from '../../src/lib/monitorForm';
 import { chartStats, downsample } from '../../src/components/home/HostChart';
 import {
   baseline, buildRuns, durText, pctText, ribbonSummary, segmentAt, sortRows, thickness, visibleWindow, type RibbonMonitor, type RibbonsDoc, type Segment,
@@ -2652,6 +2653,94 @@ export async function runWebTests(): Promise<WebResult> {
     await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);
     await h.waitFor(() => !!q('.ur-trim'), 'the short-history note');
     expect(text(q('.ur-trim')!).includes('first recorded check') && text(q('.ur-trim')!).includes('fills in as history builds'), `note: ${text(q('.ur-trim')!)}`);
+  });
+
+  const BOUNDS = { intervalMs: { min: 10_000, max: 86_400_000, default: 60_000 }, timeoutMs: { min: 500, max: 30_000, default: 5_000 }, retentionHours: { min: 24, max: 2000, default: 336 } };
+
+  await test('monitor form: what is typed becomes a service, a web address or host:port, and only valid checks are offered', async () => {
+    const svcs = [{ name: 'jellyfin', displayName: 'Jellyfin', group: 'Media' }, { name: 'wave', displayName: 'Wave', group: 'Music' }];
+    const a = classifyTarget('jellyfin', svcs);
+    expect(a.kind === 'service' && a.service?.group === 'Media' && classifyTarget(' Wave ', svcs).kind === 'service', 'a service is matched by name or display name');
+    expect(typesFor('service').map((t) => t.type).join() === 'http,docker' && typesFor('url').map((t) => t.type).join() === 'http' && typesFor('hostport').map((t) => t.type).join() === 'tcp' && typesFor('none').length === 0, 'check types per target');
+    expect(classifyTarget('https://nas.lan:8443/health', svcs).kind === 'url', 'a web address');
+    const hp = classifyTarget('nas.lan:5432', svcs);
+    expect(hp.kind === 'hostport' && hp.port === 5432 && hp.host === 'nas.lan', 'host:port');
+    expect(classifyTarget('nas.lan:99999', svcs).problem?.includes('port') && classifyTarget('nas.lan', svcs).kind === 'none', 'a bad port or a bare name is not a target');
+    expect((classifyTarget('example.com/x', svcs).problem || '').includes('http://'), 'a scheme-less address is told what to do');
+    expect(classifyTarget('', svcs).kind === 'none' && !classifyTarget('', svcs).problem, 'nothing typed is not an error');
+    expect(defaultName(a) === 'Jellyfin' && defaultName(hp) === 'nas.lan:5432' && defaultName(classifyTarget('https://a.example/x', svcs)) === 'a.example', 'default names');
+    expect(JSON.stringify(monitorDraft(a, 'docker', ' Jellyfin ')) === JSON.stringify({ name: 'Jellyfin', type: 'docker', target: { service: { group: 'Media', name: 'jellyfin' } } }), 'a service draft carries only the reference');
+    expect(JSON.stringify(monitorDraft(hp, 'tcp', 'DB')) === JSON.stringify({ name: 'DB', type: 'tcp', target: { host: 'nas.lan', port: 5432 } }), 'a tcp draft');
+  });
+
+  await test('monitor form: defaults are checked against the server\'s bounds, and retention follows the interval', async () => {
+    const ok = validateDefaults(toForm({ intervalMs: 60_000, timeoutMs: 5_000, retentionHours: 336 }, 1000), BOUNDS);
+    expect(ok.ok && ok.payload.monitoring.retentionHours === 336 && ok.payload.slowMs === 1000 && ok.payload.monitoring.retentionSamples === 1452, `payload: ${JSON.stringify(ok)}`);
+    const fast = validateDefaults({ intervalS: '10', timeoutS: '2', slowS: '0.5', days: '30' }, BOUNDS);
+    expect(fast.ok && fast.payload.monitoring.retentionSamples === 2000 && fast.payload.slowMs === 500, 'detail is capped at the engine\'s 2000 checks');
+    const bad = validateDefaults({ intervalS: '5', timeoutS: '60', slowS: '0', days: '0' }, BOUNDS);
+    expect(!bad.ok && Object.keys(bad.errors).length === 4, 'every out-of-range field is named');
+    const clash = validateDefaults({ intervalS: '10', timeoutS: '10', slowS: '1', days: '7' }, BOUNDS);
+    expect(!clash.ok && !!clash.errors.timeoutS && clash.errors.timeoutS.includes('shorter'), 'a timeout that outlives its interval is refused');
+    expect(!validateDefaults({ intervalS: '60', timeoutS: '5', slowS: '1', days: '2.5' }, BOUNDS).ok, 'days must be whole');
+  });
+
+  await test('uptime: Defaults shows the current values, names a bad one, and saves interval, timeout, retention and the slow threshold', async (h) => {
+    h.setRoutes(uptimeRoutes(upMonitors(), {
+      '/api/monitoring/settings': (body: unknown) => (body ? { settings: body } : { settings: { intervalMs: 60000, timeoutMs: 5000, retentionHours: 336, retentionSamples: 360 }, bounds: BOUNDS }),
+    }));
+    await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);
+    await h.waitFor(() => qa('.ur-row').length === 3, 'the page');
+    expect(!q('.ud-pop'), 'the panel is open before it was asked for');
+    click(qa('.ur-ctl button').find((b) => text(b).includes('Defaults'))!);
+    await h.waitFor(() => !!q('.ud-pop') && q<HTMLInputElement>('#ud-intervalS')!.value === '60', 'the panel with the current interval');
+    expect(q<HTMLInputElement>('#ud-timeoutS')!.value === '5' && q<HTMLInputElement>('#ud-slowS')!.value === '1' && q<HTMLInputElement>('#ud-days')!.value === '14', 'timeout, slow threshold and days are not filled from the settings');
+    expect(qa('.ud-f').length === 4, 'the panel holds anything beyond the four settings');
+    expect(text(q('.ud-pop')!).includes('does not open an incident'), 'the slow threshold does not say what it does');
+    type(q<HTMLInputElement>('#ud-timeoutS')!, '90');
+    await h.waitFor(() => text(q('.ud-pop')!).includes('0.5 to 30 seconds'), 'the bound for a bad timeout');
+    expect(q<HTMLButtonElement>('.ud-actions .btn-primary')!.disabled, 'Save is enabled with a bad value');
+    type(q<HTMLInputElement>('#ud-timeoutS')!, '8'); type(q<HTMLInputElement>('#ud-intervalS')!, '30'); type(q<HTMLInputElement>('#ud-slowS')!, '2'); type(q<HTMLInputElement>('#ud-days')!, '30');
+    await h.waitFor(() => !q<HTMLButtonElement>('.ud-actions .btn-primary')!.disabled, 'Save to enable');
+    click(q('.ud-actions .btn-primary')!);
+    await h.waitFor(() => h.writes('PUT', '/api/monitoring/settings').length === 1 && h.writes('PUT', '/api/settings').length === 1, 'both saves');
+    const mon = h.lastCall('PUT', '/api/monitoring/settings')!.body as { intervalMs: number; timeoutMs: number; retentionHours: number; retentionSamples: number };
+    expect(mon.intervalMs === 30_000 && mon.timeoutMs === 8_000 && mon.retentionHours === 720 && mon.retentionSamples === 2000, `monitoring settings: ${JSON.stringify(mon)}`);
+    expect((h.lastCall('PUT', '/api/settings')!.body as { monitoring: { slowMs: number } }).monitoring.slowMs === 2000, 'the slow threshold was not saved to the display settings');
+    await h.waitFor(() => !q('.ud-pop'), 'the panel to close after saving');
+  });
+
+  await test('uptime: Add monitor asks for what to watch, the check and a name, and sends exactly that', async (h) => {
+    h.setRoutes(uptimeRoutes(upMonitors(), { '/api/monitoring/monitors': (body: unknown) => ({ monitor: { id: 'mon-new', ...(body as object) } }) }));
+    await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);
+    await h.waitFor(() => qa('.ur-row').length === 3, 'the page');
+    click(qa('.ur-ctl button').find((b) => text(b).includes('Add monitor'))!);
+    await h.waitFor(() => !!q('#ua-target'), 'the dialog');
+    expect(qa('.modal input').length === 2, `only what to watch and a name are fields, saw ${qa('.modal input').length}`);
+    expect(qa('.modal [role="radio"]').length === 0 && q<HTMLButtonElement>('.modal-foot .btn-primary')!.disabled, 'a check type was offered, or Add was enabled, before a target');
+    type(q<HTMLInputElement>('#ua-target')!, 'Wave');
+    await h.waitFor(() => qa('.modal [role="radio"]').length === 2, 'both checks for a service');
+    expect(q<HTMLInputElement>('#ua-name')!.value === 'Wave', 'the name does not default from the service');
+    click(qa('.modal [role="radio"]')[1]);
+    click(q('.modal-foot .btn-primary')!);
+    await h.waitFor(() => h.writes('POST', '/api/monitoring/monitors').length === 1, 'the create request');
+    expect(JSON.stringify(h.lastCall('POST', '/api/monitoring/monitors')!.body) === JSON.stringify({ name: 'Wave', type: 'docker', target: { service: { group: 'Media', name: 'wave' } } }), `body: ${JSON.stringify(h.lastCall('POST', '/api/monitoring/monitors')!.body)}`);
+    await h.waitFor(() => !q('#ua-target'), 'the dialog to close');
+  });
+
+  await test('uptime: Add monitor shows the server\'s reason when it refuses, and a host:port is a port check', async (h) => {
+    h.setRoutes(uptimeRoutes(upMonitors(), { '/api/monitoring/monitors': { $status: 400, body: { error: 'That address is not allowed.', code: 'blocked' } } }));
+    await h.mount(<MemoryRouter initialEntries={['/monitoring']}><App /></MemoryRouter>);
+    await h.waitFor(() => qa('.ur-row').length === 3, 'the page');
+    click(qa('.ur-ctl button').find((b) => text(b).includes('Add monitor'))!);
+    await h.waitFor(() => !!q('#ua-target'), 'the dialog');
+    type(q<HTMLInputElement>('#ua-target')!, 'db.lan:5432');
+    await h.waitFor(() => qa('.modal [role="radio"]').length === 1 && text(q('.modal')!).includes('Port check'), 'the port check');
+    click(q('.modal-foot .btn-primary')!);
+    await h.waitFor(() => !!q('.modal .ud-err'), 'the refusal');
+    expect(text(q('.modal .ud-err')!).includes('not allowed'), `error: ${text(q('.modal .ud-err')!)}`);
+    expect(!!q('#ua-target'), 'the dialog closed on a refusal');
+    expect((h.lastCall('POST', '/api/monitoring/monitors')!.body as { target: { port: number } }).target.port === 5432, 'the port was not sent as a number');
   });
 
   for (const r of results) {
