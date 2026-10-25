@@ -29,11 +29,16 @@ html[data-bg='ember'] { --bg-base: #100b08; --scrim-top: .04; --scrim-bot: .14; 
   radial-gradient(40% 30% at 38% 34%, rgba(230, 170, 90, 0.10), transparent 70%),
   linear-gradient(180deg, #221510, #100b08 76%); }
 /* the user's own photo: cover-fit under a heavier scrim, and denser tiles (see .glass below) */
-html[data-bg='photo'] { --bg-base: #0b0c0e; --scrim-top: .12; --scrim-bot: .40; --bg-art: var(--bg-photo, none); --bg-size: cover; --bg-pos: center; }
+html[data-bg='photo'] { --bg-base: #0b0c0e; --scrim-top: .50; --scrim-bot: .62; --plate: .62; --bg-art: var(--bg-photo, none); --bg-size: cover; --bg-pos: center; }
 /* the light theme keeps its flat paper background */
 html[data-bg='flat'] .bg-layer { background: var(--bg); }
 html[data-bg='flat'] .bg-layer .art, html[data-bg='flat'] .bg-layer .grain, html[data-bg='flat'] .bg-layer .scrim { display: none; }
-html[data-bg='photo'] { --tile: rgba(19, 21, 25, 0.70); --tile-hover: rgba(26, 29, 35, 0.80); }
+html[data-bg='photo'] { --tile: rgba(19, 21, 25, 0.78); --tile-hover: rgba(26, 29, 35, 0.86); }
+
+/* text that sits straight on the background gets a soft local plate (scripts/contrast.mjs reads --plate) */
+:root { --plate: .40; }
+.plate { margin-left: -12px; padding: 6px 12px; border-radius: 12px; background: linear-gradient(90deg, rgba(8, 9, 12, var(--plate)) 0, rgba(8, 9, 12, var(--plate)) 80%, transparent); }
+html[data-bg='flat'] .plate { background: none; }
 
 /* ───────── page frame ───────── */
 .app-shell { display: block; position: relative; z-index: 1; min-height: 100dvh; }

@@ -76,7 +76,7 @@ export default function Home() {
   return (
     <>
       <section className="hm-hero rise" style={{ ['--i' as never]: 0 }}>
-        <div>
+        <div className="plate">
           <h1 className="on-bg">{greetingLead(now)}, <em>{name}</em>.</h1>
           <p className="hm-sub on-bg">
             {all.length > 0 && <span><i className="hdot ok" />{running} of {all.length} containers running</span>}
@@ -107,7 +107,7 @@ export default function Home() {
           {!services.data && services.error && <p className="hm-empty glass">The services could not be read ({services.error}).</p>}
           {stacks.map((st) => (
             <section key={st.name} className="hm-stack rise" style={{ ['--i' as never]: i++, ['--h' as never]: st.hue }} aria-labelledby={`hm-st-${st.name}`}>
-              <div className="hm-stack-h on-bg">
+              <div className="hm-stack-h plate on-bg">
                 <h2 id={`hm-st-${st.name}`}>{st.name}</h2>
                 <span className="hm-meta">{st.tiles.length} container{st.tiles.length === 1 ? '' : 's'} · {st.attention ? `${st.attention} need${st.attention === 1 ? 's' : ''} attention` : 'all running'}</span>
                 <span className="hm-line" />
