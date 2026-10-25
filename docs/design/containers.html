@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en" data-bg="graphite">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpusHub — Containers (design mockup)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  .tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .search { position: relative; } .search svg { position: absolute; left: 12px; top: 9px; color: var(--ink-3); pointer-events: none; }
+  .search input { padding-left: 36px; width: 220px; border-radius: 999px; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 18px; }
+  .fchip { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--hair); background: rgba(10, 11, 14, 0.4); color: var(--ink-2); font-size: 13px; display: inline-flex; gap: 8px; align-items: center; transition: all var(--t-fast) var(--ease); backdrop-filter: blur(8px); }
+  .fchip:hover { color: var(--ink); border-color: var(--hair-strong); }
+  .fchip[aria-pressed='true'] { background: rgba(255, 255, 255, 0.14); color: var(--ink); border-color: var(--hair-strong); }
+  .fchip b { font-weight: 600; color: var(--ink); font-size: 12.5px; }
+
+  .stack { margin-bottom: 22px; }
+  .stack .sh { display: flex; align-items: center; gap: 14px; padding: 14px 20px 12px; }
+  .sh .nm { display: flex; align-items: baseline; gap: 12px; flex: 1; min-width: 0; flex-wrap: wrap; } .sh h2 { font-size: 17px; font-weight: 640; letter-spacing: -0.012em; }
+  .sh .hue { width: 10px; height: 10px; border-radius: 4px; background: hsl(var(--h) 55% 62%); box-shadow: 0 0 12px hsl(var(--h) 60% 60% / 0.55); align-self: center; }
+  .row { display: grid; grid-template-columns: minmax(220px, 1.7fr) minmax(130px, 0.9fr) 70px 150px 316px; gap: 16px; align-items: center; padding: 10px 14px 10px 20px; border-top: 1px solid var(--hair); cursor: pointer; transition: background var(--t-fast) var(--ease); position: relative; }
+  .row:hover { background: rgba(255, 255, 255, 0.04); } .row:focus-visible { outline-offset: -2px; }
+  .row.upd::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+  .id { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .ico { width: 38px; height: 38px; border-radius: 12px; flex: none; display: grid; place-items: center; color: hsl(var(--h) 66% 80%); background: hsl(var(--h) 42% 52% / 0.17); border: 1px solid hsl(var(--h) 45% 72% / 0.2); }
+  .id .t { min-width: 0; line-height: 1.3; } .id b { display: block; font-weight: 600; font-size: 14.5px; letter-spacing: -0.01em; }
+  .id small { display: block; color: var(--ink-2); font-size: 12px; font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .st { display: flex; align-items: center; gap: 9px; font-size: 13px; line-height: 1.3; } .st small { display: block; color: var(--ink-3); font-size: 12px; }
+  .ports { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); }
+  .res { font-size: 12px; color: var(--ink-2); } .res .bar { height: 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); margin-top: 5px; overflow: hidden; } .res .bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+  .acts { display: flex; align-items: center; gap: 2px; justify-content: flex-end; }
+  .updbtn { height: 30px; padding: 0 12px 0 9px; border-radius: 999px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); color: var(--accent-ink); font-weight: 600; font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; white-space: nowrap; transition: all var(--t-fast) var(--ease); }
+  .updbtn:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); transform: translateY(-1px); }
+  .row.flash { animation: flash 900ms var(--ease) 1; } @keyframes flash { from { background: color-mix(in srgb, var(--accent) 22%, transparent); } }
+  .empty { padding: 28px; text-align: center; color: var(--ink-2); }
+
+  /* drawer */
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 55; width: min(560px, 100vw); background: rgba(14, 15, 19, 0.97); backdrop-filter: blur(24px); border-left: 1px solid var(--hair-strong); box-shadow: -30px 0 70px -20px rgba(0, 0, 0, 0.8); transform: translateX(102%); visibility: hidden; transition: transform 320ms var(--ease-out), visibility 0s linear 320ms; display: flex; flex-direction: column; }
+  .drawer.open { transform: none; visibility: visible; transition-delay: 0s; }
+  .dh { padding: 18px 22px 14px; border-bottom: 1px solid var(--hair); display: flex; gap: 14px; align-items: center; } .dh .ico { width: 46px; height: 46px; }
+  .dh h2 { font-size: 20px; font-weight: 640; letter-spacing: -0.015em; line-height: 1.2; } .dh .sub { color: var(--ink-2); font-size: 12.5px; font-family: var(--font-mono); }
+  .dbar { display: flex; gap: 8px; padding: 12px 22px; border-bottom: 1px solid var(--hair); flex-wrap: wrap; }
+  .dbody { overflow: auto; flex: 1; padding: 4px 22px 40px; scrollbar-width: thin; }
+  .sec { padding: 18px 0 6px; border-bottom: 1px solid var(--hair); } .sec:last-child { border-bottom: 0; }
+  .sec h3 { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; } .sec h3 .lnk { text-transform: none; letter-spacing: 0; }
+  .kv { display: grid; grid-template-columns: 112px 1fr; gap: 7px 14px; font-size: 13.5px; padding-bottom: 14px; } .kv dt { color: var(--ink-3); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+  .updbox { padding: 14px 16px; border-radius: 14px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); margin-bottom: 14px; }
+  .updbox .v { font-family: var(--font-mono); font-size: 13px; } .updbox p { color: var(--ink-2); font-size: 12.5px; margin: 6px 0 10px; }
+  .tr { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; font-size: 13.5px; border-top: 1px solid var(--hair); } .tr:first-of-type { border-top: 0; } .tr small { display: block; color: var(--ink-3); font-size: 12px; }
+  .log { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.7; background: #090a0c; border: 1px solid var(--hair); border-radius: 12px; padding: 10px 12px; max-height: 220px; overflow: auto; margin-bottom: 14px; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .log .ts { color: var(--ink-3); } .log .WARN { color: var(--warn); } .log .ERROR, .log .FATAL { color: #f08a8c; }
+  .fld { display: grid; grid-template-columns: 112px 1fr; gap: 6px 14px; align-items: center; margin-bottom: 10px; font-size: 13.5px; } .fld label { color: var(--ink-3); }
+
+  /* modal */
+  .modal { position: fixed; z-index: 60; left: 50%; top: 50%; transform: translate(-50%, -46%) scale(0.97); width: min(520px, calc(100vw - 28px)); max-height: calc(100dvh - 40px); overflow: auto; background: rgba(16, 18, 22, 0.98); border: 1px solid var(--hair-strong); border-radius: 22px; box-shadow: var(--shadow-pop); opacity: 0; visibility: hidden; transition: opacity var(--t-med) var(--ease), transform 280ms var(--ease-out), visibility 0s linear var(--t-med); }
+  .modal.open { opacity: 1; visibility: visible; transform: translate(-50%, -50%); transition-delay: 0s; }
+  .modal.wide { width: min(980px, calc(100vw - 28px)); }
+  .mh2 { padding: 22px 24px 4px; } .mh2 h2 { font-size: 19px; font-weight: 640; letter-spacing: -0.015em; } .mh2 p { color: var(--ink-2); margin-top: 4px; }
+  .mb { padding: 12px 24px 6px; } .mf { padding: 14px 24px 22px; display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
+  .cons { display: grid; gap: 8px; margin: 8px 0 4px; } .cons div { display: grid; grid-template-columns: 20px 1fr; gap: 10px; font-size: 13.5px; color: var(--ink-2); } .cons svg { margin-top: 2px; } .cons .y svg { color: var(--ok); } .cons .w svg { color: var(--warn); } .cons .n svg { color: var(--ink-3); }
+  .steps { display: grid; gap: 10px; margin: 10px 0 8px; } .stp { display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: center; font-size: 14px; color: var(--ink-3); } .stp .c { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--hair-strong); display: grid; place-items: center; } .stp.go { color: var(--ink); } .stp.go .c { border-color: var(--accent); border-top-color: transparent; animation: spin 800ms linear infinite; } .stp.ok { color: var(--ink-2); } .stp.ok .c { background: var(--ok); border-color: var(--ok); color: #0b0c0e; } @keyframes spin { to { transform: rotate(360deg); } }
+  .toast { position: fixed; left: 50%; bottom: 28px; z-index: 70; transform: translate(-50%, 16px); padding: 11px 18px; border-radius: 999px; background: rgba(18, 20, 24, 0.97); border: 1px solid var(--hair-strong); box-shadow: var(--shadow-pop); display: flex; gap: 10px; align-items: center; opacity: 0; visibility: hidden; transition: all 300ms var(--ease-out); font-size: 13.5px; }
+  .toast.on { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
+
+  /* compose editor */
+  .wz { display: flex; gap: 8px; padding: 6px 24px 12px; align-items: center; font-size: 13px; color: var(--ink-3); } .wz .s { display: inline-flex; align-items: center; gap: 8px; } .wz .n { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--hair-strong); display: grid; place-items: center; font-size: 12px; font-weight: 600; } .wz .s.on { color: var(--ink); } .wz .s.on .n { background: var(--accent); border-color: var(--accent); color: #0b0c0e; } .wz .s.done .n { background: color-mix(in srgb, var(--accent) 30%, transparent); border-color: var(--accent); } .wz .bar { width: 28px; height: 1px; background: var(--hair-strong); }
+  .ed { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: 16px; }
+  .code { position: relative; border: 1px solid var(--hair-strong); border-radius: 14px; background: #090a0c; overflow: hidden; }
+  .code .gut { position: absolute; left: 0; top: 0; bottom: 0; width: 40px; background: rgba(255, 255, 255, 0.03); border-right: 1px solid var(--hair); font-family: var(--font-mono); font-size: 12px; line-height: 20px; color: var(--ink-3); text-align: right; padding: 10px 8px 10px 0; overflow: hidden; white-space: pre; user-select: none; }
+  .code .gut i { display: block; font-style: normal; } .code .gut i.e { color: #f08a8c; background: color-mix(in srgb, var(--fail) 22%, transparent); } .code .gut i.w { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+  .code textarea { display: block; width: 100%; height: 340px; resize: vertical; border: 0; outline: 0; background: transparent; color: #d7dbe0; font-family: var(--font-mono); font-size: 12.5px; line-height: 20px; padding: 10px 12px 10px 52px; tab-size: 2; white-space: pre; overflow: auto; }
+  .code:focus-within { border-color: color-mix(in srgb, var(--accent) 65%, transparent); }
+  .vres { border: 1px solid var(--hair); border-radius: 14px; background: rgba(255, 255, 255, 0.025); padding: 12px 14px; max-height: 392px; overflow: auto; }
+  .vres h4 { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; } .vres h4 > span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+  .vi { display: grid; grid-template-columns: 18px 1fr; gap: 9px; font-size: 13px; padding: 7px 0; border-top: 1px solid var(--hair); line-height: 1.45; } .vi:first-of-type { border-top: 0; } .vi small { display: block; color: var(--ink-3); font-size: 12px; } .vi.e svg { color: #f08a8c; } .vi.w svg { color: var(--warn); } .vi.o svg { color: var(--ok); }
+  table.rv { width: 100%; border-collapse: collapse; font-size: 13px; } table.rv th { text-align: left; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; padding: 6px 10px 6px 0; } table.rv td { padding: 9px 10px 9px 0; border-top: 1px solid var(--hair); vertical-align: top; }
+
+  @media (max-width: 1100px) { .row { grid-template-columns: minmax(200px, 1.6fr) minmax(120px, 1fr) auto; } .row .ports, .row .res { display: none; } .ed { grid-template-columns: 1fr; } }
+  @media (max-width: 640px) { .row { grid-template-columns: 1fr auto; padding-right: 10px; } .row .st { grid-column: 1 / -1; order: 3; padding-left: 50px; } .acts { flex-wrap: wrap; } .search input { width: 150px; } }
+</style>
+</head>
+<body>
+
+<main class="wrap">
+  <section class="page-h rise" style="--i:0">
+    <div><h1>Containers</h1><p id="sub"></p></div>
+    <div class="tools">
+      <label class="search"><span class="sr">Filter containers</span><span id="si"></span><input class="in" id="q" placeholder="Filter containers" autocomplete="off"></label>
+      <button class="btn" id="chk" type="button"></button>
+      <button class="btn primary" id="addbtn" type="button"></button>
+    </div>
+  </section>
+  <div class="filters rise" style="--i:1" id="filters" role="group" aria-label="Filter by state"></div>
+  <div id="stacks"></div>
+</main>
+
+<div class="scrimfull" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Container details"></aside>
+<div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="mock.js"></script>
+<script>
+(function () {
+  const O = window.OPUS, Q = O.Q, $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  O.mountChrome('containers');
+  $('#si').innerHTML = O.icon('search', 16); $('#chk').innerHTML = O.icon('restart', 15) + 'Check for updates'; $('#addbtn').innerHTML = O.icon('plus', 15) + 'Add compose block';
+
+  /* ── state ── */
+  const C = O.SERVICES.map((s) => Object.assign({ svc: s, hue: O.stackHue(s.stack), cs: O.currentState(s) }, O.detail(s)));
+  C.forEach((c) => { c.status = c.state === 'exited' ? 'exited' : c.cs === 'degraded' ? 'unhealthy' : 'running'; c.pendingUpdate = c.svc.update || null; });
+  let filter = Q.get('filter') || 'all', text = '';
+
+  const icn = (n, s) => O.icon(n, s || 16);
+  const dotOf = (c) => (c.status === 'running' ? 'ok' : c.status === 'unhealthy' ? 'warn' : 'fail');
+  const statusText = (c) => c.status === 'running' ? ['Up ' + c.up, c.health === 'healthy' ? 'healthy' : ''] : c.status === 'unhealthy' ? ['Unhealthy', 'up ' + c.up + ' · healthcheck failing'] : ['Exited (137)', c.up.replace('exited ', '')];
+
+  /* ── list ── */
+  function counts() { return { all: C.length, running: C.filter((c) => c.status !== 'exited').length, stopped: C.filter((c) => c.status === 'exited').length, updates: C.filter((c) => c.pendingUpdate).length, attention: C.filter((c) => c.status !== 'running').length }; }
+  function drawFilters() {
+    const n = counts(), F = [['all', 'All'], ['running', 'Running'], ['stopped', 'Stopped'], ['updates', 'Updates'], ['attention', 'Needs attention']];
+    $('#filters').innerHTML = F.map((f) => '<button class="fchip" type="button" data-f="' + f[0] + '" aria-pressed="' + (filter === f[0]) + '">' + f[1] + ' <b>' + n[f[0]] + '</b></button>').join('');
+    $('#sub').textContent = n.all + ' containers in ' + O.STACKS.length + ' stacks · ' + n.running + ' running' + (n.updates ? ' · ' + n.updates + ' updates available' : '');
+  }
+  const match = (c) => (text ? (c.svc.name + ' ' + c.image + ' ' + c.svc.stack).toLowerCase().includes(text) : true) && (filter === 'all' || (filter === 'running' && c.status !== 'exited') || (filter === 'stopped' && c.status === 'exited') || (filter === 'updates' && c.pendingUpdate) || (filter === 'attention' && c.status !== 'running'));
+  function rowHTML(c) {
+    const s = c.svc, st = statusText(c), run = c.status !== 'exited';
+    const b = (a, ic, label, dis) => '<button class="ibtn" type="button" data-a="' + a + '" data-id="' + s.id + '" aria-label="' + label + ' ' + s.name + '"' + (dis ? ' disabled' : '') + '>' + icn(ic, 16) + '<span class="tt">' + label + '</span></button>';
+    return '<div class="row' + (c.pendingUpdate ? ' upd' : '') + '" tabindex="0" role="button" data-id="' + s.id + '" aria-label="' + s.name + ', ' + st[0] + '. Open details" style="--h:' + c.hue + '">' +
+      '<div class="id"><span class="ico">' + icn(s.icon, 19) + '</span><div class="t"><b>' + s.name + '</b><small>' + c.image + ':' + c.tag + '</small></div></div>' +
+      '<div class="st"><i class="dot ' + dotOf(c) + '"></i><div>' + st[0] + (st[1] ? '<small>' + st[1] + '</small>' : '') + '</div></div>' +
+      '<div class="ports">:' + s.port + '</div>' +
+      '<div class="res">' + (run ? c.cpu + '% · ' + (c.mem >= 1000 ? (c.mem / 1000).toFixed(1) + ' GB' : c.mem + ' MB') + '<div class="bar"><i style="width:' + Math.min(100, Math.max(3, c.cpu * 2)) + '%"></i></div>' : '<span style="color:var(--ink-3)">not running</span>') + '</div>' +
+      '<div class="acts">' + (c.pendingUpdate ? '<button class="updbtn" type="button" data-a="update" data-id="' + s.id + '">' + icn('up', 13) + 'Update to ' + c.pendingUpdate[1] + '</button>' : '') +
+        (run ? b('stop', 'stop', 'Stop') : b('start', 'start', 'Start')) + b('restart', 'restart', 'Restart', !run) + b('logs', 'terminal', 'Logs') + b('recreate', 'layers', 'Recreate') + '</div></div>';
+  }
+  function drawList() {
+    const html = O.STACKS.map((name, si) => {
+      const items = C.filter((c) => c.svc.stack === name && match(c)); if (!items.length) return '';
+      const all = C.filter((c) => c.svc.stack === name), bad = all.filter((c) => c.status !== 'running').length, up = all.filter((c) => c.pendingUpdate).length;
+      return '<section class="stack glass rise" style="--i:' + (2 + si) + ';--h:' + O.stackHue(name) + '" aria-labelledby="sh' + si + '"><div class="sh"><span class="hue"></span><div class="nm"><h2 id="sh' + si + '">' + name + '</h2><span class="meta">' + all.length + ' containers · ' + (bad ? bad + ' need attention' : 'all running') + (up ? ' · ' + up + ' update' + (up > 1 ? 's' : '') : '') + '</span></div>' +
+        '<button class="btn sm ghost" type="button" data-sa="start">' + icn('start', 13) + 'Start all</button><button class="btn sm ghost" type="button" data-sa="stop">' + icn('stop', 13) + 'Stop all</button><button class="btn sm ghost" type="button" data-sa="restart">' + icn('restart', 13) + 'Restart</button></div>' + items.map(rowHTML).join('') + '</section>';
+    }).join('');
+    $('#stacks').innerHTML = html || '<div class="glass empty"><b>No containers match.</b><br>Try another filter, or clear the search.</div>';
+  }
+  function draw() { drawFilters(); drawList(); }
+
+  /* ── toast + simulated operations ── */
+  let tt; function toast(msg, ok) { const t = $('#toast'); t.innerHTML = '<i class="dot ' + (ok === false ? 'warn' : 'ok') + '"></i>' + msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 3200); }
+  function find(id) { return C.find((c) => c.svc.id === id); }
+  function apply(a, id) {
+    const c = find(id);
+    if (a === 'stop') { c.status = 'exited'; c.up = 'exited just now'; toast(c.svc.name + ' stopped. Auto-heal will leave it alone.'); }
+    else if (a === 'start') { c.status = 'running'; c.up = 'a few seconds'; toast(c.svc.name + ' started.'); }
+    else if (a === 'restart') { c.status = 'running'; c.up = 'a few seconds'; toast(c.svc.name + ' restarted in 6 s.'); }
+    else if (a === 'recreate') { c.status = 'running'; c.up = 'a few seconds'; toast(c.svc.name + ' recreated from the same image.'); }
+    draw(); if (drawerId === id) drawDrawer(id);
+    const r = $('.row[data-id="' + id + '"]'); if (r) r.classList.add('flash');
+  }
+
+  /* ── confirm dialog: every action that changes a container says what it will do ── */
+  const modal = $('#modal'), scrim = $('#scrim');
+  const OPEN = { modal: false, drawer: false };
+  function sync() { scrim.classList.toggle('open', OPEN.modal || OPEN.drawer); }
+  function closeModal() { modal.classList.remove('open'); OPEN.modal = false; sync(); }
+  const POL = {
+    stop: (c) => ({ title: 'Stop ' + c.svc.name + '?', sub: 'It stays stopped until you start it.', rows: [['y', 'Sends a stop signal, waits up to 10 s, then force-stops.'], ['y', 'Auto-heal will not restart it. A deliberate stop is respected.'], ['n', 'Volumes, networks and settings are untouched.']], go: 'Stop', cls: 'danger' }),
+    start: (c) => ({ title: 'Start ' + c.svc.name + '?', sub: 'Starts the existing container.', rows: [['y', 'Runs with the same image, ports and volumes as before.'], ['n', 'Nothing is pulled or recreated.']], go: 'Start', cls: 'primary' }),
+    restart: (c) => ({ title: 'Restart ' + c.svc.name + '?', sub: 'Brief downtime, about 5 to 10 seconds.', rows: [['y', 'Stops the container, then starts it again.'], ['w', 'Active sessions and downloads are interrupted.'], ['n', 'Image and settings are not changed.']], go: 'Restart', cls: 'primary' }),
+    recreate: (c) => ({ title: 'Recreate ' + c.svc.name + '?', sub: 'Replaces the container with a fresh one from the same image.', rows: [['y', 'Removes the container and creates a new one with identical settings.'], ['y', 'Volumes and networks are kept. Data on volumes is safe.'], ['w', 'Anything stored only inside the container (not on a volume) is lost.'], ['y', 'If the new container fails to start, the old one is restored.']], go: 'Recreate', cls: 'primary' }),
+    update: (c) => ({ title: 'Update ' + c.svc.name + ' to ' + (c.pendingUpdate ? c.pendingUpdate[1] : '') + '?', sub: c.image + ': ' + (c.pendingUpdate ? c.pendingUpdate[0] + ' to ' + c.pendingUpdate[1] : ''), rows: [['y', 'Pulls the new image (about 210 MB) before touching the running container.'], ['y', 'Recreates the container with the same settings, then waits up to 60 s for it to be healthy.'], ['y', 'If anything fails, it rolls back to ' + (c.pendingUpdate ? c.pendingUpdate[0] : 'the old version') + ' automatically.'], ['w', 'Expect about a minute of downtime.']], go: 'Update', cls: 'primary', steps: true }),
+  };
+  function confirmDialog(a, id) {
+    const c = find(id), p = POL[a](c), ic = { y: 'check', w: 'info', n: 'info' };
+    closeDrawerKeep(); modal.className = 'modal';
+    modal.innerHTML = '<div class="mh2"><h2>' + p.title + '</h2><p>' + p.sub + '</p></div><div class="mb"><div class="cons">' + p.rows.map((r) => '<div class="' + r[0] + '">' + icn(ic[r[0]], 16) + '<span>' + r[1] + '</span></div>').join('') + '</div></div><div class="mf"><button class="btn ghost" type="button" data-x>Cancel</button><button class="btn ' + p.cls + '" type="button" id="go">' + p.go + '</button></div>';
+    modal.classList.add('open'); OPEN.modal = true; sync(); $('#go').focus();
+    $('[data-x]', modal).addEventListener('click', closeModal);
+    $('#go').addEventListener('click', () => {
+      if (!p.steps) { closeModal(); setTimeout(() => apply(a, id), 120); return; }
+      const S = ['Pulling ' + c.image + ':' + c.pendingUpdate[1], 'Recreating the container', 'Waiting for it to be healthy'];
+      modal.innerHTML = '<div class="mh2"><h2>Updating ' + c.svc.name + '</h2><p>You can close this; it keeps going.</p></div><div class="mb"><div class="steps">' + S.map((s, i) => '<div class="stp" id="s' + i + '"><span class="c"></span><span>' + s + '</span><small class="meta" id="m' + i + '"></small></div>').join('') + '</div></div><div class="mf"><button class="btn" type="button" data-x>Close</button></div>';
+      $('[data-x]', modal).addEventListener('click', closeModal);
+      const M = ['212 MB', 'old container kept until the new one is up', 'healthcheck passed after 14 s'];
+      S.forEach((_, i) => { setTimeout(() => { const e = $('#s' + i); e.className = 'stp go'; }, i * 1500 + 100); setTimeout(() => { const e = $('#s' + i); e.className = 'stp ok'; e.querySelector('.c').innerHTML = icn('check', 12); $('#m' + i).textContent = M[i]; if (i === 2) { c.tag = c.pendingUpdate[1]; c.pendingUpdate = null; c.status = 'running'; c.up = 'a few seconds'; draw(); toast(c.svc.name + ' updated to ' + c.tag + '.'); $('.mf', modal).innerHTML = '<button class="btn primary" type="button" data-x>Done</button>'; $('[data-x]', modal).addEventListener('click', closeModal); } }, i * 1500 + 1400); });
+    });
+  }
+
+  /* ── detail drawer ── */
+  let drawerId = null; const drawer = $('#drawer');
+  function closeDrawerKeep() { drawer.classList.remove('open'); OPEN.drawer = false; drawerId = null; sync(); }
+  function drawDrawer(id) {
+    const c = find(id), s = c.svc, run = c.status !== 'exited', st = statusText(c), lg = O.logs(s, s.id === 'immich' ? 12 : 9);
+    const fmt = (d) => d.toLocaleTimeString('en', { hour12: false });
+    drawer.innerHTML =
+      '<div class="dh" style="--h:' + c.hue + '"><span class="ico">' + icn(s.icon, 22) + '</span><div style="flex:1;min-width:0"><h2>' + s.name + '</h2><div class="sub">' + c.image + ':' + c.tag + '</div></div><span class="pill ' + (c.status === 'running' ? 'ok' : c.status === 'unhealthy' ? 'warn' : 'fail') + '"><i class="dot ' + dotOf(c) + '" style="width:7px;height:7px;box-shadow:none"></i>' + (c.status === 'running' ? 'Running' : c.status === 'unhealthy' ? 'Unhealthy' : 'Exited') + '</span><button class="ibtn" type="button" id="dx" aria-label="Close">' + icn('x', 18) + '</button></div>' +
+      '<div class="dbar">' + (run ? '<button class="btn sm" data-a="stop" data-id="' + id + '">' + icn('stop', 13) + 'Stop</button><button class="btn sm" data-a="restart" data-id="' + id + '">' + icn('restart', 13) + 'Restart</button>' : '<button class="btn sm primary" data-a="start" data-id="' + id + '">' + icn('start', 13) + 'Start</button>') + '<button class="btn sm" data-a="recreate" data-id="' + id + '">' + icn('layers', 13) + 'Recreate</button><a class="btn sm" href="#">' + icn('ext', 13) + 'Open ' + s.name + '</a></div>' +
+      '<div class="dbody">' +
+      '<div class="sec"><h3>Overview</h3><dl class="kv"><dt>Status</dt><dd>' + st[0] + (st[1] ? ' · ' + st[1] : '') + '</dd><dt>Image</dt><dd class="mono">' + c.image + ':' + c.tag + '</dd><dt>Container</dt><dd class="mono">' + c.id + '</dd><dt>Restart policy</dt><dd>' + c.policy + '</dd><dt>Ports</dt><dd class="mono">' + c.ports.join(', ') + '</dd><dt>Networks</dt><dd>' + c.nets.join(', ') + '</dd><dt>Volumes</dt><dd class="mono">' + c.vols.join('<br>') + '</dd></dl></div>' +
+      '<div class="sec"><h3>Updates and recovery</h3>' + (c.pendingUpdate ? '<div class="updbox"><div class="v">' + c.tag + ' → ' + c.pendingUpdate[1] + '</div><p>Found 2 h ago. Nothing is applied until you press Update. Volumes are kept and a failed update rolls back.</p><button class="btn sm primary" type="button" data-a="update" data-id="' + id + '">' + icn('up', 13) + 'Update to ' + c.pendingUpdate[1] + '</button></div>' : '<p class="meta" style="margin-bottom:10px">' + c.tag + ' is the newest version found. Last checked 2 h ago.</p>') +
+        '<div class="tr"><div>Check for updates<small>Looks for a newer image digest once a day. Never applies one.</small></div><button class="tog" role="switch" aria-checked="' + c.checks + '" aria-label="Check for updates"></button></div>' +
+        '<div class="tr"><div>Auto-heal<small>Restarts it when its healthcheck keeps failing (3 tries, with backoff).</small></div><button class="tog" role="switch" aria-checked="' + c.autoheal + '" aria-label="Auto-heal"></button></div></div>' +
+      '<div class="sec"><h3>Recent logs <a class="lnk" href="#">Open full logs</a></h3><div class="log" tabindex="0" aria-label="Last log lines">' + lg.map((l) => '<span class="ts">' + fmt(l[0]) + '</span> <span class="' + l[1] + '">' + l[1].padEnd(5) + '</span> ' + l[2]).join('\n') + '</div></div>' +
+      '<div class="sec"><h3>On the Home page</h3><div class="fld"><label for="o1">Name</label><input class="in" id="o1" value="' + s.name + '"></div><div class="fld"><label for="o2">Link</label><input class="in mono" id="o2" value="' + c.url + '"></div><div class="fld"><label>Icon</label><div style="display:flex;gap:10px;align-items:center"><span class="ico" style="width:34px;height:34px;--h:' + c.hue + '">' + icn(s.icon, 17) + '</span><button class="btn sm" type="button">Change icon</button></div></div><div class="tr"><div>Show on Home<small>Hidden containers stay in this list.</small></div><button class="tog" role="switch" aria-checked="true" aria-label="Show on Home"></button></div><div style="display:flex;justify-content:flex-end;padding:8px 0 14px"><button class="btn sm primary" type="button">Save changes</button></div></div>' +
+      '</div>';
+    $('#dx').addEventListener('click', closeDrawerKeep);
+  }
+  function openDrawer(id) { drawerId = id; drawDrawer(id); drawer.classList.add('open'); OPEN.drawer = true; sync(); }
+
+  /* ── add compose block ── */
+  const GOOD = 'services:\n  uptime-kuma:\n    image: louislam/uptime-kuma:1.23.13\n    container_name: uptime-kuma\n    restart: unless-stopped\n    ports:\n      - "3002:3001"\n    volumes:\n      - kuma-data:/app/data\n\nvolumes:\n  kuma-data:\n';
+  const BAD = 'services:\n  web:\n    image: nginx:latest\n    ports:\n      - "8096:80"\n  agent:\n    container_name: agent\n    privileged: true\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n';
+  const USED = { 8096: 'Jellyfin', 4533: 'Navidrome', 2283: 'Immich', 8989: 'Sonarr', 7878: 'Radarr', 8080: 'qBittorrent', 8123: 'Home Assistant', 8053: 'Pi-hole', 8200: 'Vaultwarden', 3000: 'Gitea', 8000: 'Paperless', 3001: 'Grafana' };
+  function validate(src) {
+    const L = src.split('\n'), out = [], svcs = []; let cur = null, inServices = false, sect = null;
+    const add = (lvl, line, msg, hint) => out.push({ lvl, line, msg, hint });
+    if (!/^services:\s*$/m.test(src)) add('e', 1, 'No "services:" section.', 'A compose block needs at least one service.');
+    L.forEach((raw, i) => {
+      const n = i + 1;
+      if (/\t/.test(raw)) { add('e', n, 'Tabs are not allowed in YAML.', 'Indent with two spaces.'); return; }
+      if (/^services:/.test(raw)) { inServices = true; return; }
+      if (/^\S/.test(raw) && !/^services:/.test(raw)) { inServices = false; return; }
+      if (!inServices) return;
+      let m;
+      if ((m = raw.match(/^ {2}([A-Za-z0-9_.-]+):\s*$/))) { cur = { name: m[1], line: n, ports: [], vols: [] }; svcs.push(cur); sect = null; return; }
+      if (!cur) return;
+      if ((m = raw.match(/^ {4}image:\s*(\S+)/))) { cur.image = m[1]; cur.imageLine = n; if (!/:[^/]+$/.test(m[1]) || /:latest$/.test(m[1])) add('w', n, cur.name + ': the image is not pinned (' + m[1] + ').', 'A fixed version makes updates deliberate: use a tag like :1.23.13.'); }
+      if ((m = raw.match(/^ {4}restart:\s*(\S+)/))) cur.restart = m[1];
+      if (/^ {4}privileged:\s*true/.test(raw)) add('e', n, cur.name + ': privileged containers are blocked.', 'Policy: OpusHub will not create a container with full host access.');
+      if (/^ {4}(ports|volumes):\s*$/.test(raw)) sect = raw.trim().replace(':', '');
+      else if (/^ {4}\S/.test(raw)) sect = null;
+      if ((m = raw.match(/^ {6}-\s*"?([^"]+)"?\s*$/)) && sect === 'ports') { const hp = +m[1].split(':')[0]; cur.ports.push(m[1]); if (USED[hp]) add('e', n, cur.name + ': host port ' + hp + ' is already used by ' + USED[hp] + '.', 'Pick a free host port, e.g. ' + (hp + 1000) + ':' + (m[1].split(':')[1] || hp) + '.'); }
+      if ((m = raw.match(/^ {6}-\s*"?([^"]+)"?\s*$/)) && sect === 'volumes') { cur.vols.push(m[1]); if (/docker\.sock/.test(m[1])) add('e', n, cur.name + ': the Docker socket cannot be mounted.', 'Policy: a container with the socket can control every other container.'); }
+    });
+    svcs.forEach((s) => { if (!s.image) add('e', s.line, s.name + ': "image" is required.', 'Add an image line, e.g. image: nginx:1.27'); if (s.image && !s.restart) add('w', s.imageLine, s.name + ': no restart policy.', 'Without one it will not come back after a reboot. Consider restart: unless-stopped.'); });
+    out.sort((a, b) => a.line - b.line);
+    return { out, svcs, errs: out.filter((o) => o.lvl === 'e').length, warns: out.filter((o) => o.lvl === 'w').length };
+  }
+  let step = 1, src = Q.get('compose') === 'bad' ? BAD : GOOD, sname = 'uptime-kuma';
+  function drawCompose() {
+    const v = validate(src), L = src.split('\n'), marks = {}; v.out.forEach((o) => { marks[o.line] = marks[o.line] === 'e' ? 'e' : o.lvl; });
+    const wz = '<div class="wz">' + [['Write', 1], ['Review', 2], ['Confirm', 3]].map((s, i) => (i ? '<span class="bar"></span>' : '') + '<span class="s ' + (step === s[1] ? 'on' : step > s[1] ? 'done' : '') + '"><span class="n">' + (step > s[1] ? icn('check', 12) : s[1]) + '</span>' + s[0] + '</span>').join('') + '</div>';
+    let body = '', foot = '';
+    if (step === 1) {
+      body = '<div class="mb"><div class="ed"><div><div class="code"><div class="gut" id="gut">' + L.map((_, i) => '<i' + (marks[i + 1] ? ' class="' + marks[i + 1] + '"' : '') + '>' + (i + 1) + '</i>').join('') + '</div><textarea id="ta" spellcheck="false" aria-label="Compose file">' + src.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</textarea></div><div class="fld" style="margin:12px 0 0;grid-template-columns:96px 1fr"><label for="sn">Stack name</label><input class="in mono" id="sn" value="' + sname + '"></div></div>' +
+        '<div class="vres" aria-live="polite"><h4>' + (v.errs ? '<span style="color:#f08a8c">' + icn('alert', 16) + v.errs + ' error' + (v.errs > 1 ? 's' : '') + '</span>' : '<span style="color:var(--ok)">' + icn('check', 16) + 'Looks good</span>') + (v.warns ? '<span class="meta">· ' + v.warns + ' warning' + (v.warns > 1 ? 's' : '') + '</span>' : '') + '<span class="meta" style="margin-left:auto">' + v.svcs.length + ' service' + (v.svcs.length === 1 ? '' : 's') + '</span></h4>' +
+        (v.out.length ? v.out.map((o) => '<div class="vi ' + o.lvl + '">' + icn(o.lvl === 'e' ? 'alert' : 'info', 16) + '<div>' + o.msg + '<small>Line ' + o.line + ' · ' + o.hint + '</small></div></div>').join('') : '<div class="vi o">' + icn('check', 16) + '<div>Every service has an image, ports are free, no blocked options.<small>Checked as you type. Nothing is sent to Docker yet.</small></div></div>') + '</div></div></div>';
+      foot = '<span class="meta" style="margin-right:auto">Pasted from a README? Paste the whole block, including <span class="mono">services:</span>.</span><button class="btn ghost" data-x type="button">Cancel</button><button class="btn primary" id="next" type="button"' + (v.errs || !v.svcs.length ? ' disabled' : '') + '>Review ' + icn('chevr', 14) + '</button>';
+    } else if (step === 2) {
+      body = '<div class="mb"><table class="rv"><thead><tr><th>Service</th><th>Image</th><th>Ports</th><th>Volumes</th></tr></thead><tbody>' + v.svcs.map((s) => '<tr><td><b>' + s.name + '</b></td><td class="mono">' + s.image + '</td><td class="mono">' + (s.ports.join('<br>') || '—') + '</td><td class="mono">' + (s.vols.join('<br>') || '—') + '</td></tr>').join('') + '</tbody></table>' +
+        '<div class="cons" style="margin-top:14px"><div class="y">' + icn('check', 16) + '<span>Creates the stack <b>' + sname + '</b>, its network <span class="mono">' + sname + '_default</span> and ' + (v.svcs.reduce((a, s) => a + s.vols.filter((x) => !x.startsWith('/')).length, 0)) + ' named volume(s).</span></div>' + (v.warns ? '<div class="w">' + icn('info', 16) + '<span>' + v.warns + ' warning' + (v.warns > 1 ? 's' : '') + ' remain. They do not block the deploy.</span></div>' : '') + '</div></div>';
+      foot = '<button class="btn ghost" data-back type="button">Back to editing</button><button class="btn primary" id="next" type="button">Continue ' + icn('chevr', 14) + '</button>';
+    } else {
+      body = '<div class="mb"><div class="cons"><div class="y">' + icn('check', 16) + '<span>Pulls ' + v.svcs.length + ' image' + (v.svcs.length > 1 ? 's' : '') + ' (about 180 MB in total) before creating anything.</span></div><div class="y">' + icn('check', 16) + '<span>Starts ' + v.svcs.map((s) => s.name).join(', ') + ' in order, then checks they stay up for 10 s.</span></div><div class="y">' + icn('check', 16) + '<span>If it fails, everything it created is removed again. Existing containers are not touched.</span></div><div class="n">' + icn('info', 16) + '<span>The compose file is stored in OpusHub (not on disk) and appears under "' + sname + '" on this page.</span></div></div></div>';
+      foot = '<button class="btn ghost" data-back type="button">Back</button><button class="btn primary" id="deploy" type="button">' + icn('start', 14) + 'Deploy ' + sname + '</button>';
+    }
+    modal.className = 'modal wide' + (OPEN.modal ? ' open' : '');
+    modal.innerHTML = '<div class="mh2"><h2>Add compose block</h2><p>Paste a Docker Compose snippet. It is checked as you type and nothing runs until you confirm.</p></div>' + wz + body + '<div class="mf">' + foot + '</div>';
+    $$('[data-x]', modal).forEach((b) => b.addEventListener('click', closeModal));
+    $$('[data-back]', modal).forEach((b) => b.addEventListener('click', () => { step--; drawCompose(); }));
+    const nx = $('#next'); if (nx) nx.addEventListener('click', () => { step++; drawCompose(); });
+    const dp = $('#deploy'); if (dp) dp.addEventListener('click', () => { closeModal(); setTimeout(() => toast('Deploying ' + sname + '… 2 containers started.'), 140); });
+    const ta = $('#ta'); if (ta) {
+      ta.addEventListener('input', () => { const pos = ta.selectionStart; src = ta.value; sname = $('#sn').value; const keep = ta.scrollTop; drawCompose(); const t2 = $('#ta'); t2.focus(); t2.selectionStart = t2.selectionEnd = pos; t2.scrollTop = keep; });
+      ta.addEventListener('scroll', () => { $('#gut').scrollTop = ta.scrollTop; });
+      $('#sn').addEventListener('input', (e) => { sname = e.target.value; });
+    }
+  }
+  function openCompose() { closeDrawerKeep(); step = 1; drawCompose(); modal.classList.add('open'); OPEN.modal = true; sync(); }
+
+  /* ── wiring ── */
+  document.addEventListener('click', (e) => {
+    const t = e.target, fc = t.closest('.fchip'), act = t.closest('[data-a]'), sa = t.closest('[data-sa]'), row = t.closest('.row'), tg = t.closest('.tog');
+    if (tg) { tg.setAttribute('aria-checked', String(tg.getAttribute('aria-checked') !== 'true')); return; }
+    if (fc) { filter = fc.dataset.f; draw(); return; }
+    if (act) { e.stopPropagation(); const a = act.dataset.a, id = act.dataset.id; if (a === 'logs') { openDrawer(id); setTimeout(() => { const l = $('.log', drawer); if (l) l.scrollIntoView({ block: 'center' }); }, 330); } else confirmDialog(a, id); return; }
+    if (sa) { toast('Stack actions ask for confirmation too (' + sa.dataset.sa + ' all).'); return; }
+    if (row) openDrawer(row.dataset.id);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (OPEN.modal) closeModal(); else if (OPEN.drawer) closeDrawerKeep(); } if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('row')) { e.preventDefault(); openDrawer(e.target.dataset.id); } });
+  scrim.addEventListener('click', () => { if (OPEN.modal) closeModal(); else closeDrawerKeep(); });
+  $('#q').addEventListener('input', (e) => { text = e.target.value.trim().toLowerCase(); drawList(); });
+  $('#addbtn').addEventListener('click', openCompose);
+  $('#chk').addEventListener('click', () => toast('Checked 41 images: 3 updates available (nothing applied).'));
+
+  draw();
+  const o = Q.get('open'); if (o && find(o)) openDrawer(o);
+  const cf = Q.get('confirm'); if (cf) { const [a, id] = cf.split(':'); if (POL[a] && find(id)) confirmDialog(a, id); }
+  const cp = Q.get('compose'); if (cp) { if (cp === 'review') step = 2; if (cp === 'confirm') step = 3; openCompose(); if (cp === 'review' || cp === 'confirm') { step = cp === 'review' ? 2 : 3; drawCompose(); } }
+})();
+</script>
+</body>
+</html>

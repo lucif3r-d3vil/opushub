@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en" data-bg="graphite">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpusHub — First run (design mockup)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  body { display: grid; grid-template-rows: auto 1fr auto; min-height: 100dvh; }
+  .top { padding: 34px 20px 0; text-align: center; }
+  .top .brand { justify-content: center; font-size: 26px; }
+  .top .brand i { width: 28px; height: 28px; border-radius: 9px; }
+  .stage { display: grid; place-items: start center; padding: 26px 16px 40px; }
+  .col { width: min(520px, 100%); }
+  .prog { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 6px 0 22px; font-size: 13px; color: var(--ink-3); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.5); }
+  .prog .s { display: inline-flex; align-items: center; gap: 8px; } .prog .n { width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--hair-strong); display: grid; place-items: center; font-size: 12px; font-weight: 600; transition: all var(--t-med) var(--ease); }
+  .prog .s.on { color: var(--ink); } .prog .s.on .n { background: var(--accent); border-color: var(--accent); color: #0b0c0e; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .prog .s.done { color: var(--ink-2); } .prog .s.done .n { background: color-mix(in srgb, var(--accent) 28%, transparent); border-color: var(--accent); color: var(--accent-ink); }
+  .prog .bar { width: 34px; height: 1px; background: var(--hair-strong); }
+  .card { padding: 30px 30px 26px; overflow: hidden; }
+  .pane { display: none; } .pane.on { display: block; animation: slide 420ms var(--ease-out) both; }
+  html.static .pane.on { animation: none; } @keyframes slide { from { opacity: 0; transform: translateX(22px); } }
+  .card h1 { font-family: var(--font-display); font-weight: 400; font-size: 34px; line-height: 1.08; letter-spacing: -0.02em; }
+  .card h1 em { font-style: italic; color: var(--accent-ink); }
+  .card .lead { color: var(--ink-2); margin: 10px 0 22px; font-size: 14.5px; line-height: 1.55; }
+  .f { display: grid; gap: 6px; margin-bottom: 16px; } .f label { font-size: 13px; font-weight: 560; } .f small { color: var(--ink-3); font-size: 12.5px; }
+  .f input.in { height: 44px; border-radius: 12px; font-size: 15px; width: 100%; }
+  .pwrow { position: relative; } .pwrow button { position: absolute; right: 8px; top: 7px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; color: var(--ink-2); } .pwrow button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.07); }
+  .meter { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 8px; } .meter i { height: 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); transition: background var(--t-med) var(--ease); }
+  .meter[data-l='1'] i:nth-child(-n+1) { background: var(--fail); } .meter[data-l='2'] i:nth-child(-n+2) { background: var(--warn); } .meter[data-l='3'] i:nth-child(-n+3) { background: color-mix(in srgb, var(--ok) 80%, var(--warn)); } .meter[data-l='4'] i { background: var(--ok); }
+  .rules { display: grid; gap: 6px; margin: 4px 0 18px; font-size: 13px; color: var(--ink-3); } .rules div { display: flex; align-items: center; gap: 9px; transition: color var(--t-fast) var(--ease); } .rules .dotc { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--hair-strong); display: grid; place-items: center; transition: all var(--t-fast) var(--ease); } .rules .ok { color: var(--ink); } .rules .ok .dotc { background: var(--ok); border-color: var(--ok); color: #0b0c0e; }
+  .actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 8px; }
+  .btn.lg { height: 44px; padding: 0 24px; font-size: 14.5px; border-radius: 999px; }
+  .foot { text-align: center; padding: 0 16px 26px; color: var(--ink-3); font-size: 12.5px; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6); }
+
+  .check { display: flex; align-items: center; gap: 16px; padding: 16px 18px; border-radius: 16px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--hair); margin-bottom: 14px; }
+  .check .big { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); }
+  .check.ok { --c: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); } .check.bad { --c: var(--fail); border-color: color-mix(in srgb, var(--fail) 32%, transparent); } .check.busy { --c: var(--ink-3); }
+  .check b { display: block; font-size: 15.5px; } .check small { color: var(--ink-2); font-size: 13px; line-height: 1.45; display: block; margin-top: 2px; }
+  .spinr { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--hair-strong); border-top-color: var(--ink); animation: spin 800ms linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
+  .stacks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px; } .stk { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--hair); background: rgba(255, 255, 255, 0.03); font-size: 13.5px; } .stk i { width: 9px; height: 9px; border-radius: 3px; background: hsl(var(--h) 55% 62%); } .stk span { margin-left: auto; color: var(--ink-3); font-size: 12.5px; }
+  .fixbox { padding: 14px 16px; border-radius: 14px; margin-bottom: 16px; background: color-mix(in srgb, var(--fail) 8%, transparent); border: 1px solid color-mix(in srgb, var(--fail) 26%, transparent); font-size: 13px; color: var(--ink-2); line-height: 1.6; } .fixbox code { font-family: var(--font-mono); font-size: 12px; color: var(--ink); background: rgba(255, 255, 255, 0.07); padding: 1px 6px; border-radius: 6px; } .fixbox ol { margin: 6px 0 0 18px; padding: 0; }
+  .sum { display: grid; gap: 0; margin: 4px 0 20px; border: 1px solid var(--hair); border-radius: 16px; overflow: hidden; } .sum div { display: grid; grid-template-columns: 24px 1fr auto; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--hair); font-size: 14px; } .sum div:first-child { border-top: 0; } .sum svg { color: var(--ok); } .sum small { color: var(--ink-3); font-size: 12.5px; }
+  .tick { width: 72px; height: 72px; margin: 0 0 14px; } .tick circle { fill: none; stroke: color-mix(in srgb, var(--ok) 40%, transparent); stroke-width: 2; } .tick path { fill: none; stroke: var(--ok); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 40; stroke-dashoffset: 40; animation: drawc 700ms 250ms var(--ease-out) forwards; } html.static .tick path { animation: none; stroke-dashoffset: 0; } @keyframes drawc { to { stroke-dashoffset: 0; } }
+  .err { color: #f0a6a8; font-size: 12.5px; min-height: 18px; }
+  @media (max-width: 480px) { .card { padding: 24px 20px 20px; } .card h1 { font-size: 29px; } .stacks { grid-template-columns: 1fr; } .prog .bar { width: 14px; } }
+</style>
+</head>
+<body>
+<header class="top rise" style="--i:0"><a class="brand" href="home.html"><i></i><span>OpusHub</span></a></header>
+
+<main class="stage">
+  <div class="col">
+    <div class="prog rise" style="--i:1" id="prog" aria-label="Progress"></div>
+    <section class="card glass rise" style="--i:2" id="card">
+
+      <!-- Step 1 -->
+      <div class="pane" id="p1" aria-labelledby="t1">
+        <h1 id="t1">Welcome. Let's make <em>your</em> account.</h1>
+        <p class="lead">One administrator guards this install. It's only for you; there is no sign-up, no email and no cloud account.</p>
+        <div class="f"><label for="u">Username</label><input class="in" id="u" value="admin" autocomplete="username" spellcheck="false"><small>Used for the greeting on Home. You can't rename it later, but you can change the password any time.</small></div>
+        <div class="f"><label for="pw">Password</label><div class="pwrow"><input class="in" id="pw" type="password" autocomplete="new-password"><button type="button" id="show" aria-label="Show password">Show</button></div><div class="meter" id="meter" data-l="0" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div>
+        <div class="f"><label for="pw2">Repeat password</label><input class="in" id="pw2" type="password" autocomplete="new-password"></div>
+        <div class="rules" id="rules" aria-live="polite"></div>
+        <div class="err" id="err1"></div>
+        <div class="actions"><span class="meta">Stored as a salted hash on this machine.</span><button class="btn primary lg" id="n1" type="button" disabled></button></div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="pane" id="p2" aria-labelledby="t2">
+        <h1 id="t2">Can OpusHub <em>see</em> Docker?</h1>
+        <p class="lead">It reads your containers from the engine. Nothing is stored about them except what you rename.</p>
+        <div id="dk"></div>
+        <div class="f" id="addr" style="margin-top:6px"><label for="host">Address for links</label><input class="in" id="host" value="nas.lan" spellcheck="false"><small>Detected from this browser. Tiles use it to open containers that publish a port. You can change it in Settings.</small></div>
+        <div class="actions"><button class="btn ghost" id="b2" type="button">Back</button><button class="btn primary lg" id="n2" type="button" disabled></button></div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="pane" id="p3" aria-labelledby="t3">
+        <svg class="tick" viewBox="0 0 72 72" aria-hidden="true"><circle cx="36" cy="36" r="33"/><path d="M22 37l10 10 19-21"/></svg>
+        <h1 id="t3">You're all set, <em id="who"></em>.</h1>
+        <p class="lead">Home is ready. Here is what OpusHub found.</p>
+        <div class="sum" id="sum"></div>
+        <div class="actions"><span class="meta">Want alerts on your phone? Add Telegram under Settings.</span><a class="btn primary lg" href="home.html" id="go"></a></div>
+      </div>
+    </section>
+  </div>
+</main>
+<p class="foot">Everything stays on this machine. OpusHub makes no connection to anyone's servers.</p>
+
+<script src="mock.js"></script>
+<script>
+(function () {
+  const O = window.OPUS, Q = O.Q, $ = (s) => document.querySelector(s);
+  O.mountChrome('wizard', { bare: true });
+  const I = (n, s) => O.icon(n, s || 16), fail = Q.get('docker') === 'fail';
+  let step = 1, dockerOk = false, first = true;
+  $('#n1').innerHTML = 'Continue ' + I('chevr', 15); $('#n2').innerHTML = 'Continue ' + I('chevr', 15); $('#go').innerHTML = 'Open Home ' + I('chevr', 15);
+
+  function prog() { $('#prog').innerHTML = [['Account', 1], ['Docker', 2], ['Done', 3]].map((s, i) => (i ? '<span class="bar"></span>' : '') + '<span class="s ' + (step === s[1] ? 'on' : step > s[1] ? 'done' : '') + '"><span class="n">' + (step > s[1] ? I('check', 12) : s[1]) + '</span>' + s[0] + '</span>').join(''); }
+  function show(n) { step = n; [1, 2, 3].forEach((k) => $('#p' + k).classList.toggle('on', k === n)); prog(); $('#who').textContent = $('#u').value || O.user; if (n === 2) runCheck(); if (!first) { try { window.scrollTo(0, 0); } catch (e) { /* not a browser */ } } first = false; }
+
+  /* step 1: live validation */
+  const u = $('#u'), pw = $('#pw'), pw2 = $('#pw2');
+  function strength(v) { let s = 0; if (v.length >= 8) s++; if (v.length >= 12) s++; if (v.length >= 16) s++; if (/[a-z]/.test(v) && /[A-Z]/.test(v)) s++; if (/\d/.test(v) && /[^A-Za-z0-9]/.test(v)) s++; return v ? Math.max(1, s) : 0; }
+  function check1() {
+    const R = [[u.value.trim().length >= 2 && /^[A-Za-z0-9._-]+$/.test(u.value.trim()), 'A username with letters, numbers, dots or dashes'], [pw.value.length >= 8, 'At least 8 characters'], [pw.value.length > 0 && pw.value === pw2.value, 'Both passwords match']];
+    $('#rules').innerHTML = R.map((r) => '<div class="' + (r[0] ? 'ok' : '') + '"><span class="dotc">' + (r[0] ? I('check', 11) : '') + '</span>' + r[1] + '</div>').join('');
+    $('#meter').dataset.l = strength(pw.value);
+    $('#n1').disabled = !R.every((r) => r[0]);
+    $('#err1').textContent = pw2.value && pw.value !== pw2.value && pw2.value.length >= pw.value.length ? 'The two passwords differ.' : '';
+  }
+  [u, pw, pw2].forEach((e) => e.addEventListener('input', check1));
+  $('#show').addEventListener('click', (e) => { const t = pw.type === 'password'; pw.type = pw2.type = t ? 'text' : 'password'; e.target.textContent = t ? 'Hide' : 'Show'; });
+  $('#n1').addEventListener('click', () => show(2));
+  [pw, pw2, u].forEach((e) => e.addEventListener('keydown', (k) => { if (k.key === 'Enter' && !$('#n1').disabled) show(2); }));
+
+  /* step 2: the Docker check lists containers, not just the socket */
+  function dk(kind) {
+    const box = $('#dk');
+    if (kind === 'busy') { box.innerHTML = '<div class="check busy"><span class="big"><span class="spinr"></span></span><div><b>Checking…</b><small>Asking the engine for its version, then listing containers.</small></div></div>'; $('#n2').disabled = true; $('#addr').style.opacity = 0.5; return; }
+    if (kind === 'ok') {
+      dockerOk = true; $('#addr').style.opacity = 1; $('#n2').disabled = false;
+      box.innerHTML = '<div class="check ok"><span class="big">' + I('check', 24) + '</span><div><b>Connected</b><small>Engine 26.1.0 · API 1.43 · <b style="display:inline;font-size:inherit;color:var(--ink)">12 containers</b> listed. That proves OpusHub may use the engine, not just reach it.</small></div></div><div class="stacks">' +
+        O.STACKS.map((s) => '<div class="stk" style="--h:' + O.stackHue(s) + '"><i></i>' + s + '<span>' + O.SERVICES.filter((x) => x.stack === s).length + ' containers</span></div>').join('') + '</div>';
+    } else {
+      dockerOk = false; $('#addr').style.opacity = 0.5; $('#n2').disabled = true;
+      box.innerHTML = '<div class="check bad"><span class="big">' + I('alert', 22) + '</span><div><b>The engine answers, but OpusHub may not list containers</b><small>Reaching the socket is not the same as being allowed to use it.</small></div></div><div class="fixbox"><b style="color:var(--ink)">How to fix it</b><ol><li>Find the socket\'s group: <code>stat -c %g /var/run/docker.sock</code></li><li>Add that number under <code>group_add</code> in <code>docker-compose.yml</code>.</li><li>Recreate OpusHub: <code>docker compose up -d</code>, then press Check again.</li></ol></div><button class="btn" id="again" type="button">' + I('restart', 14) + 'Check again</button>';
+      $('#again').addEventListener('click', runCheck);
+    }
+  }
+  let ck = 0;
+  function runCheck() { dk('busy'); const my = ++ck; setTimeout(() => { if (my === ck) dk(fail && !window._fixed ? 'bad' : 'ok'); if (fail) window._fixed = !window._fixed; }, O.reduce ? 0 : 1200); }   // with ?docker=fail the first check fails and the second succeeds
+  $('#b2').addEventListener('click', () => show(1));
+  $('#n2').addEventListener('click', () => {
+    $('#sum').innerHTML = [['Signed in as <b>' + (u.value.trim() || O.user) + '</b>', 'administrator', 'user'], ['Docker connected', '12 containers in 4 stacks', 'box'], ['Links use <b>' + ($('#host').value || 'nas.lan') + '</b>', 'change in Settings', 'link'], ['Monitoring is ready', 'add your first monitor on Uptime', 'bars']].map((r) => '<div>' + I('check', 16) + '<span>' + r[0] + '</span><small>' + r[1] + '</small></div>').join('');
+    show(3);
+  });
+
+  /* demo and screenshot switches: ?step=2, ?docker=fail, ?demo=1 prefills valid values */
+  if (Q.get('demo')) { pw.value = pw2.value = 'correct horse battery'; }
+  check1();
+  const s0 = +Q.get('step') || 1;
+  if (s0 === 3) { $('#n2').dispatchEvent(new Event('click')); }
+  else { show(s0 >= 2 ? 2 : 1); if (s0 === 2) { window._fixed = false; } }
+})();
+</script>
+</body>
+</html>

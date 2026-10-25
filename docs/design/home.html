@@ -25,6 +25,28 @@
   .host .val small { font-size: 12.5px; font-weight: 450; color: var(--ink-2); letter-spacing: 0; }
   .host svg.sp { width: 100%; height: 30px; }
   .host .plain { font-size: 12.5px; color: var(--ink-3); height: 30px; display: flex; align-items: center; }
+  .host .hb { text-align: left; border-radius: 14px; cursor: pointer; transition: background var(--t-fast) var(--ease); }
+  .host .hb:hover { background: rgba(255, 255, 255, 0.045); }
+  .host .hb[aria-expanded='true'] { background: rgba(255, 255, 255, 0.075); }
+  .host .hb .lab .cv { color: var(--ink-3); transition: transform var(--t-med) var(--ease), color var(--t-fast) var(--ease); }
+  .host .hb:hover .cv { color: var(--ink); } .host .hb[aria-expanded='true'] .cv { transform: rotate(180deg); color: var(--accent-ink); }
+  .host { margin-bottom: 0; } .hxw + .attn, .host + .hxw { margin-top: 0; }
+  .hxw { display: grid; grid-template-rows: 0fr; margin-bottom: 18px; transition: grid-template-rows 340ms var(--ease-out); }
+  .hxw.open { grid-template-rows: 1fr; } .hxw > .hxi { overflow: hidden; min-height: 0; }
+  .hxw:not(.open) { margin-bottom: 18px; } .hxw .hx { margin-top: 12px; padding: 18px 22px 18px; opacity: 0; transform: translateY(-6px); transition: opacity 260ms var(--ease), transform 340ms var(--ease-out); }
+  .hxw.open .hx { opacity: 1; transform: none; } html.static .hxw, html.static .hxw .hx { transition: none; }
+  .hx header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
+  .hx h2 { font-size: 17px; font-weight: 640; letter-spacing: -0.012em; } .hx header .meta { margin-right: auto; }
+  .hx .chart { position: relative; }
+  svg.bigc { width: 100%; height: auto; display: block; overflow: visible; }
+  svg.bigc text { fill: var(--ink-3); font-size: 11px; font-family: var(--font-ui); }
+  svg.bigc text.pk { fill: var(--warn); font-weight: 600; } svg.bigc text.avgl { fill: var(--ink-2); }
+  svg.bigc .ln { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 45%, transparent)); }
+  .cxt { position: absolute; pointer-events: none; padding: 6px 11px; border-radius: 10px; background: rgba(12, 13, 16, 0.94); border: 1px solid var(--hair-strong); box-shadow: var(--shadow-pop); font-size: 12px; line-height: 1.4; opacity: 0; transition: opacity var(--t-fast) var(--ease); white-space: nowrap; z-index: 3; }
+  .cxt.on { opacity: 1; } .cxt b { display: block; font-size: 14px; } .cxt em { font-style: normal; color: var(--ink-2); }
+  .hx .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin-top: 10px; border-top: 1px solid var(--hair); padding-top: 12px; }
+  .hx .stats div { padding: 0 6px; } .hx .stats b { display: block; font-size: 20px; font-weight: 560; letter-spacing: -0.02em; } .hx .stats small { display: block; color: var(--ink-3); font-size: 12px; }
+  @media (max-width: 600px) { .hx .stats { grid-template-columns: repeat(2, 1fr); row-gap: 10px; } .hx { padding: 14px 14px 14px; } }
 
   /* ── needs attention: the only band that is empty when all is well ── */
   .attn { padding: 16px 18px 16px; margin-bottom: 30px; border-color: color-mix(in srgb, var(--warn) 34%, var(--hair)); }
@@ -103,13 +125,14 @@
 <main class="wrap">
   <section class="hero rise" style="--i:0">
     <div>
-      <h1 id="greet">Good afternoon, <em>Nora</em>.</h1>
+      <h1 id="greet">Good afternoon, <em>admin</em>.</h1>
       <p class="sub" id="sub"></p>
     </div>
     <div class="clock" aria-label="Local time"><b id="clk">14:35</b><span id="dt"></span></div>
   </section>
 
   <section class="host glass rise" style="--i:1" aria-label="Host vitals" id="host"></section>
+  <div class="hxw" id="hxw"><div class="hxi"><section class="hx glass" id="hx" aria-label="Host history"></section></div></div>
 
   <section class="attn glass rise" style="--i:2" aria-labelledby="attn-h" id="attn"></section>
 
@@ -122,12 +145,13 @@
 <script src="mock.js"></script>
 <script>
 (function () {
-  const O = window.OPUS, $ = (s) => document.querySelector(s);
+  const O = window.OPUS, $ = (s) => document.querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   O.mountChrome('home');
 
   /* greeting + clock (live) */
   const now = new Date(), hr = now.getHours();
-  $('#greet').innerHTML = (hr < 5 ? 'Still up' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening') + ', <em>Nora</em>.';
+  $('#greet').innerHTML = (hr < 5 ? 'Still up' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening') + ', <em></em>.';
+  $('#greet em').textContent = O.user;   // placeholder: the administrator's account name
   function tick() {
     const d = new Date(); $('#clk').textContent = O.clock(d);
     $('#dt').textContent = d.toLocaleDateString('en', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -145,15 +169,40 @@
 
   /* host vitals — one sampler feeds all of these in the product */
   const H = [
-    { k: 'CPU', unit: '%', min: 0, max: 48, mean: 17, amp: 17, fmt: (v) => Math.round(v) + '<small>%</small>' },
-    { k: 'Memory', unit: '%', min: 38, max: 46, mean: 41.5, amp: 2.4, fmt: (v) => Math.round(v) + '<small>% of 32 GB</small>' },
-    { k: 'Network', unit: '', min: 0, max: 36, mean: 9, amp: 16, fmt: (v) => '↓ ' + v.toFixed(1) + '<small> MB/s</small>' },
-    { k: 'Disk /', unit: '%', min: 61.5, max: 62.5, mean: 62, amp: 0.16, fmt: (v) => v.toFixed(0) + '<small>% of 1.8 TB</small>' },
+    { m: 'cpu', k: 'CPU', min: 0, max: 48, mean: 17, amp: 17, fmt: (v) => Math.round(v) + '<small>%</small>' },
+    { m: 'memory', k: 'Memory', min: 38, max: 46, mean: 41.5, amp: 2.4, fmt: (v) => Math.round(v) + '<small>% of 32 GB</small>' },
+    { m: 'network', k: 'Network', min: 0, max: 36, mean: 9, amp: 16, fmt: (v) => '↓ ' + v.toFixed(1) + '<small> MB/s</small>' },
+    { m: 'disk', k: 'Disk /', min: 61.5, max: 62.5, mean: 62, amp: 0.16, fmt: (v) => v.toFixed(0) + '<small>% of 1.8 TB</small>' },
   ];
-  $('#host').innerHTML = H.map((h, i) => '<div class="h"><div class="lab"><span class="micro">' + h.k + '</span></div><div class="val" id="hv' + i + '"></div><svg class="sp" id="hs' + i + '" role="img" aria-label="' + h.k + ' over the last few minutes"></svg></div>').join('') +
-    '<div class="h"><div class="lab"><span class="micro">Temp</span></div><div class="val">41<small>°C</small></div><div class="plain">CPU package · fine</div></div>' +
+  const chev = O.icon('chev', 14, 'cv');
+  $('#host').innerHTML = H.map((h, i) => '<button type="button" class="h hb" data-m="' + h.m + '" aria-expanded="false" aria-controls="hx" aria-label="' + h.k + ': show history"><div class="lab"><span class="micro">' + h.k + '</span>' + chev + '</div><div class="val" id="hv' + i + '"></div><svg class="sp" id="hs' + i + '" aria-hidden="true"></svg></button>').join('') +
+    '<button type="button" class="h hb" data-m="temp" aria-expanded="false" aria-controls="hx" aria-label="Temperature: show history"><div class="lab"><span class="micro">Temp</span>' + chev + '</div><div class="val">41<small>°C</small></div><div class="plain">CPU package · fine</div></button>' +
     '<div class="h"><div class="lab"><span class="micro">Uptime</span></div><div class="val">18<small> days</small></div><div class="plain">since the kernel update</div></div>';
   H.forEach((h, i) => O.spark($('#hs' + i), { n: 44, w: 160, h: 30, min: h.min, max: h.max, mean: h.mean, amp: h.amp, start: h.mean, seed: 'host' + i, tick: 1600, onValue: (v) => { $('#hv' + i).innerHTML = h.fmt(v); } }));
+
+  /* expand a stat into a larger chart: 1h / 24h / 7d */
+  let hm = null, hr2 = '1h';
+  const fmtT = (t, r) => r === '7d' ? O.dayClock(new Date(t)) : O.clock(new Date(t));
+  function paintHx() {
+    const m = O.METRICS[hm], box = $('#hx');
+    box.innerHTML = '<header><h2>' + m.label + '</h2><span class="meta">' + m.note + '</span>' +
+      '<div class="seg sm" role="group" aria-label="Range">' + ['1h', '24h', '7d'].map((r) => '<button type="button" data-r="' + r + '" aria-pressed="' + (r === hr2) + '">' + (r === '1h' ? '1 hour' : r === '24h' ? '24 hours' : '7 days') + '</button>').join('') + '</div>' +
+      '<button type="button" class="ibtn" id="hxclose" aria-label="Close chart">' + O.icon('x', 16) + '</button></header><div class="chart" id="hxc"></div><div class="stats" id="hxs"></div>';
+    const st = O.bigChart($('#hxc'), hm, hr2);
+    $('#hxs').innerHTML = '<div><b>' + m.fmt(st.now) + '</b><small>now</small></div><div><b>' + m.fmt(st.avg) + '</b><small>average, ' + O.HR[hr2].label.toLowerCase() + '</small></div><div><b>' + m.fmt(st.peak) + '</b><small>peak at ' + fmtT(st.peakAt, hr2) + '</small></div><div><b>' + m.fmt(st.low) + '</b><small>lowest at ' + fmtT(st.lowAt, hr2) + '</small></div>';
+    $$('.seg button', box).forEach((b) => b.addEventListener('click', () => { hr2 = b.dataset.r; paintHx(); }));
+    $('#hxclose').addEventListener('click', () => toggleHx(hm));
+  }
+  function toggleHx(m) {
+    const wrap = $('#hxw'), same = hm === m && wrap.classList.contains('open');
+    $$('.hb').forEach((b) => b.setAttribute('aria-expanded', String(!same && b.dataset.m === m)));
+    if (same) { wrap.classList.remove('open'); hm = null; return; }
+    hm = m; paintHx(); wrap.classList.add('open');
+  }
+  $$('.hb').forEach((b) => b.addEventListener('click', () => toggleHx(b.dataset.m)));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && hm) toggleHx(hm); });
+  if (O.Q.get('hrange')) hr2 = O.Q.get('hrange');
+  if (O.Q.get('expand')) toggleHx(O.Q.get('expand'));
 
   /* needs attention */
   if (bad.length) {

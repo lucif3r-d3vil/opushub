@@ -7,13 +7,17 @@ Two static mockups illustrate it. Open them straight from disk, no build step:
 
 | File | What it shows |
 |---|---|
-| [`home.html`](home.html) | Home: greeting, host vitals, needs attention, launch tiles by stack, updates, uptime summary, bookmarks, bell panel |
+| [`home.html`](home.html) | Home: greeting, host vitals (each stat expands to a 1 h / 24 h / 7 d chart), needs attention, launch tiles by stack, updates, uptime summary, bookmarks |
 | [`uptime.html`](uptime.html) | Uptime: summary, pulse ribbons for 12 services, 24 h / 7 d, hover scrub, incidents, compact defaults panel |
-| `mock.css`, `mock.js` | Shared tokens, six backgrounds, fake data. Home and Uptime read the same fake homelab, so their numbers agree |
+| [`containers.html`](containers.html) | Containers: list by stack with start, stop, restart, recreate, logs and update; detail drawer; confirmation dialogs; "Add compose block" editor with live validation and a three-step confirm |
+| [`bell.html`](bell.html) | The bell panel in four states (needs you, filtered, all clear, phone width), with acknowledge and expandable activity |
+| [`settings.html`](settings.html) | Settings: five compact sections (Docker connection, Notifications, Monitoring defaults, Appearance, Account) |
+| [`wizard.html`](wizard.html) | First run: create the administrator, confirm Docker, done |
+| `mock.css`, `mock.js` | Shared tokens, six backgrounds, fake data. Every page reads the same fake homelab, so their numbers agree |
 
 Useful URL switches (for review and screenshots): `?bg=graphite|dusk|forest|ember|ridge|city`,
-`?static` (settled frame, no motion), `?bell=1`, and on Uptime `?range=7d`, `?pop=1`, `?scrub=0.62&row=2`.
-The swatch dock at the bottom is mockup-only. The product exposes the same choice in Settings.
+`?static` (settled frame, no motion), `?bell=1`, `?menu=1` (account menu), `?user=name` (placeholder name). Per page: Home `?expand=cpu&hrange=24h&hover=0.6`; Uptime `?range=7d&pop=1&scrub=0.62&row=2`; Containers `?open=immich`, `?confirm=recreate:immich`, `?compose=bad|review|confirm`; Settings `?docker=fail&adv=1&pw=1`; Wizard `?step=2|3`, `?docker=fail`, `?demo=1`.
+The background picker now lives in the account menu (avatar, top right) and in Settings → Appearance; both share one state.
 
 Mockup limits, so nothing surprises you: the two "photos" are generated stand-ins (SVG ridges and CSS
 bokeh); links go nowhere; the Containers page is not drawn; fonts load from `node_modules` if the repo is
@@ -55,6 +59,17 @@ by default, the other accents still work on all six backgrounds); tokens in `tok
 installed and renders tabular figures well, which matters for the host strip and ribbons; Source Serif 4
 supplies the one warm, editorial note that stops a dashboard looking like a dashboard. The only
 additions: numerals at weight 300 for big figures (40 to 56 px), and the serif extension in the table.
+
+## 2b. Round 2 changes
+
+- **Greeting name** is the administrator's account name (`admin` by default), not a made-up first name. The mockup takes `?user=` to show others.
+- **Account menu** (avatar, top right) holds Appearance (theme, six backgrounds, accent), Settings and Sign out. The floating background dock is gone. There is no separate gear.
+- **Host stats expand.** Clicking CPU, Memory, Network, Disk or Temp opens a larger chart under the strip with 1 hour, 24 hours and 7 days, a hover read-out, an average line, the peak marked, and now/average/peak/lowest figures. Esc or the close button collapses it. Needs the single host sampler to keep 7 days (the mockup assumes minute, 15-minute and hourly points).
+- **Containers** is the Portainer replacement surface. Every row shows state, image and tag, port, CPU and memory, and one-click Stop/Start, Restart, Logs and Recreate; an accent "Update to x" button appears only when an update exists. Every change opens a confirm dialog that lists, in plain words, what will and will not happen (volumes kept, rollback on failure). The update dialog shows live steps: pull, recreate, wait for healthy. The detail drawer adds the per-container toggles (check for updates, auto-heal) and the Home overrides (name, link, icon, visibility) that moved off Settings.
+- **Add compose block:** paste, validate as you type (errors and warnings with line numbers and a fix hint, gutter marks on the bad lines), review what will be created, then confirm. Policy refusals are shown, not hidden: privileged mode, mounting the Docker socket, ports already used. Nothing runs until the last step.
+- **Bell** is specified in section 7 and shown in all four states.
+- **Settings** has exactly five sections. Docker connection shows the container-listing check (not just "socket found") and how to fix a refusal. Telegram adds a "Send me" choice of event kinds (a small addition to today's policy; flagged below).
+- **First run** has three steps, as asked. The Docker step performs the same container-listing check and explains the refusal case with the fix.
 
 ## 3. Layout and navigation
 
@@ -218,3 +233,6 @@ and popover fades: no entrance, no drift, no ticking sparklines (they render onc
 6. **Ribbon resolution for 7 days:** hourly buckets (proposed, no new storage) or 30-minute?
 7. **Sparkline window:** the mockup shows about 4 minutes of live data. Is that the right feel, or should it show the last hour?
 8. **Alert acknowledge** in the bell: keep (drawn) or drop?
+9. **Telegram "Send me" checkboxes** (downtime, updates, auto-heal, info): new in this round, maps onto the existing allowed-types policy. Keep, or severity only?
+10. **Wizard scope:** account, Docker, done. The earlier plan also mentioned optional Telegram and a background choice; both are reachable from Settings and the avatar menu right after. Leave them out of the wizard?
+11. **Containers page destructive actions** all confirm. Is one confirmation for Restart too heavy for a homelab, or is the consistency worth it?

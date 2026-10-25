@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en" data-bg="graphite">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpusHub — Bell panel (design mockup)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  .intro { max-width: 760px; }
+  .grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 34px 28px; align-items: start; padding-bottom: 110px; }
+  .state h2 { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; margin-bottom: 4px; text-shadow: 0 1px 12px rgba(0, 0, 0, 0.5); }
+  .state > h3 { font-size: 17px; font-weight: 640; margin-bottom: 12px; letter-spacing: -0.012em; text-shadow: 0 1px 14px rgba(0, 0, 0, 0.55); }
+  .frame { max-width: 440px; } .frame.phone { max-width: 360px; }
+  .why { margin-top: 14px; max-width: 440px; font-size: 13px; color: var(--ink-2); line-height: 1.55; text-shadow: 0 1px 12px rgba(0, 0, 0, 0.6); }
+  .why li { position: relative; padding-left: 16px; margin-bottom: 4px; } .why li::before { content: ''; position: absolute; left: 2px; top: 9px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+  .bellbox .chips2 { padding-top: 14px; }
+  .bellbox .note b { display: block; } .bellbox .note.done { opacity: 0.62; } .bellbox .note .ackd { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-3); font-size: 12.5px; }
+  .bellbox .acts { align-items: center; } .bellbox .acts button { cursor: pointer; }
+  .bellbox .act .at { text-align: left; color: var(--ink-2); font-size: 13px; padding: 0; } .bellbox .act .ad { grid-column: 2 / 4; color: var(--ink-3); font-size: 12.5px; line-height: 1.45; padding: 0 0 4px; }
+  .bellbox h3.sub, .bellbox h3.top { border-top: 1px solid var(--hair); margin-top: 6px; padding-top: 14px; }
+  .bellbox .clear { display: grid; justify-items: center; gap: 2px; padding: 22px 18px 24px; color: var(--ink-2); text-align: center; } .bellbox .clear svg { color: var(--ok); margin-bottom: 4px; } .bellbox .clear b { color: var(--ink); font-weight: 560; }
+  .bellbox .more { padding: 4px 18px 14px; }
+  .live { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 5px 12px; border-radius: 999px; border: 1px solid var(--hair); background: rgba(10, 11, 14, 0.5); margin-top: 10px; }
+  @media (max-width: 480px) { .grid4 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <section class="page-h rise" style="--i:0">
+    <div class="intro">
+      <h1>The bell</h1>
+      <p>One panel for everything that needs you, and a record of what happened. It replaces the Activity page. Click the bell in the top bar for the real popover; below are four states, all interactive.</p>
+      <span class="live"><i class="dot ok"></i><span id="count"></span></span>
+    </div>
+  </section>
+
+  <div class="grid4">
+    <section class="state rise" style="--i:1"><h2>State 1</h2><h3>Needs you</h3><div class="frame bellbox" id="s1"></div>
+      <ul class="why"><li>Unacknowledged items first, each with a severity dot, one plain sentence and one to three actions.</li><li>The paper-plane mark says it also went to Telegram.</li><li>Acknowledge dims the row and moves it to "Acknowledged"; the badge count in the top bar drops.</li></ul></section>
+
+    <section class="state rise" style="--i:2"><h2>State 2</h2><h3>Filtered to Auto-heal</h3><div class="frame bellbox" id="s2"></div>
+      <ul class="why"><li>Filters narrow both lists: Needs you, Updates, Auto-heal, Downtime.</li><li>Activity rows expand on click to show the detail behind them, including your own actions (the audit record).</li></ul></section>
+
+    <section class="state rise" style="--i:3"><h2>State 3</h2><h3>All clear</h3><div class="frame bellbox" id="s3"></div>
+      <ul class="why"><li>When nothing needs you the panel says so and the badge disappears.</li><li>Recent activity stays, so "what just happened?" always has an answer.</li></ul></section>
+
+    <section class="state rise" style="--i:4"><h2>State 4</h2><h3>On a phone (360 px)</h3><div class="frame phone bellbox" id="s4"></div>
+      <ul class="why"><li>Same panel, full width under the top bar. Actions wrap rather than shrink.</li><li>Closes with Esc, a tap outside, or the bell again; focus returns to the bell.</li></ul></section>
+  </div>
+</main>
+
+<script src="mock.js"></script>
+<script>
+(function () {
+  const O = window.OPUS, B = O.bell, $ = (s) => document.querySelector(s);
+  O.mountChrome('bell', { noPopover: true });
+  const paint = () => { const n = B.unacked(); $('#count').textContent = n ? n + ' need you right now (this is the number on the bell badge)' : 'All clear (the badge is hidden)'; };
+
+  B.render($('#s1'), { data: B.data });                                   // shares state with the real popover and the badge
+  B.render($('#s2'), { data: B.clone(), filter: 'heal', open: { 'Today1': true } });
+  B.render($('#s3'), { data: B.clone((c) => c.notes.forEach((n) => { n.acked = true; })), open: {} });
+  B.render($('#s4'), { data: B.clone() });
+
+  paint(); document.addEventListener('click', () => setTimeout(paint, 0));
+  const open = O.Q.get('open'); if (open === 'act') document.querySelector('#s1 .at') && document.querySelector('#s1 .at').click();
+})();
+</script>
+</body>
+</html>
