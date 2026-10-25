@@ -21,13 +21,6 @@ operations listed below. Treat the OpusHub account like a Docker administrator a
   code. For a boundary enforced outside OpusHub, set `OPUSHUB_OPERATIONS_SOCKET` to a filtering
   socket proxy that exposes only the endpoints you want.
 
-## Files explorer
-
-Read-only by construction: there is no write endpoint. Requests name a configured root plus a
-relative path; containment is resolved server-side, and credentials, keys, session material and
-the Docker socket are refused by policy. Mount the roots `:ro` as well, because a mount is
-enforced by the kernel rather than by our code. Details: `docs/archive/17-phase-11a.md`.
-
 ## Reporting a vulnerability
 
 Please report privately through GitHub's "Report a vulnerability" (Security tab of

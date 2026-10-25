@@ -29,7 +29,6 @@ You do **not** need to be a developer or know React/Node to use it.
 | **Monitoring** | OpusHub’s own uptime engine. Create monitors for HTTP, TCP, or Docker state. It records incidents with real durations and never pretends a service is up when it isn’t |
 | **System** | Honest host metrics — CPU, memory, storage, network — read directly from the Linux kernel (`/proc` and `/sys`) |
 | **Infrastructure** | Filesystems, ZFS pools/datasets (when present), network interfaces, optional OPNsense firewall status, and a physical topology map you can define |
-| **Files** | A read-only explorer for directories you name: list, sort, search by name, preview (text, JSON/YAML, Markdown, logs, images, PDF), inspect ownership and permissions, see which mount, dataset and containers a path belongs to, and download. It cannot create, rename, move, copy, delete, upload, `mkdir`, `chmod` or `chown` anything — there is no such endpoint |
 | **Operations** | Confirmation-gated, audited actions on containers (start, stop, restart, pause, kill, rename, recreate, edit, update, remove), stacks (deploy, start, stop, remove), images (pull) and a small service catalog. Each action shows its consequence and needs a server-minted confirmation token |
 | **Updates & recovery** | Update-available state and "Update now" (pull, recreate, health-check, rollback) for containers, fed today by [Diun](https://crazymax.dev/diun/) webhooks; recovery events from [Docker Autoheal](https://github.com/willfarrell/docker-autoheal) webhooks. Both are external tools OpusHub *observes*; it does not yet replace them. Webhooks are authenticated with `OPUSHUB_WEBHOOK_SECRET` |
 | **Notifications** | An in-app notification center plus Telegram and generic-webhook channels, driven by an event bus (container state, monitor incidents, updates, operations, alerts) and a simple allow-list policy |
@@ -51,7 +50,7 @@ OpusHub takes a different approach:
 - **Docker is the source of truth.** If a container exists, it appears. If you remove it, it disappears from every page. No stale entries.
 - **YAML is only presentation.** You can rename services, pick icons, change groups, and set order — but you cannot invent a container that doesn’t exist.
 - **No fake data.** If Docker is disconnected or a metric is unavailable, the UI says so clearly instead of showing zeros or placeholders.
-- **Safety by design.** Docker access is a fixed, enumerated set of calls, not a pass-through. Mutating operations (container start/stop/restart/pause/kill/rename/recreate/update/remove, stack deploy, image pull, catalog install) require a server-minted confirmation token and are fully audited. Note that mounting the socket `:ro` does **not** stop Docker API writes — the boundary is OpusHub's own code; for an outside-enforced boundary, set `OPUSHUB_OPERATIONS_SOCKET` to a filtering socket proxy. The file manager is read-only the same way — not by hiding buttons, but by having no write path to hide: every request names a root you configured plus a path relative to it, resolution and containment happen server-side, and credentials, keys, session material and the Docker socket are refused by policy wherever they live.
+- **Safety by design.** Docker access is a fixed, enumerated set of calls, not a pass-through. Mutating operations (container start/stop/restart/pause/kill/rename/recreate/update/remove, stack deploy, image pull, catalog install) require a server-minted confirmation token and are fully audited. Note that mounting the socket `:ro` does **not** stop Docker API writes — the boundary is OpusHub's own code; for an outside-enforced boundary, set `OPUSHUB_OPERATIONS_SOCKET` to a filtering socket proxy.
 - **One local administrator account.** Simple, honest authentication. Designed for LAN / VPN use, not the public internet.
 
 ---
@@ -117,13 +116,6 @@ Everything lives in the `config/` folder. You can start with an empty folder —
 
 You can also edit most of these from the Settings UI. Changes are written as clean, readable YAML.
 
-Two environment values control the file manager (`.env`, or the container's environment):
-
-| Value | Purpose |
-|-------|---------|
-| `OPUSHUB_FILES_ROOTS` | Comma-separated absolute paths the Files page may read, e.g. `/tank/media,/opt/stacks`. Nothing else is reachable; `/` is refused outright. In a container these directories must also be mounted — see the commented example in `docker-compose.yml` |
-| `OPUSHUB_FILES_DISABLED` | Set to `1` to switch the feature off completely: no root is exposed and no `/api/files` route answers |
-
 ---
 
 ## Philosophy in one sentence
@@ -138,7 +130,7 @@ This principle guides every feature — from how service URLs are resolved, to h
 
 Deeper technical docs live in the `docs/` folder:
 
-See the [documentation index](docs/README.md). Current docs: architecture, design system, discovery contract, authentication, distribution, and [SECURITY.md](SECURITY.md). Per-phase design records, including the File manager (Phase 11A) review, are kept in [docs/archive](docs/archive/).
+See the [documentation index](docs/README.md). Current docs: architecture, design system, discovery contract, authentication, distribution, and [SECURITY.md](SECURITY.md). Per-phase design records are kept in [docs/archive](docs/archive/).
 
 ---
 
