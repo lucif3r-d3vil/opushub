@@ -76,8 +76,8 @@ Sizes are approximate lines of code, to show the scale of each removal.
 | `search.js`, `SearchOverlay.tsx` | KEEP | Decided: Ctrl+K stays. Trim its index to containers, stacks, monitors, settings. |
 | `providers/icons.js` | KEEP | Service icons on Home. |
 | `statsHistory.js` | REMOVE | Decided: container charts go. |
-| `homepageImport.js` | KEEP, then REMOVE | A one-time migration; delete once you have moved off Homepage. |
-| `configStore.js`, `configSchema.js`, `configHistory.js`, `configScope.js` | MERGE | Into two modules: store and history. |
+| `homepageImport.js` | REMOVED | Went with the import wizard. |
+| `configStore.js` | KEEP | Atomic writes with a bounded backup in `data/config-backups/`. `configSchema.js`, `configHistory.js`, `configScope.js`, `configExport.js` and `configImport.js` are removed. |
 | `configExport.js`, `configImport.js` | REMOVE | Decided: back up by copying `config/`. |
 | `updateCheck.js`, `version.js` | MERGE | Into Settings ("about"). Small. |
 | `api.js` (1.9k), `model.js` (1.2k), `*Api.js` | MERGE | Split by domain: containers, uptime, bell, settings, auth. |

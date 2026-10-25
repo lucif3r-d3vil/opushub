@@ -153,9 +153,6 @@ test('choosing a template applies exactly that template', async () => {
   const layout = readLayout();
   assert.equal(layout.hub.spacing, 'comfortable');
   assert.equal(layout.hub.widgets.length, 4, 'the media arrangement, not the default one');
-  // A version was recorded, so the choice is undoable like every other configuration write.
-  const versions = fs.readdirSync(path.join(DATA, 'config-history'));
-  assert.ok(versions.length >= 1, 'applying a template at setup records a configuration version');
 });
 
 test('the default choice arranges nothing, and setup still completes', async () => {

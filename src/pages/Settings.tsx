@@ -18,7 +18,6 @@ import { GroupNameField } from '../components/GroupNameField';
 import { checkGroupName, renameGroupAt, uniqueGroupName } from '../lib/groupName';
 import { Sortable } from '../components/Sortable';
 import { Block, Row } from './settings/parts';
-import { ExportTab, HistoryTab, ImportTab } from './settings/Configuration';
 import { MonitoringSettingsTab } from './settings/Monitoring';
 import ConnectionsTab from './settings/Connections';
 import { HubPreview } from '../components/hub/HubPreview';
@@ -58,9 +57,6 @@ const TABS = [
   { id: 'notifications', label: 'Notifications', section: 'Connections' },
   // the Docker connection: whether the engine answers and lets OpusHub list containers
   { id: 'connections', label: 'Connections', section: 'Connections' },
-  { id: 'import', label: 'Import & migration', section: 'Configuration' },
-  { id: 'history', label: 'History', section: 'Configuration' },
-  { id: 'export', label: 'Export', section: 'Configuration' },
   { id: 'environment', label: 'Environment', section: 'This install' },
   // Phase 10A — the monitoring defaults, their server-side bounds, and the monitors that exist
   { id: 'monitoring', label: 'Monitoring', section: 'This install' },
@@ -129,9 +125,6 @@ export default function SettingsPage() {
           {tab === 'authentication' && <AuthenticationTab />}
           {tab === 'environment' && <EnvironmentTab />}
           {tab === 'monitoring' && <MonitoringSettingsTab />}
-          {tab === 'import' && <ImportTab />}
-          {tab === 'history' && <HistoryTab />}
-          {tab === 'export' && <ExportTab />}
           {!TABS.some((t) => t.id === tab) && (
             <p className="stale-note">Unknown section. <button className="section-link" onClick={() => nav('/settings/appearance')}>Go to Appearance →</button></p>
           )}
@@ -177,7 +170,7 @@ function GeneralTab() {
       <Block title="This install" aside={<span className="stale-note">read-only</span>}>
         <Row label="Version" tight><span className="mono-meta">OpusHub {health?.version || '0.1.0'} · node {health?.node || '…'}</span></Row>
         <Row label="Configured widgets" tight><span className="mono-meta">{layout?.hub.widgets.length ?? 0} instance(s)</span></Row>
-        <Row label="Where the files live" desc="Presentation in config/, account and history in data/ — both mounted, never baked into the image.">
+        <Row label="Where the files live" desc="Presentation in config/, account and state in data/ — both mounted, never baked into the image.">
           <Link className="btn btn-sm" to="/settings/environment">Environment</Link>
         </Row>
       </Block>
@@ -837,8 +830,7 @@ function TemplatesTab({ onPreview }: { onPreview: (t: TemplateEntry | null) => v
       </div>
       <p className="stale-note" style={{ marginTop: 'var(--sp-5)' }}>
         Applying keeps your service ordering, hidden groups and first-run dismissal — a template only rearranges the page.
-        A configuration version is recorded immediately before it is applied, so the previous arrangement is one
-        click away in <Link className="section-link" to="/settings/history">History</Link>.
+        The previous file is kept in <span className="mono-meta">data/config-backups/</span>.
       </p>
 
       {confirming && (

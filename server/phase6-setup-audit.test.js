@@ -1,5 +1,4 @@
-// Phase 6 — security audit of the first-run presentation path, and of the configuration read /
-// history endpoints it sits beside.
+// Phase 6 — security audit of the first-run presentation path.
 //
 // `POST /api/setup` is deliberately reachable *before* authentication: an install with no
 // administrator has nobody to authenticate. Phase 6 made it accept a `presentation` block, which
@@ -16,10 +15,6 @@
 //     file (`layout.json`) atomically;
 //   · no string from the request reaches a filesystem path, a URL fetch, or `settings.advanced`
 //     (so custom CSS/JS cannot be switched on from here);
-//   · the history snapshot the template path records is the presentation scope, and a version file
-//     that names anything else is refused file-by-file at restore time;
-//   · the four configuration read/delete/restore endpoints have the auth + CSRF boundaries they
-//     claim.
 //
 // Every "nothing happened" assertion compares a full byte-level snapshot of *both* directories —
 // config/ and data/ — because the security property is about the whole install, not one file.
@@ -52,7 +47,7 @@ fs.writeFileSync(path.join(CONFIG_DIR, 'app.js'), '// keep me\n');
 
 const { handleApi } = await import('./api.js');
 const { seedSession } = await import('../test/auth-helper.js');
-const { PRESENTATION_FILES, PROTECTED_STATE } = await import('./configScope.js');
+const PRESENTATION_FILES = ['services.yaml', 'stacks.yaml', 'bookmarks.yaml', 'settings.yaml', 'layout.json', 'theme.css', 'app.js'].map((name) => ({ name }));
 
 /* --------------------------------------------------------------------------- request plumbing --- */
 
@@ -119,7 +114,7 @@ const changedFiles = (before, after) => {
   const names = new Set([...Object.keys(before), ...Object.keys(after)]);
   return [...names].filter((n) => before[n] !== after[n]).sort();
 };
-const configTree = (t) => Object.fromEntries(Object.entries(t).filter(([k]) => !k.startsWith('config-history/')));
+const configTree = (t) => t;
 
 /* ======================================================================
    1–2. Limits, and what a hostile payload cannot do — while the install is still uninitialized.
@@ -306,147 +301,6 @@ test('a presentation write is a single atomic file replacement', async () => {
 });
 
 /* ======================================================================
-   9–10. History holds presentation state, and a hostile version cannot escape it.
-   ====================================================================== */
-
-test('setup history snapshots hold presentation files only, and a hostile version is refused per file', async () => {
-  const session = await seedSession();
-  const auth = { cookie: session };
-  // A real configuration write, through the authenticated route, so the history list holds a
-  // version this audit did not plant.
-  const wrote = await call('PUT', '/api/settings', { app: { name: 'Audit Fixture Two' } }, auth);
-  assert.equal(wrote.status, 200, wrote.body);
-  const hist = await call('GET', '/api/config/history', undefined, auth);
-  assert.equal(hist.status, 200, hist.body);
-  const allowed = new Set(PRESENTATION_FILES.map((f) => f.name));
-  assert.ok(hist.json.versions.length >= 1, 'an authenticated settings write should have recorded a version');
-  for (const v of hist.json.versions) {
-    for (const name of v.files) {
-      assert.ok(allowed.has(name), `a version claims to hold ${name}, which is outside the presentation scope`);
-    }
-  }
-
-  // A version file planted by hand, naming authentication state: restore must refuse that file and
-  // still restore the legitimate ones. This is the guard that makes an old or edited snapshot
-  // incapable of escaping the boundary.
-  const historyDir = path.join(DATA_DIR, 'config-history');
-  fs.mkdirSync(historyDir, { recursive: true });
-  const hostileId = '2020-01-01T00-00-00-000Z';
-  fs.writeFileSync(path.join(historyDir, `${hostileId}.json`), JSON.stringify({
-    format: 1, at: '2020-01-01T00:00:00.000Z', reason: 'planted', subject: 'audit', label: 'hostile version',
-    actor: 'audit', checksum: 'x',
-    files: {
-      'services.yaml': 'groups: []\n',
-      '../../data/auth.json': JSON.stringify({ users: [{ username: 'attacker', hash: 'x' }] }),
-      'data/sessions.json': '[]',
-      '../.env': 'SECRET=1\n',
-      '/etc/passwd': 'root:x:0:0\n',
-    },
-    changed: [],
-  }), 'utf8');
-
-  const outsideBefore = Object.fromEntries([path.join(CONFIG_DIR, '..', '.env'), '/etc/passwd']
-    .map((t) => [t, fs.existsSync(t) ? fs.readFileSync(t, 'utf8') : null]));
-  const authBefore = fs.readFileSync(path.join(DATA_DIR, 'auth.json'), 'utf8');
-  const sessionsBefore = fs.readFileSync(path.join(DATA_DIR, 'sessions.json'), 'utf8');
-  const restore = await call('POST', `/api/config/history/${hostileId}/restore`, {}, auth);
-  assert.equal(restore.status, 200, restore.body);
-  assert.deepEqual(restore.json.files, ['services.yaml'], `only services.yaml may be restored (got ${JSON.stringify(restore.json.files)})`);
-  assert.equal(restore.json.skipped.length, 4, 'every out-of-scope file must be reported as skipped');
-  for (const entry of restore.json.skipped) {
-    assert.ok(entry.file && entry.reason, 'a skipped file must say which file, and why');
-  }
-  assert.equal(fs.readFileSync(path.join(DATA_DIR, 'auth.json'), 'utf8'), authBefore, 'authentication state was overwritten by a restore');
-  assert.equal(fs.readFileSync(path.join(DATA_DIR, 'sessions.json'), 'utf8'), sessionsBefore, 'sessions were overwritten by a restore');
-  // A path that exists on every machine would make an existence check meaningless, so the probe is
-  // "did these bytes change", for both destinations the planted version aimed at.
-  const outside = [path.join(CONFIG_DIR, '..', '.env'), '/etc/passwd'];
-  for (const target of outside) {
-    assert.equal(fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null, outsideBefore[target] ?? null,
-      `a restore wrote outside the configuration scope: ${target}`);
-  }
-
-  // A traversal id is not a version at all — for restore or for delete.
-  for (const id of ['../../data/auth', '..%2F..%2Fdata%2Fauth', 'auth.json']) {
-    const r = await call('POST', `/api/config/history/${encodeURIComponent(id)}/restore`, {}, auth);
-    assert.equal(r.status, 404, `restoring ${id} must 404: ${r.status} ${r.body}`);
-    const d = await call('DELETE', `/api/config/history/${encodeURIComponent(id)}`, undefined, auth);
-    assert.equal(d.status, 404, `deleting ${id} must 404: ${d.status} ${d.body}`);
-  }
-});
-
-/* ======================================================================
-   11–13. The configuration read, download and history endpoints carry the boundaries they claim.
-   ====================================================================== */
-
-test('the configuration read and history endpoints require a session, and CSRF for writes', async () => {
-  const session = await seedSession();
-  const auth = { cookie: session };
-
-  // ---- GET /api/config/export : authenticated, read-only ----
-  const anonExport = await call('GET', '/api/config/export', undefined, {});
-  assert.equal(anonExport.status, 401, 'the export must require a session');
-  assert.ok(!anonExport.body.includes('groups'), 'an unauthenticated export leaked configuration');
-  const exportOk = await call('GET', '/api/config/export', undefined, auth);
-  assert.equal(exportOk.status, 200, exportOk.body);
-  assert.ok(exportOk.json.files['services.yaml'], 'the export should carry the overlay');
-  for (const forbidden of ['auth.json', 'sessions.json', 'metrics.json', 'activity.jsonl', '.env']) {
-    assert.ok(!JSON.stringify(exportOk.json).includes(forbidden), `an export must not mention ${forbidden}`);
-  }
-
-  // ---- GET /api/config/export/download : authenticated; same scope, as a file ----
-  const anonDownload = await call('GET', '/api/config/export/download', undefined, {});
-  assert.equal(anonDownload.status, 401, 'the download must require a session');
-  const downloadOk = await call('GET', '/api/config/export/download', undefined, auth);
-  assert.equal(downloadOk.status, 200, downloadOk.body);
-  assert.match(String(downloadOk.headers['content-disposition'] || ''), /attachment; filename="opushub-native-\d{4}-\d{2}-\d{2}\.json"/);
-  // A `?file=` name is looked up in the *built* bundle, never joined to a path.
-  for (const wanted of ['../../data/auth.json', 'auth.json', '/etc/passwd', '..%2F.env', 'settings.json']) {
-    const r = await call('GET', `/api/config/export/download?file=${encodeURIComponent(wanted)}`, undefined, auth);
-    assert.equal(r.status, 404, `${wanted} must not be readable through the export: ${r.status}`);
-  }
-
-  // ---- DELETE /api/config/history/:id : unsafe method, so session + CSRF ----
-  const hist = await call('GET', '/api/config/history', undefined, auth);
-  const victim = hist.json.versions[0]?.id;
-  assert.ok(victim, 'the fixture should have at least one version');
-  assert.ok(fs.existsSync(path.join(DATA_DIR, 'config-history', `${victim}.json`)), 'the version to delete should exist');
-
-  const anonDelete = await call('DELETE', `/api/config/history/${victim}`, undefined, {});
-  assert.equal(anonDelete.status, 401, 'deleting history must require a session');
-  const crossSiteDelete = await call('DELETE', `/api/config/history/${victim}`, undefined,
-    { cookie: session, origin: 'https://evil.example', extraHeaders: { 'sec-fetch-site': 'cross-site' } });
-  assert.equal(crossSiteDelete.status, 403, 'a cross-site delete must fail CSRF');
-  assert.ok(fs.existsSync(path.join(DATA_DIR, 'config-history', `${victim}.json`)), 'a refused delete removed the version');
-
-  // ---- POST /api/config/history/:id/restore : same, and it cannot name a non-version ----
-  const anonRestore = await call('POST', `/api/config/history/${victim}/restore`, {}, {});
-  assert.equal(anonRestore.status, 401, 'restore must require a session');
-  const crossSiteRestore = await call('POST', `/api/config/history/${victim}/restore`, {},
-    { cookie: session, origin: 'https://evil.example', extraHeaders: { 'sec-fetch-site': 'cross-site' } });
-  assert.equal(crossSiteRestore.status, 403, 'a cross-site restore must fail CSRF');
-
-  for (const bad of ['not-a-version', '../../../etc/passwd', '..', '']) {
-    const r2 = await call('POST', `/api/config/history/${encodeURIComponent(bad)}/restore`, {}, auth);
-    assert.equal(r2.status, 404, `restoring ${bad} must 404: ${r2.status}`);
-  }
-
-  // and a legitimate delete works, with the session and a same-origin request
-  const ok = await call('DELETE', `/api/config/history/${victim}`, undefined, auth);
-  assert.equal(ok.status, 200, ok.body);
-  assert.ok(!fs.existsSync(path.join(DATA_DIR, 'config-history', `${victim}.json`)), 'the delete did not remove the version');
-});
-
-test('every protected state path is outside the presentation scope, by name', () => {
-  const names = new Set(PRESENTATION_FILES.map((f) => f.name));
-  assert.ok(PROTECTED_STATE.length >= 5, 'the protected-state list should name the state an export or restore must skip');
-  for (const p of PROTECTED_STATE) {
-    assert.ok(!names.has(p.path), `${p.path} must not be writable configuration`);
-    assert.ok(p.why && p.why.length > 20, `${p.path} must carry a reason a reader can check`);
-  }
-});
-
-/* ======================================================================
    The whole path, end to end, on an install that does not exist yet.
 
    Everything above runs inside one process whose module state is already "set up". This last check
@@ -501,24 +355,12 @@ test('a first run that chooses a template writes the account and layout.json, an
 
   const moved = [...new Set([...Object.keys(report.before), ...Object.keys(report.after)])]
     .filter((n) => report.before[n] !== report.after[n]).sort();
-  const historyMoved = moved.filter((n) => n.startsWith('config-history/'));
 
   // Exactly what setup is allowed to write: the account, its session, the setup event, the layout
-  // it was asked to apply, and a history version of the *presentation* files.
-  assert.deepEqual(moved.filter((n) => !n.startsWith('config-history/')),
+  // it was asked to apply.
+  assert.deepEqual(moved,
     ['activity.jsonl', 'auth.json', 'layout.json', 'sessions.json'],
     `first-run setup wrote ${moved.join(', ')}`);
-  assert.equal(historyMoved.length, 1, `expected exactly one history version, got ${historyMoved.join(', ')}`);
-
-  // the history version it recorded holds presentation files only
-  const version = JSON.parse(report.after[historyMoved[0]]);
-  const allowedNames = PRESENTATION_FILES.map((f) => f.name);
-  for (const name of Object.keys(version.files)) {
-    assert.ok(allowedNames.includes(name), `a setup history version holds ${name}`);
-  }
-  assert.ok(!JSON.stringify(version).includes('first-run-password-42'), 'the history version captured the password');
-  assert.ok(!Object.keys(version.files).some((f) => f.includes('auth') || f.includes('session')), 'the history version captured authentication state');
-
   // and the layout it applied is the template's, not an empty document
   const layout = JSON.parse(report.after['layout.json']);
   assert.ok(layout.hub.widgets.length >= 4, 'the template was not applied to layout.json');

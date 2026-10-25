@@ -291,15 +291,6 @@ test('monitoring runs no command and reads no file it did not write', async () =
   for (const bad of ['../../etc/passwd', '/etc/passwd', 'monitors.json/../../../x', '..%2f', 'secrets.json']) {
     assert.throws(() => storePath(bad), /refuses the file/, `${bad} must not resolve to a path`);
   }
-  // and the data is not part of the exportable configuration (it is operational state)
-  const scope = read('server/configScope.js');
-  const scopeCode = stripComments(scope);
-  // PRESENTATION_FILES must not contain monitoring — it is operational state, not presentation
-  const presBlock = scopeCode.match(/PRESENTATION_FILES\s*=\s*\[([\s\S]*?)\];/);
-  assert.ok(presBlock, 'PRESENTATION_FILES block found');
-  assert.equal(/monitoring/.test(presBlock[1]), false, 'monitoring state is not presented as configuration');
-  // Phase 10B — monitoring, events, notifications are explicitly protected
-  assert.ok(/PROTECTED_STATE/.test(scopeCode), 'protected state exists');
 });
 
 /* ==================================================================== */

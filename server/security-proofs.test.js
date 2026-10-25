@@ -64,8 +64,6 @@ test('the set of non-GET routes in api.js is exactly the reviewed list', () => {
     'POST /api/auth/logout',
     'POST /api/auth/password',
     'POST /api/auth/sessions/revoke',
-    'POST /api/config/import/apply',
-    'POST /api/config/import/parse',
     'POST /api/config/validate',
     'POST /api/discovery/refresh',
     'POST /api/layout/reset',

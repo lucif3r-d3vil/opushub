@@ -46,12 +46,9 @@ export default function SetupPage() {
   const [discovery, setDiscovery] = useState<SetupDiscovery | null>(setup?.discovery ?? null);
   const [created, setCreated] = useState<{ username: string; revoked: number } | null>(null);
   // Phase 6 — the presentation decision. `detected` writes nothing at all; `template` applies one of
-  // the six built-in templates in the same request that creates the account. Importing is offered as
-  // the step *after* sign-in: it is an authenticated configuration write, and the wizard may not
-  // touch configuration before an account exists.
+  // the six built-in templates in the same request that creates the account.
   const [mode, setMode] = useState<'detected' | 'template'>('detected');
   const [templateId, setTemplateId] = useState<string | null>(null);
-  const [importAfter, setImportAfter] = useState(false);
   const [applied, setApplied] = useState<string | null>(null);
   const nav = useNavigate();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -306,9 +303,9 @@ export default function SetupPage() {
 
               <div className="setup-choices" role="radiogroup" aria-label="Starting presentation">
                 <button
-                  type="button" role="radio" aria-checked={mode === 'detected' && !importAfter}
-                  className={`setup-choice${mode === 'detected' && !importAfter ? ' sel' : ''}`}
-                  onClick={() => { setMode('detected'); setTemplateId(null); setImportAfter(false); }}
+                  type="button" role="radio" aria-checked={mode === 'detected'}
+                  className={`setup-choice${mode === 'detected' ? ' sel' : ''}`}
+                  onClick={() => { setMode('detected'); setTemplateId(null); }}
                 >
                   <span className="setup-choice-title">Use what Docker found</span>
                   <span className="setup-choice-desc">
@@ -325,7 +322,7 @@ export default function SetupPage() {
                 <button
                   type="button" role="radio" aria-checked={mode === 'template'}
                   className={`setup-choice${mode === 'template' ? ' sel' : ''}`}
-                  onClick={() => { setMode('template'); setImportAfter(false); if (!templateId) setTemplateId(discovery?.presentation?.templates[0]?.id ?? null); }}
+                  onClick={() => { setMode('template'); if (!templateId) setTemplateId(discovery?.presentation?.templates[0]?.id ?? null); }}
                 >
                   <span className="setup-choice-title">Start from a template</span>
                   <span className="setup-choice-desc">
@@ -334,26 +331,9 @@ export default function SetupPage() {
                   </span>
                   <span className="setup-choice-meta">{discovery?.presentation?.templates.length ?? 0} built in</span>
                 </button>
-
-                <button
-                  type="button" role="radio" aria-checked={importAfter}
-                  className={`setup-choice${importAfter ? ' sel' : ''}`}
-                  onClick={() => { setImportAfter(!importAfter); }}
-                >
-                  <span className="setup-choice-title">Import a Homepage configuration</span>
-                  <span className="setup-choice-desc">
-                    Comes from a Homepage install: <code className="mono-meta">services.yaml</code>,{' '}
-                    <code className="mono-meta">bookmarks.yaml</code>, widgets, theme and custom assets.
-                    You will review what matched and what did not before a single file is written, and
-                    entries that match no container stay links rather than becoming fake services.
-                  </span>
-                  <span className="setup-choice-meta">
-                    {importAfter ? 'Opens the import screen after you sign in' : 'Nothing imported yet — this only takes you there next'}
-                  </span>
-                </button>
               </div>
 
-              {mode === 'template' && !importAfter && (
+              {mode === 'template' && (
                 <>
                   <h3 className="setup-explain-title" style={{ marginTop: 'var(--sp-8)' }}>Which template</h3>
                   <div className="setup-templates" role="radiogroup" aria-label="Template">
@@ -387,35 +367,12 @@ export default function SetupPage() {
           {step === 5 && (
             <>
               <p className="lede">
-                {importAfter
-                  ? 'Nothing has been chosen yet, and nothing has been written.'
-                  : mode === 'template'
-                    ? `This is the shape “${(discovery?.presentation?.templates ?? []).find((t) => t.id === templateId)?.name || templateId}” produces.`
-                    : 'This is the shape your Hub takes with no configuration at all.'}
+                {mode === 'template'
+                  ? `This is the shape “${(discovery?.presentation?.templates ?? []).find((t) => t.id === templateId)?.name || templateId}” produces.`
+                  : 'This is the shape your Hub takes with no configuration at all.'}
               </p>
 
-              {importAfter ? (
-                <>
-                  <div className="setup-result">
-                    <p>
-                      The import is next, and it begins with a review: every entry in the files you
-                      provide is classified as <b>matched to a running container</b>,{' '}
-                      <b>unmatched</b>, or <b>invalid</b>, with the counts in front of you before you
-                      apply anything.
-                    </p>
-                    <p className="hint">
-                      Unmatched entries are kept only as bookmarks or presentation overlays. They can
-                      never enter the Docker inventory — a configuration file cannot invent a container.
-                      Credentials found in widget blocks are dropped and never re-exported.
-                    </p>
-                  </div>
-                  <p className="hint">
-                    Your account is created first (that request is the only write in this wizard), and
-                    then you land on the import screen with it already open.
-                  </p>
-                </>
-              ) : (
-                <>
+              <>
                   <SetupPreview
                     widgets={mode === 'template'
                       ? (discovery?.presentation?.templates ?? []).find((t) => t.id === templateId)?.widgets ?? []
@@ -432,8 +389,7 @@ export default function SetupPage() {
                     your {discovery?.presentation?.detected.services ?? discovery?.services ?? 0} applications — their real
                     names, icons and URLs come from the engine once you are signed in.
                   </p>
-                </>
-              )}
+              </>
             </>
           )}
 
@@ -520,8 +476,8 @@ export default function SetupPage() {
           {step === STEP_FINISH && (
             <button
               className="btn btn-primary"
-              onClick={() => { enter(); if (importAfter) nav('/settings/import'); }}
-            >{importAfter ? 'Enter OpusHub and import' : 'Enter OpusHub'}</button>
+              onClick={enter}
+            >Enter OpusHub</button>
           )}
         </footer>
       </main>

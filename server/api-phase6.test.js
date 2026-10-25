@@ -80,38 +80,13 @@ const post = (p, b, opts) => call('POST', p, b, opts);
 const put = (p, b, opts) => call('PUT', p, b, opts);
 const del = (p, opts) => call('DELETE', p, undefined, opts);
 
-/** A Homepage configuration with one service that exists and one that does not. */
-const HOMEPAGE_FILES = {
-  'services.yaml': `
-- Media:
-    - Jellyfin:
-        icon: si-jellyfin
-        href: https://stream.lab.internal
-        description: Movies and TV from the import
-    - Kodi Box:
-        href: http://192.0.2.44:8080
-        description: A television, not a container
-- Music:
-    - Navidrome:
-        href: https://music.lab.internal
-`,
-  'bookmarks.yaml': `
-- Reading:
-    - Hacker News:
-        - abbr: HN
-          href: https://news.ycombinator.com
-`,
-  'settings.yaml': 'title: Imported Hub\ntheme: dark\ncolor: teal\n',
-};
-
 // ---------------------------------------------------------------------------
 // the door
 // ---------------------------------------------------------------------------
 
 test('every Phase 6 read route requires a session', async () => {
   const routes = [
-    '/api/config/scope', '/api/config/history',
-    '/api/config/import/files', '/api/config/export', '/api/groups',
+    '/api/groups',
   ];
   for (const route of routes) {
     const r = await get(route, { cookie: null, origin: null });
@@ -121,10 +96,7 @@ test('every Phase 6 read route requires a session', async () => {
 
 test('every Phase 6 write route requires a session', async () => {
   const writes = [
-    ['POST', '/api/config/import/parse'], ['POST', '/api/config/import/apply'],
     ['POST', '/api/config/validate'], ['PUT', '/api/groups'],
-    ['POST', '/api/config/history/2026-01-01T00-00-00-000Z/restore'],
-    ['POST', '/api/custom/reset'], ['GET', '/api/config/export/download'],
   ];
   for (const [method, route] of writes) {
     const r = await call(method, route, {}, { cookie: null, origin: null });
@@ -134,12 +106,8 @@ test('every Phase 6 write route requires a session', async () => {
 
 test('every Phase 6 write route refuses a cross-origin request (CSRF)', async () => {
   const writes = [
-    ['POST', '/api/config/import/parse', { files: {} }],
-    ['POST', '/api/config/import/apply', { files: {} }],
     ['POST', '/api/config/validate', { area: 'bookmarks', draft: { groups: [] } }],
     ['PUT', '/api/groups', { groups: [] }],
-    ['POST', '/api/config/history/x/restore', {}],
-    ['POST', '/api/custom/reset', { file: 'theme.css' }],
   ];
   for (const [method, route, body] of writes) {
     const r = await call(method, route, body, { origin: 'https://evil.example' });
@@ -150,168 +118,12 @@ test('every Phase 6 write route refuses a cross-origin request (CSRF)', async ()
 test('a write with no Origin header but an explicit cross-site marker is still refused', async () => {
   // The CSRF gate has two independent signals: the Origin/Host comparison and `Sec-Fetch-Site`.
   // A same-origin GET from a link has no Origin; a cross-site POST always carries the marker.
-  const r = await call('POST', '/api/config/import/apply', { files: {} }, { origin: null, extraHeaders: { 'sec-fetch-site': 'cross-site' } });
+  const r = await call('POST', '/api/config/validate', { area: 'bookmarks', draft: { groups: [] } }, { origin: null, extraHeaders: { 'sec-fetch-site': 'cross-site' } });
   assert.equal(r.status, 403);
 });
 
-test('the scope document states the boundary as data', async () => {
-  const r = await get('/api/config/scope');
-  assert.equal(r.status, 200);
-  assert.equal(r.json.presentation.length, 7);
-  const protectedPaths = r.json.protected.map((p) => p.path);
-  for (const expected of ['data/auth.json', 'data/sessions.json', 'data/activity.jsonl', 'data/metrics.json']) {
-    assert.ok(protectedPaths.includes(expected), `${expected} is not listed as protected`);
-  }
-  assert.match(r.json.rule, /never touches authentication/i);
-});
-
-// ---------------------------------------------------------------------------
-// migration
-// ---------------------------------------------------------------------------
-
-test('the import file list names what is accepted and what is refused, with reasons', async () => {
-  const r = await get('/api/config/import/files');
-  assert.equal(r.status, 200);
-  const accepted = r.json.accepted.map((f) => f.name);
-  assert.ok(accepted.includes('services.yaml'));
-  assert.ok(accepted.includes('bookmarks.yaml'));
-  const refused = r.json.refused.map((f) => f.name);
-  assert.ok(refused.includes('docker.yaml'));
-  assert.ok(refused.includes('.env'));
-  assert.ok(r.json.refused.every((f) => typeof f.why === 'string' && f.why.length > 10));
-});
-
-test('POST /api/config/import/parse returns a review and writes nothing at all', async () => {
-  const servicesBefore = fs.existsSync(path.join(CONFIG_DIR, 'services.yaml'))
-    ? fs.readFileSync(path.join(CONFIG_DIR, 'services.yaml'), 'utf8') : null;
-  const r = await post('/api/config/import/parse', { files: HOMEPAGE_FILES });
-  assert.equal(r.status, 200, JSON.stringify(r.json).slice(0, 300));
-  assert.equal(r.json.summary.groups, 2);
-  assert.equal(r.json.summary.services, 3);
-  assert.ok(r.json.summary.dockerContainers > 10, 'the mock engine should have produced a fleet');
-  assert.equal(r.json.summary.matched, 2, 'jellyfin and navidrome are running');
-  assert.equal(r.json.summary.unmatched, 1, 'the Kodi Box is not');
-  assert.equal(r.json.summary.bookmarks, 1);
-  // nothing was written
-  const servicesAfter = fs.existsSync(path.join(CONFIG_DIR, 'services.yaml'))
-    ? fs.readFileSync(path.join(CONFIG_DIR, 'services.yaml'), 'utf8') : null;
-  assert.equal(servicesAfter, servicesBefore, 'parsing an import modified a configuration file');
-  // and the plan says which files it *would* touch
-  assert.ok(Array.isArray(r.json.plan.files));
-  assert.ok(r.json.plan.files.some((f) => f.name === 'services.yaml'));
-});
-
-test('docker.yaml is refused by the API with an explanation, before anything is parsed', async () => {
-  const r = await post('/api/config/import/parse', {
-    files: { 'docker.yaml': 'my-docker:\n  socket: /var/run/docker.sock\n  password: hunter2\n' },
-  });
-  assert.equal(r.status, 400);
-  assert.equal(r.json.code, 'import_refused_file');
-  assert.match(r.json.error, /credentials/i);
-  assert.ok(!JSON.stringify(r.json).includes('hunter2'), 'the refusal echoed the password back');
-});
-
-test('applying an import writes configuration, records a version, and reports what it did', async () => {
-  const r = await post('/api/config/import/apply', {
-    files: HOMEPAGE_FILES,
-    decisions: { keepUnmatched: 'bookmark', includeBookmarks: true, includeAppearance: true },
-  });
-  assert.equal(r.status, 200, JSON.stringify(r.json).slice(0, 400));
-  assert.ok(r.json.written.includes('services.yaml'));
-  assert.ok(r.json.written.includes('bookmarks.yaml'));
-  assert.ok(r.json.version, 'the import recorded a configuration version');
-  assert.equal(r.json.summary.matched, 2);
-  assert.equal(r.json.preservedUnmatched, 1, 'the unmatched entry was kept, as a link');
-
-  // the overlay now exists and binds only to real containers
-  const services = model.readServices();
-  const overlays = services.overlays;
-  assert.equal(overlays.length, 2, 'exactly the two matched services became overlays');
-  const containers = overlays.map((o) => o.container).sort();
-  assert.deepEqual(containers, ['jellyfin', 'navidrome']);
-  assert.ok(!containers.includes('not-a-container'));
-
-  // the imported presentation is in force
-  const jellyfin = overlays.find((o) => o.container === 'jellyfin');
-  assert.equal(jellyfin.displayName, 'Jellyfin');
-  assert.equal(jellyfin.description, 'Movies and TV from the import');
-  assert.equal(jellyfin.icon, 'si:jellyfin');
-
-  // the unmatched entry became a bookmark, which the inventory never reads
-  const bookmarks = model.readBookmarks();
-  const names = bookmarks.flat.map((b) => b.name);
-  assert.ok(names.includes('Kodi Box'), 'the unmatched entry was not preserved as a link');
-  assert.ok(names.includes('Hacker News'));
-
-  // and the appearance patch landed
-  assert.equal(model.getSettings().app.name, 'Imported Hub');
-  assert.equal(model.getSettings().appearance.theme, 'dark');
-});
-
-test('an imported service that is not running is NOT in the inventory as a service', async () => {
-  await model.invalidateDiscovery();
-  const doc = await model.getServicesView();
-  const names = doc.services.map((s) => s.name.toLowerCase());
-  assert.ok(!names.some((n) => n.includes('kodi')), 'the ghost became a service');
-  assert.equal(doc.services.length, FLEET.length, 'the inventory is still exactly the fleet');
-});
-
-test('the live inventory is unchanged in count by an import — the phase\'s critical invariant', async () => {
-  const before = await model.getInventory({ force: true });
-  const beforeIds = before.services.map((s) => s.id).sort();
-
-  await post('/api/config/import/apply', {
-    files: {
-      'services.yaml': `
-- Imaginary Land:
-    - Ghost One:
-        href: https://ghost-one.example.com
-    - Ghost Two:
-        href: https://ghost-two.example.com
-- Media:
-    - Jellyfin:
-        container: jellyfin
-        displayName: Renamed By Import
-`,
-    },
-    decisions: { keepUnmatched: 'drop' },
-  });
-
-  const after = await model.getInventory({ force: true });
-  const afterIds = after.services.map((s) => s.id).sort();
-  assert.deepEqual(afterIds, beforeIds, 'an import changed which containers exist');
-  assert.equal(after.services.length, FLEET.length);
-  // the rename did land, on a container that exists
-  const jellyfin = after.services.find((s) => s.name === 'jellyfin');
-  assert.equal(jellyfin.displayName, 'Renamed By Import');
-});
-
-test('the same import applied as replace drops earlier overlays', async () => {
-  await post('/api/config/import/apply', {
-    files: { 'services.yaml': '- Media:\n    - Jellyfin:\n        container: jellyfin\n        displayName: Only One\n' },
-    decisions: { keepUnmatched: 'drop' },
-    mode: 'replace',
-  });
-  const overlays = model.readServices().overlays;
-  assert.equal(overlays.length, 1);
-  assert.equal(overlays[0].displayName, 'Only One');
-});
-
-test('an oversized import through the API is a 413, not a timeout', async () => {
-  const huge = `- Media:\n${'    - S:\n        href: https://example.com\n'.repeat(20_000)}`;
-  const r = await post('/api/config/import/parse', { files: { 'services.yaml': huge } });
-  assert.equal(r.status, 413);
-});
-
-// ---------------------------------------------------------------------------
-// the service presentation editor
-// ---------------------------------------------------------------------------
-
 test('the presentation endpoint separates discovered identity from user override', async () => {
-  await post('/api/config/import/apply', {
-    files: { 'services.yaml': '- Media:\n    - Jellyfin:\n        container: jellyfin\n        displayName: Stream\n        url: https://custom.example.com\n' },
-    decisions: { keepUnmatched: 'drop' },
-  });
+  await put('/api/services/opustream/jellyfin/presentation', { displayName: 'Stream', url: 'https://custom.example.com' });
   const r = await get('/api/services/opustream/jellyfin/presentation');
   assert.equal(r.status, 200, JSON.stringify(r.json).slice(0, 300));
   // identity: discovered, and there is no way to write it back
@@ -471,7 +283,7 @@ test('renaming a group onto an existing name is refused rather than merging them
 });
 
 // ---------------------------------------------------------------------------
-// validation, history, export
+// validation
 // ---------------------------------------------------------------------------
 
 test('the draft validator answers for every area without writing', async () => {
@@ -499,93 +311,4 @@ test('an invalid settings draft is refused with the reason, and the file is unto
   assert.equal(r.status, 200);
   assert.equal(r.json.ok, false);
   assert.equal(fs.existsSync(settingsPath) ? fs.readFileSync(settingsPath, 'utf8') : '', before);
-});
-
-test('history lists versions with time, reason and size, and marks the current one', async () => {
-  const r = await get('/api/config/history');
-  assert.equal(r.status, 200);
-  assert.ok(r.json.versions.length > 0, 'the import should have left versions');
-  const v = r.json.versions[0];
-  assert.ok(v.at && v.reason && v.bytes > 0);
-  assert.ok(Array.isArray(v.files) && v.files.length > 0);
-  assert.equal(r.json.current, v.id);
-  assert.deepEqual(r.json.scope, ['services.yaml', 'stacks.yaml', 'bookmarks.yaml', 'settings.yaml', 'layout.json', 'theme.css', 'app.js']);
-});
-
-test('a version diff reads as what restoring it would change', async () => {
-  const versions = (await get('/api/config/history')).json.versions;
-  assert.ok(versions.length >= 1);
-  const r = await get(`/api/config/history/${versions[versions.length - 1].id}/diff`);
-  assert.equal(r.status, 200);
-  assert.equal(r.json.against, 'current');
-  assert.ok(Array.isArray(r.json.sections));
-  assert.ok(typeof r.json.changes === 'number');
-});
-
-test('restoring through the API brings the configuration back and reports an undo version', async () => {
-  await post('/api/config/import/apply', {
-    files: { 'services.yaml': '- Media:\n    - Jellyfin:\n        container: jellyfin\n        displayName: Restore Me\n' },
-    decisions: { keepUnmatched: 'drop' },
-    mode: 'replace',
-  });
-  const snapshotVersion = (await get('/api/config/history')).json.versions[0];
-
-  await post('/api/config/import/apply', {
-    files: { 'services.yaml': '- Media:\n    - Jellyfin:\n        container: jellyfin\n        displayName: Afterwards\n' },
-    decisions: { keepUnmatched: 'drop' },
-    mode: 'replace',
-  });
-  assert.equal(model.readServices().overlays[0].displayName, 'Afterwards');
-
-  const r = await post(`/api/config/history/${snapshotVersion.id}/restore`, {});
-  assert.equal(r.status, 200, JSON.stringify(r.json).slice(0, 300));
-  assert.ok(r.json.files.includes('services.yaml'));
-  assert.ok(r.json.undoVersion, 'no undo version was offered');
-  assert.equal(model.readServices().overlays[0].displayName, 'Restore Me');
-});
-
-test('restoring does not disturb the mock engine\'s containers', async () => {
-  const before = await model.getInventory({ force: true });
-  const versions = (await get('/api/config/history')).json.versions;
-  await post(`/api/config/history/${versions[versions.length - 1].id}/restore`, {});
-  const after = await model.getInventory({ force: true });
-  assert.deepEqual(after.services.map((s) => s.name).sort(), before.services.map((s) => s.name).sort());
-  assert.equal(after.services.length, FLEET.length);
-});
-
-test('a native export is served with a filename and contains no secrets', async () => {
-  const r = await get('/api/config/export?format=native');
-  assert.equal(r.status, 200);
-  assert.equal(r.json.format, 'opushub');
-  assert.ok(r.json.files['services.yaml']);
-  const whole = JSON.stringify(r.json);
-  assert.ok(!whole.includes('hunter2'), 'the mock engine\'s planted secret reached an export');
-  assert.ok(!/scrypt|auth\.json/i.test(whole));
-});
-
-test('a Homepage export is offered as a set of Homepage-shaped files', async () => {
-  const r = await get('/api/config/export?format=homepage');
-  assert.equal(r.status, 200);
-  assert.equal(r.json.format, 'homepage');
-  assert.ok(r.json.files['services.yaml'].trimStart().startsWith('- '), 'Homepage services.yaml is a sequence');
-});
-
-test('a single exported file can be downloaded on its own', async () => {
-  const r = await get('/api/config/export/download?format=homepage&file=services.yaml');
-  assert.equal(r.status, 200);
-  assert.match(r.headers['content-disposition'] || '', /attachment/, 'a download was not offered as an attachment');
-  assert.match(r.headers['content-disposition'] || '', /services\.yaml/, 'the download did not name the file');
-  assert.ok(r.body.trimStart().startsWith('- '), 'the downloaded file is not Homepage-shaped');
-});
-
-test('exporting never includes the runtime state directories', async () => {
-  // Plant files that must not travel, then export and scan the payload.
-  fs.writeFileSync(path.join(DATA_DIR, 'auth.json'), '{"user":{"scrypt":{"hash":"PLANTED-AUTH-HASH"}}}');
-  fs.writeFileSync(path.join(DATA_DIR, 'sessions.json'), '{"sessions":[{"id":"PLANTED-SESSION-ID"}]}');
-  fs.writeFileSync(path.join(DATA_DIR, 'activity.jsonl'), '{"message":"PLANTED-ACTIVITY"}\n');
-  const r = await get('/api/config/export');
-  const whole = JSON.stringify(r.json);
-  for (const secret of ['PLANTED-AUTH-HASH', 'PLANTED-SESSION-ID', 'PLANTED-ACTIVITY']) {
-    assert.ok(!whole.includes(secret), `an export leaked ${secret}`);
-  }
 });

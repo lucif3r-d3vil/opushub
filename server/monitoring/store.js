@@ -6,11 +6,9 @@
 //   data/monitoring/incidents.json  incidents (open ones forever, resolved ones bounded)
 //   data/monitoring/engine.json     the engine's own bookkeeping (startedAt, lastTickAt, stops)
 //
-// Why `data/` and not `config/`: Phase 6 draws a hard line around *presentation configuration*
-// (server/configScope.js) — the seven files an import, a restore and an export are allowed to
-// touch. Monitors are not presentation: they are operational state that other machinery (history,
-// incidents, the alert engine) reads and writes continuously, and letting an export/import
-// round-trip carry someone's monitoring history would be a bug with a friendly name. Nothing here
+// Why `data/` and not `config/`: `config/` holds presentation only. Monitors are operational
+// state that other machinery (history, incidents, the alert engine) reads and writes
+// continuously, so it lives with the rest of the runtime state. Nothing here
 // can ever address a file outside `data/monitoring/`: the four names below are the whole
 // vocabulary, and `storePath()` refuses anything else.
 //
