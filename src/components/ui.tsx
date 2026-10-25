@@ -128,7 +128,7 @@ export function Modal({ title, onClose, children, footer, wide }: { title: React
     const t = setTimeout(() => ref.current?.querySelector<HTMLElement>('input,textarea,select,button')?.focus(), 30);
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = ''; clearTimeout(t); };
   }, [onClose]);
-  return (
+  const dialog = (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={`modal ${wide ? 'modal--wide' : ''}`} role="dialog" aria-modal="true" ref={ref}>
         <div className="modal-head">
@@ -142,6 +142,9 @@ export function Modal({ title, onClose, children, footer, wide }: { title: React
       </div>
     </div>
   );
+  // portalled to <body>: a fixed overlay inside an animated or transformed section is sized and
+  // stacked by that section, not by the viewport
+  return typeof document === 'undefined' ? dialog : createPortal(dialog, document.body);
 }
 
 export interface MenuItem { label?: string; icon?: ReactNode; action?: () => void; href?: string; danger?: boolean; sep?: boolean; active?: boolean }

@@ -172,12 +172,12 @@ kbd.kbd {
   position: fixed; inset: 0; z-index: 80; background: var(--scrim-bg);
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
   animation: fadeIn var(--t-fast) var(--ease-out) both;
-  display: grid; justify-items: center;
+  display: grid; justify-items: center; align-content: start;
 }
 @keyframes fadeIn { from { opacity: 0; } }
 .modal {
   margin-top: min(10vh, 96px); width: min(680px, calc(100vw - 32px)); max-height: min(760px, 86dvh);
-  background: var(--overlay); border: 1px solid var(--hair-strong); border-radius: var(--r-lg);
+  background: var(--pop); border: 1px solid var(--hair-strong); border-radius: var(--r-lg);
   box-shadow: var(--shadow-2); backdrop-filter: blur(26px) saturate(1.5); -webkit-backdrop-filter: blur(26px) saturate(1.5);
   display: flex; flex-direction: column; overflow: hidden;
   animation: modalIn var(--t-med) var(--ease) both;
