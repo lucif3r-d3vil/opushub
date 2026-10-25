@@ -233,6 +233,10 @@ and popover fades: no entrance, no drift, no ticking sparklines (they render onc
 6. **Ribbon resolution for 7 days:** hourly buckets (proposed, no new storage) or 30-minute?
 7. **Sparkline window:** the mockup shows about 4 minutes of live data. Is that the right feel, or should it show the last hour?
 8. **Alert acknowledge** in the bell: keep (drawn) or drop?
-9. **Telegram "Send me" checkboxes** (downtime, updates, auto-heal, info): new in this round, maps onto the existing allowed-types policy. Keep, or severity only?
-10. **Wizard scope:** account, Docker, done. The earlier plan also mentioned optional Telegram and a background choice; both are reachable from Settings and the avatar menu right after. Leave them out of the wizard?
-11. **Containers page destructive actions** all confirm. Is one confirmation for Restart too heavy for a homelab, or is the consistency worth it?
+
+### Decided (round 2 review)
+
+- **Telegram "Send me" toggles:** keep them while there are three or fewer (Downtime, Auto-heal, Updates). If a fourth kind is ever added, replace them with one severity choice. The mockup's "Info" checkbox is dropped.
+- **Wizard:** admin, Docker, done. Nothing else.
+- **Container action dialogs:** Start and Restart run without a dialog. Stop, Recreate, Update and Remove get a confirm dialog. The mockup's Restart confirm is dropped, and Remove needs adding to the Containers mockup.
+- **Host sampler:** gains a disk field (`diskUsedPct`) and coarser retention so the 7-day chart works (for example per-minute points for 1 h, 15-minute for 24 h, hourly for 7 d). It stays the only history sampler.
