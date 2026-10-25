@@ -266,6 +266,8 @@ export interface SettingsDoc {
     photoAvailable?: boolean;
   };
   hub: { greetingName: string | null; clock24h: boolean; showSeconds: boolean };
+  /** display only: how the Uptime ribbons draw a slow answer */
+  monitoring?: { slowMs: number };
   behavior: { logLaunches: boolean; refresh: { system: number; services: number } };
   infrastructure: {
     hostAddress: string | null;

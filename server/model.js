@@ -47,6 +47,9 @@ export const DEFAULT_SETTINGS = {
     background: 'graphite',
   },
   hub: { greetingName: null, clock24h: false, showSeconds: false },
+  // How the Uptime ribbons draw a slow answer. Display only: the monitoring engine does not read it,
+  // and a slow response alone never opens an incident.
+  monitoring: { slowMs: 1000 },
   behavior: { logLaunches: true, refresh: { system: 5, services: 30 } },
   // Infrastructure access + the two optional knobs the URL resolver can't read off Docker itself.
   // hostAddress: the name/port a browser should use for published ports (else auto-detected).
@@ -633,6 +636,7 @@ export function getSettings() {
   merged.behavior.refresh.system = clampInt(merged.behavior.refresh.system, 2, 300, 5);
   merged.behavior.refresh.services = clampInt(merged.behavior.refresh.services, 5, 600, 30);
   merged.infrastructure = merged.infrastructure || {};
+  merged.monitoring = { slowMs: clampInt(merged.monitoring?.slowMs, 100, 30_000, 1000) };
   // News, weather and market settings were removed with those widgets. An older settings.yaml may
   // still carry them; they are ignored rather than rejected, so the file keeps loading.
   delete merged.integrations;
@@ -668,6 +672,7 @@ function sanitizeSettings(s) {
       else delete out.appearance.background;
     }
   }
+  if (out.monitoring && typeof out.monitoring === 'object') out.monitoring = { slowMs: clampInt(out.monitoring.slowMs, 100, 30_000, 1000) };
   // infrastructure knobs are validated, never silently accepted: a typo'd host would otherwise
   // show up as wrong URLs everywhere with no clue why.
   const infra = out.infrastructure;

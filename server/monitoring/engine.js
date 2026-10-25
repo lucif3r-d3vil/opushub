@@ -983,6 +983,14 @@ export function incidents({ at = now(), limit = 100, monitorId = null, open = nu
   };
 }
 
+/**
+ * A read-only view of the recorded data, for the Uptime page's ribbons (server/monitoring/ribbons.js).
+ * It hands out the engine's own records without copying them: callers must not change them.
+ */
+export function recordedData() {
+  return { monitors: [...state.monitors.values()], history: state.history, incidents: state.incidents };
+}
+
 /** Internal accessors for tests and for the engine-health route. */
 export const _internals = {
   state,

@@ -14,10 +14,13 @@
 //     are monitor definitions, monitor state (pause/resume) and a maintenance window.
 import {
   applySuggestions, checkNow, createMonitor, deleteMonitor, detail, engineHealth, getSettings,
-  incidents, overview, pauseMonitor, resumeMonitor, searchEntries, setMaintenance, suggestions,
+  incidents, overview, pauseMonitor, recordedData, resumeMonitor, searchEntries, setMaintenance, suggestions,
   updateMonitor, updateSettings,
 } from './monitoring/engine.js';
+import { RANGES, buildRibbons } from './monitoringRibbons.js';
+import * as appModel from './model.js';
 import { BOUNDS, MonitorError, normalizeMaintenance, publicMonitor } from './monitoring/model.js';
+import { publicIncident } from './monitoring/incidents.js';
 
 const ID_RE = /^mon-[a-z0-9]{6,32}$/;
 
@@ -78,6 +81,12 @@ export async function handleMonitoring({ p, method, send, jsonBody, query, actor
         doc.filter = ref;
       }
       return send(200, doc), true;
+    }
+    if (p === '/api/monitoring/ribbons') {
+      // the Uptime page: one ribbon of recorded segments per monitor, read-only over the engine's history
+      const range = RANGES[query.get('range')] ? query.get('range') : '24h';
+      const slowMs = appModel.getSettings().monitoring?.slowMs ?? null;
+      return send(200, buildRibbons(recordedData(), { range, slowMs, publicMonitor, publicIncident })), true;
     }
     if (p === '/api/monitoring/engine') return send(200, engineHealth()), true;
     if (p === '/api/monitoring/settings') {
